@@ -1,0 +1,385 @@
+/**
+ * 室內模式：霓虹招牌牌匾 + 玻璃資訊卡。
+ *
+ * 由 src/ui/interior-panel.ts（interiors-dev）輸出，class 契約：
+ * .interior-layer(.show) / .interior-plaque / .interior-card / .interior-head /
+ * .interior-title / .interior-seal / .interior-meta-line / .interior-actions /
+ * .interior-body / .interior-main / .interior-col / .interior-people-col /
+ * .interior-foot / .interior-note
+ * 以及共用：.status-row/.pill/.def-notes/.note-row/.prog-row/.prog-bar/
+ * .section-label/.mini/.res-wrap/.res-chip/.finance-line/.people/.person/
+ * .badge/.seal/.confirm-inline/.muted / 按鈕 .primary/.danger/.danger-outline/.back
+ *
+ * .hud.is-interior 時隱藏建造／城事面板、把手與模式提示，保留頂欄。
+ */
+
+/* ─────────────── 進出室內時的 HUD 狀態 ─────────────── */
+
+.hud.is-interior .build-panel,
+.hud.is-interior .info-panel,
+.hud.is-interior .panel-handle {
+  transform: translateX(0);
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.hud.is-interior .hud-vignette {
+  background:
+    radial-gradient(120% 70% at 50% 100%, rgba(255, 61, 127, 0.1), transparent 62%),
+    linear-gradient(180deg, rgba(3, 6, 12, 0.55), transparent 16%, transparent 74%, rgba(3, 6, 12, 0.72));
+}
+
+/* ─────────────── 室內圖層 ─────────────── */
+
+.interior-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 36;
+  display: none;
+  pointer-events: none;
+  font-family: var(--font-sans);
+}
+
+.interior-layer.show {
+  display: block;
+  animation: interiorIn 0.32s cubic-bezier(0.22, 0.9, 0.3, 1) both;
+}
+
+@keyframes interiorIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* 頂部霓虹招牌：建築名 */
+.interior-plaque {
+  position: absolute;
+  top: calc(var(--topbar-h) + var(--warning-h, 0px) + 16px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  min-width: 180px;
+  padding: 9px 26px 10px;
+  text-align: center;
+  border-radius: 7px;
+  pointer-events: none;
+  background:
+    radial-gradient(120% 140% at 50% 0%, rgba(255, 61, 127, 0.24), transparent 70%),
+    linear-gradient(180deg, rgba(20, 36, 64, 0.92), rgba(6, 12, 24, 0.94));
+  border: 1px solid rgba(255, 61, 127, 0.5);
+  box-shadow:
+    0 0 0 1px rgba(255, 209, 102, 0.14),
+    0 0 24px rgba(255, 61, 127, 0.3),
+    0 18px 40px rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(14px);
+}
+
+/* 招牌吊掛線 */
+.interior-plaque::before,
+.interior-plaque::after {
+  content: '';
+  position: absolute;
+  top: -16px;
+  width: 1px;
+  height: 16px;
+  background: linear-gradient(180deg, transparent, rgba(255, 61, 127, 0.7));
+}
+
+.interior-plaque::before {
+  left: 26%;
+}
+.interior-plaque::after {
+  right: 26%;
+}
+
+.interior-plaque span {
+  font-family: var(--font-display);
+  font-size: clamp(18px, 2.4vw, 26px);
+  font-weight: 900;
+  letter-spacing: 6px;
+  color: #fff;
+  text-shadow:
+    0 0 8px rgba(255, 61, 127, 0.95),
+    0 0 22px rgba(255, 61, 127, 0.55),
+    0 0 44px rgba(255, 61, 127, 0.28);
+}
+
+.interior-plaque small {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 3px;
+  color: var(--gold);
+  text-shadow: 0 0 10px rgba(255, 209, 102, 0.5);
+}
+
+/* 資訊卡 */
+.interior-card {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  width: min(1160px, calc(100% - 32px));
+  max-height: min(52vh, 560px);
+  pointer-events: auto;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, rgba(28, 50, 88, 0.3), transparent 20%),
+    linear-gradient(160deg, rgba(14, 27, 52, 0.95) 0%, rgba(6, 12, 24, 0.96) 100%);
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.72), 0 0 46px rgba(36, 224, 255, 0.1);
+  backdrop-filter: blur(18px) saturate(140%);
+}
+
+.interior-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--gold) 14%, var(--pink) 44%, var(--cyan) 76%, transparent);
+  opacity: 0.9;
+}
+
+.interior-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 16px 10px;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.interior-title {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+
+.interior-seal {
+  display: inline-grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  border-radius: 7px;
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 800;
+  color: #fff;
+  border: 1px solid color-mix(in srgb, var(--c, #24e0ff) 55%, transparent);
+  background:
+    radial-gradient(100% 100% at 30% 15%, color-mix(in srgb, var(--c, #24e0ff) 40%, transparent), transparent 72%),
+    linear-gradient(160deg, rgba(20, 36, 62, 0.92), rgba(7, 14, 28, 0.92));
+  box-shadow: 0 0 18px color-mix(in srgb, var(--c, #24e0ff) 26%, transparent);
+  text-shadow: 0 0 10px color-mix(in srgb, var(--c, #24e0ff) 70%, transparent);
+}
+
+.interior-title-text {
+  min-width: 0;
+}
+
+.interior-title-text > b {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 900;
+  letter-spacing: 3px;
+  color: var(--ink);
+  text-shadow: 0 0 12px rgba(36, 224, 255, 0.3);
+}
+
+.interior-meta-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  margin-top: 2px;
+}
+
+.interior-meta-line small {
+  font-size: 9.5px;
+  color: var(--ink-faint);
+}
+
+.interior-actions {
+  display: flex;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.interior-actions kbd {
+  height: 17px;
+  font-size: 8.5px;
+  margin-left: 3px;
+}
+
+.interior-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: 1.25fr 1fr 1fr;
+  gap: 0;
+}
+
+.interior-main {
+  padding: 12px 16px 14px;
+  border-right: 1px solid var(--line-soft);
+  min-width: 0;
+}
+
+.interior-desc {
+  margin: 0 0 4px;
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--ink-dim);
+}
+
+.interior-col {
+  padding: 12px 16px 14px;
+  border-right: 1px solid var(--line-soft);
+  min-width: 0;
+}
+
+.interior-col:last-child {
+  border-right: 0;
+}
+
+.interior-people-col .people {
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.interior-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  flex: 0 0 auto;
+  border-top: 1px solid var(--line-soft);
+  background: rgba(4, 9, 18, 0.4);
+}
+
+.interior-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 10.5px;
+  color: var(--ink-faint);
+}
+
+.finance-line-col {
+  flex-direction: column;
+  gap: 3px;
+}
+
+/* 手機／窄屏：卡片變底部全寬面板 */
+.hud.is-mobile-ui .interior-card {
+  width: calc(100% - 16px);
+  bottom: 8px;
+  max-height: 56vh;
+}
+
+.hud.is-mobile-ui .interior-plaque {
+  top: calc(var(--topbar-h) + 8px);
+  padding: 7px 18px 8px;
+}
+
+.hud.is-mobile-ui .interior-body {
+  grid-template-columns: 1fr;
+}
+
+.hud.is-mobile-ui .interior-main,
+.hud.is-mobile-ui .interior-col {
+  border-right: 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.hud.is-mobile-ui .interior-col:last-child {
+  border-bottom: 0;
+}
+
+.hud.is-mobile-ui .interior-foot {
+  flex-wrap: wrap;
+}
+
+.hud.is-mobile-ui .interior-actions .primary kbd {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .interior-card {
+    width: calc(100% - 16px);
+    bottom: 8px;
+    max-height: 56vh;
+  }
+
+  .interior-plaque {
+    top: calc(var(--topbar-h) + 8px);
+    padding: 7px 18px 8px;
+  }
+
+  .interior-body {
+    grid-template-columns: 1fr;
+  }
+
+  .interior-main,
+  .interior-col {
+    border-right: 0;
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  .interior-col:last-child {
+    border-bottom: 0;
+  }
+
+  .interior-foot {
+    flex-wrap: wrap;
+  }
+
+  .interior-actions .primary kbd {
+    display: none;
+  }
+}
+
+/* 室內時收起手機底部導覽 */
+.hud.is-mobile-ui.is-interior .mobile-nav,
+.hud.is-mobile-ui.is-interior .mobile-sheet-backdrop {
+  display: none !important;
+}
+
+/* 室內時隱藏桌面功能按鈕（減少干擾，仍可看頂欄資訊） */
+.hud.is-interior .tb-actions {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+/* 室內名單：姓名後的年齡／月薪／通勤方式小字（interiors-dev 用 .person small 顯示） */
+.interior-people-col .person small,
+.interior-body .person small {
+  color: var(--cyan-hi);
+  font-size: 9px;
+  opacity: 0.82;
+}
+
+.interior-people-col .people {
+  gap: 5px;
+}
+
+/* 室內「返回城市」按鈕：更明顯的港鐵紅→青綠漸變 */
+.interior-actions .primary {
+  background: linear-gradient(120deg, var(--gold), #ffe6a6 55%, var(--cyan));
+  box-shadow: 0 6px 20px rgba(255, 209, 102, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}

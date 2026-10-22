@@ -1,0 +1,179 @@
+/**
+ * 響應式：1280×720 以上為主要桌面體驗；窄螢幕改為可收合的抽屜面板。
+ * 手機版（.hud.is-mobile-ui）另有 mobile.css。
+ */
+
+@media (max-width: 1450px) {
+  .build-panel {
+    width: 318px;
+  }
+  .info-panel {
+    width: 330px;
+  }
+  .category-tabs button {
+    letter-spacing: 0.8px;
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 1250px) {
+  .build-panel {
+    width: 300px;
+  }
+  .info-panel {
+    width: 316px;
+  }
+  .stat-grid {
+    gap: 5px;
+  }
+  .city-hero {
+    padding: 9px 10px;
+  }
+  .happy-dial {
+    width: 72px;
+    height: 72px;
+  }
+  .dial-face b {
+    font-size: 20px;
+  }
+}
+
+/* 高度較矮（1366×768 等）時壓縮面板 */
+@media (max-height: 800px) {
+  .topbar {
+    padding-top: 8px;
+  }
+  .city-name {
+    font-size: 20px;
+  }
+  .brand-neon {
+    height: 32px;
+  }
+  .build-panel,
+  .info-panel {
+    top: calc(var(--topbar-h) + 6px);
+    max-height: calc(100% - var(--topbar-h) - 16px);
+  }
+  .panel-head {
+    padding: 10px 12px 8px;
+  }
+  .build-tools {
+    padding: 8px 10px 9px;
+  }
+  .tool-meta small {
+    display: none;
+  }
+  .tool-card {
+    padding: 6px 7px 7px;
+  }
+  .interior-card {
+    max-height: 56vh;
+  }
+}
+
+/* ── 窄螢幕：面板變成左右抽屜 ── */
+
+@media (max-width: 980px) {
+  .hud:not(.is-mobile-ui) .build-panel,
+  .hud:not(.is-mobile-ui) .info-panel {
+    top: calc(var(--topbar-h) + 8px);
+    bottom: 12px;
+    max-height: none;
+    width: min(340px, 86vw);
+  }
+
+  .hud:not(.is-mobile-ui) .build-panel {
+    left: 8px;
+    transform: translateX(calc(-100% - 20px));
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .hud:not(.is-mobile-ui) .info-panel {
+    right: 8px;
+    transform: translateX(calc(100% + 20px));
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .hud:not(.is-mobile-ui).is-build-open .build-panel,
+  .hud:not(.is-mobile-ui).is-info-open .info-panel {
+    transform: translateX(0);
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .hud:not(.is-mobile-ui) .panel-handle {
+    display: none;
+  }
+
+  .hud:not(.is-mobile-ui) .tb-brand {
+    padding-right: 8px;
+  }
+
+  .hud:not(.is-mobile-ui) .brand-neon {
+    display: none;
+  }
+
+  .hud:not(.is-mobile-ui) .tb-weather .chip-warning {
+    max-width: 140px;
+  }
+
+  .hud:not(.is-mobile-ui) .tb-stats .stat-pill:not(.treasury) {
+    display: none;
+  }
+
+  .hud:not(.is-mobile-ui) .tb-clock {
+    min-width: 170px;
+    flex-basis: 190px;
+  }
+
+  .hud:not(.is-mobile-ui) .tb-actions {
+    padding-left: 8px;
+  }
+
+  .hud:not(.is-mobile-ui) .top-btn {
+    width: 30px;
+    height: 32px;
+  }
+
+  .hud:not(.is-mobile-ui) .top-btn .ico {
+    width: 15px;
+    height: 15px;
+  }
+}
+
+@media (max-width: 760px) {
+  .modal-backdrop {
+    padding: 10px;
+  }
+  .modal {
+    max-height: 92vh;
+  }
+  .modal-head {
+    padding: 12px 14px 10px;
+  }
+  .modal-heading-text h2 {
+    font-size: 17px;
+    letter-spacing: 2px;
+  }
+  .modal-body {
+    padding: 12px 14px 14px;
+  }
+  .modal-footer {
+    padding: 10px 14px;
+  }
+}
+
+/* 超寬螢幕：放寬面板與字距，保留呼吸位 */
+@media (min-width: 1800px) {
+  .build-panel {
+    width: 356px;
+  }
+  .info-panel {
+    width: 366px;
+  }
+  :root {
+    --hud-pad: 20px;
+  }
+}

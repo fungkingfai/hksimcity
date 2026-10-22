@@ -1,0 +1,41 @@
+{
+  "name": "hksimcity",
+  "version": "1.0.0",
+  "description": "《維港之城》— 香港城市建造模擬遊戲（three.js，304×304 大地圖、分區玩法、可進入建築）",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 5273",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 4273",
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "shot": "node scripts/shot.mjs",
+    "verify": "node scripts/verify-hk.mjs",
+    "verify:ui": "node scripts/ui-click-test.mjs",
+    "verify:mobile": "node scripts/mobile-test.mjs",
+    "capture": "node scripts/capture-showcase.mjs",
+    "deploy": "npm run build && wrangler deploy"
+  },
+  "keywords": [
+    "three.js",
+    "city-builder",
+    "game",
+    "hong-kong",
+    "simcity",
+    "simulation"
+  ],
+  "author": "DSH Agent Team",
+  "license": "MIT",
+  "dependencies": {
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@types/three": "^0.186.0",
+    "playwright": "^1.64.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.5",
+    "wrangler": "^4.151.2"
+  }
+}

@@ -1,0 +1,805 @@
+/**
+ * 手機版 UI（僅套用於 .hud.is-mobile-ui）
+ *
+ *  - 精簡頂欄：城市招牌、日期、天氣警告、人口、庫房、速度
+ *  - 底部導覽：建造 / 城事 / 財政 / 交通 / 存檔 / 說明
+ *  - 建造、城事為底部 sheet；彈出面板全屏
+ *  - 安全區、直向／橫向、觸控尺寸
+ */
+
+.hud.is-mobile-ui {
+  --topbar-h: 114px;
+  --mobile-nav-h: 60px;
+}
+
+/* ─────────────── 精簡頂欄 ─────────────── */
+
+.hud.is-mobile-ui .topbar {
+  padding: 6px 6px 0;
+}
+
+.hud.is-mobile-ui .topbar-inner {
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  min-height: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+
+.hud.is-mobile-ui .tb-brand {
+  order: 1;
+  gap: 7px;
+  padding-right: 8px;
+  border-right: 0;
+}
+
+.hud.is-mobile-ui .brand-neon {
+  display: none;
+}
+
+.hud.is-mobile-ui .brand-text {
+  gap: 0;
+}
+
+.hud.is-mobile-ui .city-name {
+  font-size: 18px;
+  letter-spacing: 2.5px;
+}
+
+.hud.is-mobile-ui .brand-en {
+  display: none;
+}
+
+.hud.is-mobile-ui .brand-tag {
+  display: none;
+}
+
+.hud.is-mobile-ui .tb-clock {
+  order: 3;
+  flex: 1 1 100%;
+  min-width: 0;
+  max-width: none;
+  flex-direction: row;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding-top: 5px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.hud.is-mobile-ui .tb-date {
+  font-size: 10.5px;
+  gap: 5px;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.hud.is-mobile-ui .tb-date b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hud.is-mobile-ui .season-chip {
+  width: 18px;
+  height: 18px;
+  font-size: 10px;
+  flex: 0 0 auto;
+}
+
+.hud.is-mobile-ui .chip-time {
+  display: none;
+}
+
+.hud.is-mobile-ui .tb-weather {
+  flex: 0 0 auto;
+  gap: 5px;
+  margin-left: auto;
+}
+
+.hud.is-mobile-ui .chip-weather {
+  height: 22px;
+  padding: 0 8px 0 5px;
+  font-size: 10.5px;
+}
+
+.hud.is-mobile-ui .chip-weather .wx-ico {
+  font-size: 12px;
+}
+
+.hud.is-mobile-ui .chip-warning {
+  height: 22px;
+  max-width: 150px;
+  font-size: 9.5px;
+  padding: 0 8px;
+}
+
+.hud.is-mobile-ui .tb-stats {
+  order: 2;
+  gap: 5px;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.hud.is-mobile-ui .stat-pill {
+  height: 34px;
+  min-width: 0;
+  padding: 3px 8px 3px 5px;
+  gap: 6px;
+  border-radius: 6px;
+}
+
+.hud.is-mobile-ui .pill-ico {
+  width: 23px;
+  height: 23px;
+  border-radius: 4px;
+}
+
+.hud.is-mobile-ui .pill-ico .ico {
+  width: 12px;
+  height: 12px;
+}
+
+.hud.is-mobile-ui .pill-label {
+  display: none;
+}
+
+.hud.is-mobile-ui .pill-value {
+  font-size: 12.5px;
+}
+
+.hud.is-mobile-ui .stat-pill.treasury {
+  min-width: 0;
+}
+
+.hud.is-mobile-ui .stat-pill.happiness {
+  display: none;
+}
+
+.hud.is-mobile-ui .happy-meter {
+  display: none;
+}
+
+.hud.is-mobile-ui .tb-controls {
+  order: 4;
+  width: 100%;
+  justify-content: flex-start;
+  gap: 8px;
+  margin-top: 2px;
+  padding-top: 5px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.hud.is-mobile-ui .tb-controls::before {
+  content: '速度';
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 2.5px;
+  color: var(--ink-faint);
+}
+
+.hud.is-mobile-ui .speed-group {
+  padding: 2px;
+  gap: 1px;
+}
+
+.hud.is-mobile-ui .speed-group button {
+  width: 24px;
+  height: 24px;
+}
+
+.hud.is-mobile-ui .pause-flag {
+  font-size: 9px;
+  letter-spacing: 1px;
+  padding: 1px 6px;
+}
+
+.hud.is-mobile-ui .tb-actions {
+  display: none !important;
+}
+
+.hud.is-mobile-ui .topbar-trim {
+  height: 3px;
+  margin: 0 14px;
+}
+
+/* ─────────────── 底部面板（sheet） ─────────────── */
+
+.hud.is-mobile-ui .build-panel,
+.hud.is-mobile-ui .info-panel {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  top: auto;
+  width: 100%;
+  max-height: min(70vh, 640px);
+  border-radius: 12px 12px 0 0;
+  border-left: 0;
+  border-right: 0;
+  border-bottom: 0;
+  transform: translateY(calc(100% + 24px));
+  opacity: 0;
+  pointer-events: none;
+  z-index: 23;
+  padding-bottom: calc(var(--mobile-nav-h) + env(safe-area-inset-bottom, 0px));
+  transition: transform 0.3s cubic-bezier(0.22, 0.9, 0.3, 1), opacity 0.22s ease;
+}
+
+.hud.is-mobile-ui .build-panel::after,
+.hud.is-mobile-ui .info-panel::after {
+  display: none;
+}
+
+.hud.is-mobile-ui .build-panel::before,
+.hud.is-mobile-ui .info-panel::before {
+  height: 3px;
+  background: linear-gradient(90deg, transparent, var(--pink) 20%, var(--cyan) 60%, transparent);
+}
+
+.hud.is-mobile-ui.is-build-open .build-panel,
+.hud.is-mobile-ui.is-info-open .info-panel {
+  transform: translateY(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.hud.is-mobile-ui .panel-head {
+  padding: 12px 14px 9px;
+  cursor: grab;
+}
+
+.hud.is-mobile-ui .panel-heading-text {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.hud.is-mobile-ui .panel-title {
+  font-size: 15px;
+}
+
+.hud.is-mobile-ui .panel-sub {
+  display: inline;
+  font-size: 8.5px;
+}
+
+.hud.is-mobile-ui .collapse-btn {
+  display: none;
+}
+
+.mobile-sheet-close {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  color: var(--ink-dim);
+  border-radius: 6px;
+  border: 1px solid var(--line-soft);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.hud.is-mobile-ui .mobile-sheet-close {
+  display: inline-grid;
+}
+
+.mobile-sheet-close .ico {
+  width: 15px;
+  height: 15px;
+}
+
+.hud.is-mobile-ui .build-scroll,
+.hud.is-mobile-ui .info-scroll {
+  padding: 4px 12px 16px;
+}
+
+/* 觸控尺寸 */
+.hud.is-mobile-ui .category-tabs {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 8px 12px 6px;
+  gap: 5px;
+}
+
+.hud.is-mobile-ui .category-tabs button {
+  height: 34px;
+  font-size: 12px;
+  letter-spacing: 1px;
+}
+
+.hud.is-mobile-ui .build-card {
+  min-height: 50px;
+  padding: 8px 10px 8px 8px;
+}
+
+.hud.is-mobile-ui .b-icon {
+  width: 38px;
+  height: 38px;
+  font-size: 18px;
+}
+
+.hud.is-mobile-ui .b-name {
+  font-size: 13.5px;
+}
+
+.hud.is-mobile-ui .b-main small {
+  font-size: 10.5px;
+}
+
+.hud.is-mobile-ui .b-cost {
+  font-size: 12px;
+}
+
+.hud.is-mobile-ui .build-tools {
+  padding: 9px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+}
+
+.hud.is-mobile-ui .tool-card {
+  min-height: 54px;
+}
+
+.hud.is-mobile-ui .tool-meta small {
+  font-size: 9px;
+}
+
+.hud.is-mobile-ui .build-tooltip {
+  display: none !important;
+}
+
+.hud.is-mobile-ui .info-panel {
+  max-height: min(78vh, 700px);
+}
+
+.hud.is-mobile-ui .city-hero {
+  padding: 10px 12px;
+}
+
+.hud.is-mobile-ui .hero-city {
+  font-size: 17px;
+}
+
+.hud.is-mobile-ui .happy-dial {
+  width: 74px;
+  height: 74px;
+}
+
+.hud.is-mobile-ui .dial-face b {
+  font-size: 20px;
+}
+
+.hud.is-mobile-ui .log-feed {
+  max-height: 170px;
+}
+
+/* ─────────────── 遮罩 + 底部導覽 ─────────────── */
+
+.mobile-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 22;
+  border: 0;
+  background: rgba(2, 5, 10, 0.62);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  animation: modalBackdrop 0.2s ease both;
+  padding-bottom: var(--mobile-nav-h);
+}
+
+.mobile-nav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 31;
+  display: flex;
+  align-items: stretch;
+  justify-content: space-around;
+  gap: 2px;
+  height: calc(var(--mobile-nav-h) + env(safe-area-inset-bottom, 0px));
+  padding: 5px 6px calc(5px + env(safe-area-inset-bottom, 0px));
+  background: linear-gradient(180deg, rgba(14, 27, 52, 0.96), rgba(5, 10, 20, 0.99));
+  border-top: 1px solid rgba(36, 224, 255, 0.3);
+  box-shadow: 0 -18px 40px rgba(0, 0, 0, 0.55), 0 0 30px rgba(36, 224, 255, 0.08);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  pointer-events: auto;
+}
+
+/* 導覽頂部霓虹線 */
+.mobile-nav::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--pink) 16%, var(--purple) 45%, var(--cyan) 78%, transparent);
+  opacity: 0.85;
+}
+
+.mobile-nav-glow {
+  position: absolute;
+  left: 50%;
+  bottom: -30px;
+  width: 60%;
+  height: 46px;
+  transform: translateX(-50%);
+  background: radial-gradient(50% 100% at 50% 100%, rgba(36, 224, 255, 0.18), transparent 70%);
+  pointer-events: none;
+}
+
+.mobile-nav-btn {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  flex: 1 1 0;
+  min-width: 0;
+  border-radius: 7px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  color: var(--ink-faint);
+  transition: color 0.16s, background 0.16s, text-shadow 0.16s;
+}
+
+.mobile-nav-btn .ico {
+  width: 19px;
+  height: 19px;
+}
+
+.mobile-nav-btn:active {
+  background: rgba(36, 224, 255, 0.08);
+}
+
+.mobile-nav-btn.is-active {
+  color: var(--cyan-hi);
+  background: linear-gradient(180deg, rgba(36, 224, 255, 0.14), transparent 80%);
+  text-shadow: 0 0 10px rgba(36, 224, 255, 0.55);
+}
+
+.mobile-nav-btn.is-active .ico {
+  filter: drop-shadow(0 0 6px rgba(36, 224, 255, 0.85));
+}
+
+/* 暫停時導覽列呼吸提示 */
+.mobile-nav.is-paused {
+  box-shadow: 0 -18px 40px rgba(0, 0, 0, 0.55), 0 0 30px rgba(255, 61, 127, 0.18);
+  border-top-color: rgba(255, 61, 127, 0.45);
+}
+
+/* ─────────────── 模式提示 / toast / 把手 ─────────────── */
+
+.hud.is-mobile-ui .panel-handle {
+  display: none !important;
+}
+
+.hud.is-mobile-ui .mode-hint {
+  bottom: calc(var(--mobile-nav-h) + env(safe-area-inset-bottom, 0px) + 10px);
+  max-width: calc(100% - 20px);
+  padding: 8px 12px;
+  font-size: 11.5px;
+  border-radius: 7px;
+}
+
+.hud.is-mobile-ui .toast-stack {
+  left: 50%;
+  right: auto;
+  /* 手機 toast 顯示在頂欄下方：bottom sheet／底部導覽不會被遮住 */
+  top: calc(var(--topbar-h) + 10px);
+  bottom: auto;
+  width: calc(100% - 24px);
+  align-items: center;
+  transform: translateX(-50%);
+}
+
+.hud.is-mobile-ui .toast {
+  max-width: 100%;
+}
+
+/* ─────────────── 彈出面板：全屏 ─────────────── */
+
+.hud.is-mobile-ui .modal-backdrop {
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+  padding: 0;
+}
+
+.hud.is-mobile-ui .modal {
+  flex: 1 1 100%;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  max-height: 100%;
+  animation-name: modalInMobile;
+}
+
+@keyframes modalInMobile {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.hud.is-mobile-ui .modal-frame {
+  height: 100%;
+  max-height: none;
+  border-radius: 0;
+  border: 0;
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.hud.is-mobile-ui .modal-head {
+  padding: 14px 14px 11px;
+  background: linear-gradient(180deg, rgba(20, 38, 68, 0.85), rgba(10, 18, 34, 0.6));
+}
+
+.hud.is-mobile-ui .modal-heading-text h2 {
+  font-size: 17px;
+  letter-spacing: 2px;
+}
+
+.hud.is-mobile-ui .modal-heading-text small {
+  font-size: 9px;
+  letter-spacing: 1px;
+}
+
+.hud.is-mobile-ui .modal-body {
+  padding: 12px 12px 18px;
+}
+
+.hud.is-mobile-ui .modal-footer {
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+}
+
+.hud.is-mobile-ui .finance-hero,
+.hud.is-mobile-ui .transit-hero {
+  flex-direction: column;
+}
+
+.hud.is-mobile-ui .fin-grid,
+.hud.is-mobile-ui .help-grid,
+.hud.is-mobile-ui .transit-grid,
+.hud.is-mobile-ui .tutorial-steps,
+.hud.is-mobile-ui .save-list {
+  grid-template-columns: 1fr;
+}
+
+.hud.is-mobile-ui .save-slot.autosave {
+  grid-column: auto;
+}
+
+.hud.is-mobile-ui .save-tool.danger-outline {
+  margin-left: 0;
+}
+
+.hud.is-mobile-ui .fin-treasury,
+.hud.is-mobile-ui .tr-hero-main {
+  min-width: 0;
+}
+
+.hud.is-mobile-ui .tr-cards {
+  grid-template-columns: 1fr;
+}
+
+.hud.is-mobile-ui .fin-cards {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.hud.is-mobile-ui .fin-chart {
+  gap: 6px;
+}
+
+.hud.is-mobile-ui .chart-col {
+  flex: 1 0 42px;
+}
+
+.hud.is-mobile-ui .ctrl-grid {
+  grid-template-columns: 1fr;
+}
+
+/* ─────────────── 橫向手機 ─────────────── */
+
+@media (orientation: landscape) and (max-height: 540px) {
+  .hud.is-mobile-ui {
+    --topbar-h: 88px;
+    --mobile-nav-h: 48px;
+  }
+
+  .hud.is-mobile-ui .topbar {
+    padding-top: 4px;
+  }
+
+  .hud.is-mobile-ui .topbar-inner {
+    flex-wrap: nowrap;
+    padding: 5px 9px;
+  }
+
+  .hud.is-mobile-ui .city-name {
+    font-size: 15px;
+  }
+
+  .hud.is-mobile-ui .tb-clock {
+    order: 3;
+    flex: 1 1 100%;
+    width: 100%;
+    padding-top: 3px;
+  }
+
+  .hud.is-mobile-ui .tb-controls {
+    order: 4;
+    width: auto;
+    margin-top: 0;
+    padding-top: 0;
+    border-top: 0;
+  }
+
+  .hud.is-mobile-ui .tb-controls::before {
+    display: none;
+  }
+
+  .hud.is-mobile-ui .pill-label {
+    display: none;
+  }
+
+  .hud.is-mobile-ui .build-panel,
+  .hud.is-mobile-ui .info-panel {
+    max-height: 82vh;
+  }
+
+  .hud.is-mobile-ui .mobile-nav-btn span {
+    font-size: 8.5px;
+  }
+
+  .hud.is-mobile-ui .mobile-nav-btn .ico {
+    width: 16px;
+    height: 16px;
+  }
+
+  .hud.is-mobile-ui .modal-heading-text h2 {
+    font-size: 15px;
+  }
+
+  .hud.is-mobile-ui .modal-body {
+    padding: 10px 12px 14px;
+  }
+}
+
+/* 安全區：iPhone 瀏海／底部橫條 */
+@supports (padding: env(safe-area-inset-bottom)) {
+  .hud.is-mobile-ui .mobile-nav {
+    padding-bottom: calc(5px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+/* ─────────────── 手機版天文台警告橫幅 ─────────────── */
+
+.hud.is-mobile-ui .warning-banner {
+  margin: 4px 8px 0;
+  padding: 5px 9px;
+  gap: 7px;
+  border-radius: 4px;
+}
+
+.hud.is-mobile-ui .wb-icon {
+  font-size: 14px;
+}
+
+.hud.is-mobile-ui .wb-text b {
+  font-size: 11px;
+  letter-spacing: 0.8px;
+}
+
+.hud.is-mobile-ui .wb-text span {
+  font-size: 9px;
+}
+
+.hud.is-mobile-ui .wb-timer {
+  display: none;
+}
+
+.hud.is-mobile-ui .wb-close {
+  width: 20px;
+  height: 20px;
+}
+
+.hud.is-mobile-ui .wb-close .ico {
+  width: 10px;
+  height: 10px;
+}
+
+/* ─────────────── 分區玩法：手機建造 sheet 更緊湊，騰出建築卡空間 ─────────────── */
+
+.hud.is-mobile-ui .build-panel {
+  max-height: min(80vh, 700px);
+}
+
+.hud.is-mobile-ui .zone-block {
+  padding: 7px 12px 8px;
+}
+
+.hud.is-mobile-ui .zone-grid {
+  gap: 5px;
+}
+
+.hud.is-mobile-ui .zone-brush {
+  min-height: 66px;
+  padding: 6px 8px 6px;
+  gap: 1px;
+}
+
+.hud.is-mobile-ui .zb-icon {
+  width: 22px;
+  height: 22px;
+}
+
+.hud.is-mobile-ui .zb-icon .ico {
+  width: 13px;
+  height: 13px;
+}
+
+.hud.is-mobile-ui .zb-name {
+  font-size: 12px;
+}
+
+.hud.is-mobile-ui .zb-cost {
+  font-size: 9px;
+}
+
+.hud.is-mobile-ui .zb-demand {
+  font-size: 8.5px;
+  line-height: 13px;
+  padding: 0 5px;
+}
+
+.hud.is-mobile-ui .zone-tools {
+  margin-top: 5px;
+}
+
+.hud.is-mobile-ui .zone-tools .tool-card {
+  min-height: 44px;
+  padding: 5px 7px 6px;
+}
+
+.hud.is-mobile-ui .zone-tools .tool-meta b {
+  font-size: 11px;
+}
+
+.hud.is-mobile-ui .zone-tools .tool-meta small {
+  font-size: 8px;
+}
+
+.hud.is-mobile-ui .build-tabs-wrap {
+  padding: 6px 12px 0;
+}
+
+.hud.is-mobile-ui .build-tabs-wrap .category-tabs {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+  padding-bottom: 6px;
+}
+
+.hud.is-mobile-ui .build-tabs-wrap .category-tabs button {
+  height: 29px;
+  font-size: 10.5px;
+  letter-spacing: 0.5px;
+}
+
+.hud.is-mobile-ui .build-tools {
+  padding: 5px 12px calc(6px + env(safe-area-inset-bottom, 0px));
+}
+
+.hud.is-mobile-ui .tools-hint {
+  margin-top: 5px;
+}
+
+/* toast 再落低少少，避免蓋住頂欄第三行 */
+.hud.is-mobile-ui .toast-stack {
+  top: calc(var(--topbar-h) + 28px);
+}

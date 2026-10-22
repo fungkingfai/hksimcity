@@ -1,0 +1,830 @@
+/**
+ * 城事面板：城市概況（幸福度霓虹錶盤、指標覆蓋率、全城庫存、城中紀要、建言）
+ * 與選取建築詳情。
+ */
+
+.info-panel {
+  top: calc(var(--topbar-h) + var(--warning-h, 0px) + 10px);
+  right: var(--hud-pad);
+  width: 348px;
+  max-height: calc(100% - var(--topbar-h) - var(--warning-h, 0px) - 24px);
+}
+
+.hud.is-info-collapsed .info-panel,
+.hud.is-info-hidden .info-panel {
+  transform: translateX(calc(100% + 24px));
+  opacity: 0;
+  pointer-events: none;
+}
+
+.info-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 14px 16px;
+}
+
+.info-view {
+  animation: panelFade 0.24s ease both;
+}
+
+@keyframes panelFade {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── 城市標頭 + 幸福度錶盤 ── */
+
+.city-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background:
+    radial-gradient(120% 130% at 0% 0%, rgba(255, 61, 127, 0.16), transparent 60%),
+    linear-gradient(160deg, rgba(26, 46, 82, 0.7), rgba(8, 16, 30, 0.82));
+  border: 1px solid rgba(255, 61, 127, 0.22);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.hero-text {
+  min-width: 0;
+}
+
+.hero-label {
+  display: block;
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  color: var(--pink);
+  text-shadow: 0 0 10px rgba(255, 61, 127, 0.6);
+}
+
+.hero-city {
+  display: block;
+  margin: 2px 0 3px;
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 900;
+  letter-spacing: 3px;
+  color: var(--ink);
+  text-shadow: 0 0 12px rgba(36, 224, 255, 0.28);
+}
+
+.hero-date {
+  display: block;
+  font-size: 10.5px;
+  letter-spacing: 0.4px;
+  color: var(--ink-faint);
+}
+
+.happy-dial {
+  --tone: var(--gold);
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 82px;
+  height: 82px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 220deg,
+    var(--tone) calc(var(--p, 70) * 1%),
+    rgba(234, 244, 255, 0.07) calc(var(--p, 70) * 1%)
+  );
+  box-shadow: 0 0 18px color-mix(in srgb, var(--tone) 30%, transparent),
+    inset 0 0 12px rgba(0, 0, 0, 0.6);
+  transition: box-shadow 0.3s ease;
+}
+
+.happy-dial::before {
+  content: '';
+  position: absolute;
+  inset: 5px;
+  border-radius: 50%;
+  background: radial-gradient(120% 120% at 50% 20%, rgba(20, 38, 68, 0.96), rgba(5, 10, 20, 0.98));
+  box-shadow: inset 0 0 0 1px rgba(234, 244, 255, 0.08);
+}
+
+.happy-dial.tone-good {
+  --tone: var(--green);
+}
+.happy-dial.tone-ok {
+  --tone: var(--gold);
+}
+.happy-dial.tone-bad {
+  --tone: var(--pink);
+}
+
+.dial-face {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1;
+}
+
+.dial-face b {
+  font-family: var(--font-display);
+  font-size: 23px;
+  font-weight: 800;
+  color: var(--tone, var(--gold));
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 14px color-mix(in srgb, var(--tone, var(--gold)) 60%, transparent);
+}
+
+.dial-face span {
+  margin-top: 3px;
+  font-size: 8.5px;
+  letter-spacing: 1.5px;
+  color: var(--ink-faint);
+}
+
+/* ── 統計卡 ── */
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  background: linear-gradient(160deg, rgba(22, 40, 70, 0.55), rgba(7, 14, 28, 0.7));
+  border: 1px solid var(--line-soft);
+}
+
+.stat-card.wide {
+  grid-column: span 2;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.stat-card > span {
+  font-size: 9.5px;
+  letter-spacing: 1.5px;
+  color: var(--ink-faint);
+}
+
+.stat-card > b {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.stat-card > small {
+  font-size: 9.5px;
+  color: var(--ink-faint);
+}
+
+.stat-card.wide > small {
+  margin-left: auto;
+}
+
+/* ── 城市指標 ── */
+
+.metrics {
+  padding: 9px 11px 10px;
+  border-radius: 7px;
+  background: rgba(7, 14, 28, 0.5);
+  border: 1px solid var(--line-soft);
+}
+
+.metric-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+
+.metric-head span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  letter-spacing: 0.6px;
+}
+
+.metric-head .ico {
+  width: 12px;
+  height: 12px;
+  color: var(--cyan);
+}
+
+.metric-head b {
+  font-size: 11.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--cyan-hi);
+}
+
+.metric-kv {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 10px;
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line-soft);
+}
+
+.metric-kv > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 10.5px;
+}
+
+.metric-kv span {
+  color: var(--ink-faint);
+}
+
+.metric-kv b {
+  font-weight: 700;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.metric-kv b.danger {
+  animation: pausePulse 1.2s ease-in-out infinite;
+}
+
+/* ── 城中紀要 ── */
+
+.log-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  max-height: 216px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.log-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 8px 5px 9px;
+  font-size: 10.5px;
+  line-height: 1.5;
+  border-radius: 4px;
+  border-left: 2px solid var(--line-soft);
+  background: rgba(234, 244, 255, 0.03);
+}
+
+.log-item.info {
+  border-left-color: rgba(36, 224, 255, 0.5);
+}
+.log-item.good {
+  border-left-color: rgba(92, 255, 157, 0.6);
+  background: rgba(92, 255, 157, 0.04);
+}
+.log-item.warn {
+  border-left-color: rgba(255, 209, 102, 0.6);
+  background: rgba(255, 209, 102, 0.04);
+}
+.log-item.bad {
+  border-left-color: rgba(255, 90, 90, 0.65);
+  background: rgba(255, 90, 90, 0.05);
+}
+
+.log-date {
+  flex: 0 0 auto;
+  font-size: 9px;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.log-text {
+  color: var(--ink-dim);
+}
+
+/* ── 規劃建言 ── */
+
+.tip-card {
+  margin-top: 12px;
+  padding: 9px 11px 10px;
+  border-radius: 7px;
+  background:
+    radial-gradient(120% 100% at 100% 0%, rgba(255, 209, 102, 0.1), transparent 62%),
+    rgba(7, 14, 28, 0.55);
+  border: 1px solid rgba(255, 209, 102, 0.2);
+}
+
+.tips-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: var(--gold-hi);
+}
+
+.tips {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tips li {
+  position: relative;
+  padding-left: 12px;
+  font-size: 10.5px;
+  line-height: 1.6;
+  color: var(--ink-dim);
+}
+
+.tips li::before {
+  content: '';
+  position: absolute;
+  left: 1px;
+  top: 0.62em;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--gold);
+  box-shadow: 0 0 7px rgba(255, 209, 102, 0.7);
+}
+
+/* ── 選取建築 ── */
+
+.info-selected {
+  padding-bottom: 4px;
+}
+
+.sel-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.sel-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  border-radius: 7px;
+  color: var(--cyan);
+  border: 1px solid color-mix(in srgb, var(--c, #24e0ff) 50%, transparent);
+  background:
+    radial-gradient(100% 100% at 30% 15%, color-mix(in srgb, var(--c, #24e0ff) 36%, transparent), transparent 70%),
+    linear-gradient(160deg, rgba(20, 36, 62, 0.92), rgba(7, 14, 28, 0.92));
+  box-shadow: 0 0 16px color-mix(in srgb, var(--c, #24e0ff) 22%, transparent);
+}
+
+.sel-icon .ico {
+  width: 20px;
+  height: 20px;
+}
+
+.sel-title {
+  min-width: 0;
+}
+
+.sel-title > b {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  color: var(--ink);
+  text-shadow: 0 0 10px rgba(36, 224, 255, 0.25);
+}
+
+.sel-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.sel-meta small {
+  font-size: 9.5px;
+  color: var(--ink-faint);
+}
+
+.sel-desc {
+  margin: 9px 0 2px;
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--ink-dim);
+}
+
+.finance-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: 9px 0 4px;
+  padding: 7px 10px;
+  font-size: 10.5px;
+  border-radius: 5px;
+  color: var(--ink-faint);
+  background: rgba(7, 14, 28, 0.55);
+  border: 1px solid var(--line-soft);
+}
+
+.finance-line b {
+  margin-left: 3px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.people {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.sel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 14px;
+}
+
+.sel-actions .primary,
+.sel-actions .danger {
+  flex: 1 1 auto;
+}
+
+.sel-actions .confirm-inline {
+  flex: 1 1 100%;
+}
+
+.sel-foot {
+  margin-top: 9px;
+  text-align: center;
+}
+
+/* ─────────────── 分區需求 RCI+F / 分區統計 / 服務覆蓋 ─────────────── */
+
+.section-label .zone-toggle {
+  margin-left: auto;
+}
+
+.zoning-panel {
+  padding: 9px 10px 10px;
+  border-radius: var(--radius-sm);
+  background:
+    radial-gradient(120% 100% at 100% 0%, rgba(36, 224, 255, 0.06), transparent 58%),
+    linear-gradient(160deg, rgba(12, 24, 44, 0.6), rgba(5, 10, 20, 0.72));
+  border: 1px solid var(--line-soft);
+}
+
+.demand-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.demand-row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) 40px;
+  align-items: center;
+  gap: 8px;
+  font-size: 10.5px;
+}
+
+.dr-name {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+.dr-short {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  border-radius: 4px;
+  font-style: normal;
+  font-size: 9px;
+  font-weight: 800;
+  color: #04101a;
+  background: var(--zone);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--zone) 40%, transparent);
+}
+
+.dr-track {
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(4, 9, 18, 0.82);
+  border: 1px solid var(--line-soft);
+}
+
+.dr-mid {
+  position: absolute;
+  left: 50%;
+  top: -1px;
+  bottom: -1px;
+  width: 1px;
+  background: rgba(234, 244, 255, 0.22);
+  transform: translateX(-50%);
+}
+
+.dr-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 999px;
+  transition: left 0.3s ease, width 0.3s ease;
+}
+
+.dr-fill.pos {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--zone) 42%, transparent), var(--zone));
+  box-shadow: 0 0 8px color-mix(in srgb, var(--zone) 55%, transparent);
+}
+
+.dr-fill.neg {
+  background: linear-gradient(90deg, rgba(255, 90, 90, 0.7), rgba(255, 90, 90, 0.3));
+  box-shadow: 0 0 8px rgba(255, 90, 90, 0.3);
+}
+
+.dr-val {
+  text-align: right;
+  font-size: 11px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--zone);
+}
+
+.demand-row.tone-low .dr-val {
+  color: #ff8b8b;
+}
+
+.demand-row.tone-mid .dr-val {
+  color: var(--ink-dim);
+}
+
+.demand-advice {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 6px 8px;
+  font-size: 10px;
+  line-height: 1.6;
+  color: var(--ink-faint);
+  border-radius: var(--radius-sm);
+  background: rgba(36, 224, 255, 0.05);
+  border: 1px solid rgba(36, 224, 255, 0.14);
+}
+
+.demand-advice .ico {
+  width: 12px;
+  height: 12px;
+  margin-top: 2px;
+  flex: 0 0 auto;
+  color: var(--cyan);
+}
+
+.zoning-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 9px;
+  margin-top: 10px;
+}
+
+.zoning-col {
+  min-width: 0;
+}
+
+.zoning-title {
+  margin-bottom: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: var(--cyan-hi);
+}
+
+.zone-stat {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 10px;
+  border-bottom: 1px dashed rgba(234, 244, 255, 0.06);
+}
+
+.zs-dot {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  border-radius: 4px;
+  font-style: normal;
+  font-size: 8.5px;
+  font-weight: 800;
+  color: #04101a;
+  background: var(--zone);
+}
+
+.zs-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--ink-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zs-val {
+  flex: 0 0 auto;
+  color: var(--ink);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.svc-row {
+  display: grid;
+  grid-template-columns: 22px 68px minmax(0, 1fr) 34px;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 10px;
+}
+
+.svc-tag {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 17px;
+  border-radius: 4px;
+  font-size: 8.5px;
+  font-weight: 800;
+  color: #06121d;
+  background: var(--svc);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--svc) 35%, transparent);
+}
+
+.svc-name {
+  color: var(--ink-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.svc-bar {
+  display: block;
+  height: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(4, 9, 18, 0.8);
+  border: 1px solid var(--line-soft);
+}
+
+.svc-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+}
+
+.svc-row .tone-good {
+  background: linear-gradient(90deg, rgba(92, 255, 157, 0.5), var(--green));
+}
+.svc-row .tone-ok {
+  background: linear-gradient(90deg, rgba(255, 209, 102, 0.5), var(--gold));
+}
+.svc-row .tone-bad {
+  background: linear-gradient(90deg, rgba(255, 61, 127, 0.5), var(--pink));
+}
+
+.svc-val {
+  text-align: right;
+  color: var(--ink-dim);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.land-value {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line-soft);
+}
+
+.lv-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10.5px;
+  color: var(--ink-faint);
+}
+
+.lv-head b {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 900;
+  color: var(--gold-hi);
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 12px rgba(255, 209, 102, 0.4);
+}
+
+.lv-head b em {
+  font-style: normal;
+  font-size: 9px;
+  font-weight: 500;
+  color: var(--ink-faint);
+}
+
+/* 建築卡上的分區徽章 */
+.zone-pill,
+.zone-badge {
+  border-color: color-mix(in srgb, var(--zone) 45%, transparent) !important;
+  color: color-mix(in srgb, var(--zone) 82%, #ffffff 18%) !important;
+  background: color-mix(in srgb, var(--zone) 12%, transparent) !important;
+}
+
+.zone-badge {
+  box-shadow: 0 0 10px color-mix(in srgb, var(--zone) 20%, transparent);
+}
+
+.hud.is-mobile-ui .zoning-grid {
+  grid-template-columns: 1fr;
+}
+
+.hud.is-mobile-ui .demand-row {
+  grid-template-columns: 58px minmax(0, 1fr) 38px;
+  gap: 7px;
+}
+
+.hud.is-mobile-ui .svc-row {
+  grid-template-columns: 22px minmax(0, 1fr) 48px 32px;
+}
+
+/* 地價指數下方：自動開發棟數／城市發展分數 */
+.lv-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 5px;
+  font-size: 9.5px;
+  color: var(--ink-faint);
+}
+
+.lv-meta b {
+  color: var(--ink-dim);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 需求建議：糧食緊張（紅色警示） */
+.demand-advice.warn {
+  color: #ffd6d6;
+  background: rgba(255, 90, 90, 0.1);
+  border-color: rgba(255, 90, 90, 0.38);
+  box-shadow: 0 0 14px rgba(255, 90, 90, 0.12);
+}
+
+.demand-advice.warn .ico {
+  color: var(--danger);
+}
+
+/* CITY STATUS：地圖規模 */
+.hero-map {
+  display: block;
+  margin-top: 3px;
+  font-size: 9.5px;
+  letter-spacing: 0.3px;
+  color: var(--cyan);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}

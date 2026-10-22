@@ -1,0 +1,146 @@
+/**
+ * 浮動提示（toast）：霓虹港風四種訊息樣式與消退動畫。
+ */
+
+.toast-stack {
+  position: absolute;
+  right: 26px;
+  bottom: 26px;
+  z-index: 90;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: flex-end;
+  gap: 7px;
+  width: min(420px, calc(100% - 32px));
+  pointer-events: none;
+}
+
+.toast {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 8px 14px 9px 10px;
+  border-radius: 6px;
+  overflow: hidden;
+  color: var(--ink);
+  background: linear-gradient(160deg, rgba(16, 30, 56, 0.96), rgba(6, 12, 24, 0.97));
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6), 0 0 22px rgba(36, 224, 255, 0.12);
+  backdrop-filter: blur(12px);
+  opacity: 0;
+  transform: translateY(14px) scale(0.98);
+  transition: opacity 0.24s ease, transform 0.24s cubic-bezier(0.22, 0.9, 0.3, 1);
+}
+
+.toast.show {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.toast .toast-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  margin-top: 1px;
+  border-radius: 5px;
+  color: var(--cyan);
+  background: rgba(36, 224, 255, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(36, 224, 255, 0.26);
+}
+
+.toast .toast-mark .ico {
+  width: 13px;
+  height: 13px;
+}
+
+.toast-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.toast-body b {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--cyan);
+}
+
+.toast-body span {
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--ink-dim);
+  word-break: break-word;
+}
+
+/* 四種訊息色系 */
+.toast-good {
+  border-color: rgba(92, 255, 157, 0.46);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6), 0 0 22px rgba(92, 255, 157, 0.16);
+}
+.toast-good .toast-mark {
+  color: var(--green);
+  background: rgba(92, 255, 157, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(92, 255, 157, 0.3);
+}
+.toast-good .toast-body b {
+  color: var(--green);
+}
+
+.toast-warn {
+  border-color: rgba(255, 209, 102, 0.5);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6), 0 0 22px rgba(255, 209, 102, 0.16);
+}
+.toast-warn .toast-mark {
+  color: var(--gold);
+  background: rgba(255, 209, 102, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(255, 209, 102, 0.3);
+}
+.toast-warn .toast-body b {
+  color: var(--gold);
+}
+
+.toast-bad {
+  border-color: rgba(255, 90, 90, 0.55);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6), 0 0 26px rgba(255, 90, 90, 0.22);
+}
+.toast-bad .toast-mark {
+  color: var(--danger);
+  background: rgba(255, 90, 90, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(255, 90, 90, 0.34);
+}
+.toast-bad .toast-body b {
+  color: var(--danger);
+}
+
+/* 頂部裝飾霓虹線 */
+.toast::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+  opacity: 0.8;
+}
+
+.toast-good::before {
+  background: linear-gradient(90deg, transparent, var(--green), transparent);
+}
+.toast-warn::before {
+  background: linear-gradient(90deg, transparent, var(--gold), transparent);
+}
+.toast-bad::before {
+  background: linear-gradient(90deg, transparent, var(--danger), transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    transition-duration: 0.01ms;
+  }
+}
