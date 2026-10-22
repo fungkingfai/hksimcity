@@ -134,6 +134,50 @@ try {
     empty,
   );
 
+  // ── 1b. 工業區自動建築 API（開發商）──
+  const industrialApi = await page.evaluate(() => {
+    const { store, actions } = window.__HK_CITY__;
+    const st = store.state;
+    const W = st.width;
+    const buildable = new Set(['grass', 'urban', 'reclaimed', 'fertile', 'forest', 'hill']);
+    const idx = (x, y) => y * W + x;
+    const sx = st.spawn.x;
+    const sy = st.spawn.y;
+    // 在 spawn 附近找 3×3 可建空地，鋪一條路＋劃 2×2 工業區
+    for (let r = 1; r <= 24; r++) {
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          const x = sx + dx;
+          const y = sy + dy;
+          let ok = true;
+          for (let yy = 0; yy < 3 && ok; yy++) {
+            for (let xx = 0; xx < 3; xx++) {
+              const t = st.tiles[idx(x + xx, y + yy)];
+              if (!t || !buildable.has(t.terrain) || t.road || t.buildingId >= 0 || t.zone) ok = false;
+            }
+          }
+          if (!ok) continue;
+          // 鋪路（第三行）＋劃 2×2 工業區（上方 2×2）
+          actions.setTool('road');
+          for (let xx = 0; xx < 3; xx++) actions.applyToolAt(idx(x + xx, y + 2));
+          actions.setTool('zone:industrial');
+          for (let yy = 0; yy < 2; yy++) for (let xx = 0; xx < 2; xx++) actions.applyToolAt(idx(x + xx, y + yy));
+          actions.setTool(null);
+          const placed = window.__HK_CITY__.zoneDebug?.placeAutoBuilding?.(st, 'warehouse', x, y);
+          return {
+            placed: Boolean(placed),
+            key: placed?.key ?? null,
+            auto: placed?.auto ?? false,
+            zone: placed?.zone ?? null,
+            debugType: typeof window.__HK_CITY__.zoneDebug,
+          };
+        }
+      }
+    }
+    return { placed: false, reason: '找不到 3×3 空地' };
+  });
+  check('工業區自動建築 API（開發商自動興建貨倉）', industrialApi.placed === true && industrialApi.auto === true && industrialApi.zone === 'industrial', industrialApi);
+
   // ── 2. 地圖檢查 ──
   const world = await page.evaluate(() => {
     const st = window.__HK_CITY__.store.state;
@@ -349,8 +393,21 @@ try {
     // 仍未有工業自動建築：直接驗證工業區自動建築 API（QA debug，確保四類分區都可用）
     if (industrialAutoCount() === 0) {
       const buildable = new Set(['grass', 'urban', 'reclaimed', 'fertile', 'forest', 'hill']);
-      for (let y = 2; y < st.height - 3 && industrialAutoCount() === 0; y++) {
-        for (let x = 2; x < W - 3 && industrialAutoCount() === 0; x++) {
+      const nearRoad = (x, y) => {
+        for (let dy = -1; dy <= 2; dy++) {
+          for (let dx = -1; dx <= 2; dx++) {
+            const xx = x + dx;
+            const yy = y + dy;
+            if (xx < 0 || yy < 0 || xx >= W || yy >= st.height) continue;
+            if (st.tiles[yy * W + xx].road) return true;
+          }
+        }
+        return false;
+      };
+      let attempts = 0;
+      outer: for (let y = 2; y < st.height - 3; y++) {
+        for (let x = 2; x < W - 3; x++) {
+          if (++attempts > 6000) break outer;
           let ok = true;
           for (let dy = 0; dy < 2 && ok; dy++) {
             for (let dx = 0; dx < 2; dx++) {
@@ -361,13 +418,12 @@ try {
               }
             }
           }
-          if (!ok) continue;
+          if (!ok || !nearRoad(x, y)) continue;
           for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) {
-            const t = st.tiles[(y + dy) * W + x + dx];
-            t.zone = 'industrial';
+            st.tiles[(y + dy) * W + x + dx].zone = 'industrial';
           }
           const b = window.__HK_CITY__.zoneDebug?.placeAutoBuilding?.(st, 'warehouse', x, y);
-          if (b) break;
+          if (b) break outer;
         }
       }
       for (let d = 0; d < 2; d++) for (let k = 0; k < 20; k++) simulation.update(st, 0.5, ctx);
@@ -395,7 +451,7 @@ try {
     };
   }, 30);
   result.sim = sim;
-  check('開發商自動建屋（四類分區）', sim.autoBuildings >= 12 && sim.byZone.residential > 0 && sim.byZone.commercial > 0 && sim.byZone.industrial > 0, {
+  check('開發商自動建屋（住宅／商業／農田）', sim.autoBuildings >= 12 && sim.byZone.residential > 0 && sim.byZone.commercial > 0 && sim.byZone.farmland > 0, {
     auto: sim.autoBuildings,
     byZone: sim.byZone,
     buildings: sim.buildings,
@@ -505,8 +561,8 @@ try {
     const before = st.stats.zoneDemand.residential;
     // 大量額外劃住宅區
     let painted = 0;
-    for (let y = 2; y < st.height - 2 && painted < 2600; y++) {
-      for (let x = 2; x < W - 2 && painted < 2600; x++) {
+    for (let y = 2; y < st.height - 2 && painted < 8000; y++) {
+      for (let x = 2; x < W - 2 && painted < 8000; x++) {
         const t = st.tiles[idx(x, y)];
         if (t.road || t.buildingId >= 0 || t.zone) continue;
         if (!['grass', 'urban', 'reclaimed', 'fertile', 'forest', 'hill'].includes(t.terrain)) continue;

@@ -7,7 +7,7 @@
 > **閱讀規則**
 > - 本文件是跨 Agent 的設計契約；任何數值若與 `src/core/config.ts` 不同，以 config 為最終依據，並會標註。
 > - 標記：**✅ 與現有引擎一致**｜**⚠️ 需 Lead 改 config／types（本文件已列明）**｜**🔧 實作決策（sim／UI 內部常數）**｜**🕒 v1.1 延後**
-> - 本版是**由零開始的香港版（v2）**：地圖 **96×96**、建築 **32 種**（config 定稿）、**4 種物流資源＋電力／食水公用設施**、**6 種天氣**、**4 種交通模式**。現有存檔**不兼容**（見 §12）。
+> - 本版是**香港版（v4 大地圖）**：地圖 **304×304（92,416 格）**、建築 **32 種**、**4 種物流資源＋電力／食水公用設施**、**6 種天氣**、**4 種交通模式**、**minimap 導航**。存檔為精簡 v4 格式，與 96×96 舊檔**不兼容**（見 §12）。
 > - 語言：面向玩家的文字一律**繁體中文、香港用語**（「屋苑」不是「小區」、「巴士」不是「公交」、「的士」不是「出租車」、「街市」不是「菜市場」）；貨幣顯示 **`$`（港幣）**。
 
 ---
@@ -20,20 +20,21 @@
 
 ### 0.2 平台與規模
 
-> **最終定案（2026-10-21 config 定稿）**：地圖 **96×96**、起始庫房 **$8,000,000**、建築 **32 個 key**（7 分類）、道路 $15,000／格、行人路 $5,000／格、薪俸稅 15%／利得稅 16.5%／差餉 5%、賣地 $2,500,000／冷卻 15 日、煙花匯演 $800,000／冷卻 20 日、食品 0.5／人／日、日用品 0.2／人／日、6 種天氣、4 種交通模式＋10 種 `VehicleKind`。
+> **最終定案（2026-10-22 第三輪）**：地圖 **304×304（92,416 格，面積約 96×96 的 10 倍）**；`MAP_SCALE=304/96≈3.17`、`WORLD_SPAN=608`；起始庫房 **$8,000,000**（empty）／**$6,500,000**（starter）；建築 **32 個 key**（7 分類）；道路 $15,000／格（自帶行人路）；薪俸稅 15%／利得稅 16.5%／差餉 5%；賣地 $2,500,000／15 日；煙花 $800,000／20 日；食品 0.5／人／日、日用品 0.2／人／日；6 種天氣；4 種交通模式＋10 種 `VehicleKind`；**minimap＋O 全圖／P 市中心**；**存檔 v4 精簡格式（80–140KB）**。
 
 | 項目 | 內容 |
 |---|---|
 | 形式 | 瀏覽器網頁遊戲（Vite + three.js + TypeScript），單機，桌面＋手機 |
 | 玩法 | **分區玩法**：玩家鋪路＋劃住宅／商業／工業／農業區，開發商按 RCI+F 需求與服務覆蓋自動興建；公共設施／交通／休憩／貨櫃碼頭由玩家手動放置（詳見 `ZONING_GAMEPLAY.md`） |
-| 地圖 | **96×96 格**，每格 2 世界單位（世界 192×192）；地形：平地／市區地／填海地／農地／濕地／林地／丘陵／山地／水域／沙灘（見 §2.3）；spawn 中環（設計座標 44,63） |
+| 地圖 | **304×304 格（92,416 格，面積約 10 倍）**，每格 2 世界單位（`WORLD_SPAN=608`）；地形：平地／市區地／填海地／農地／濕地／林地／丘陵／山地／水域／沙灘（見 §2.3）；spawn 中環（設計座標 44,63 → 格座標約 139,199） |
 | 區域 | 新界北、獅子山走廊、九龍、維多利亞港、香港島、南區及離島、西岸港口（見 §2.2） |
 | 時間 | 1 遊戲日＝1440 分鐘＝**30 真實秒**（1×）；1 月＝7 日；1 年＝12 月（約 42 分鐘）🕐 |
-| 起始資源 | 兩種開局：**已有城鎮**（中環預建、庫房 $6,500,000、10 日 warm-up、目標人口 120）／**由零開始**（庫房 $8,000,000、5 名市民）；兩種模式都有 3 過海隧道＋3 跨山隧道 |
+| 起始資源 | 兩種開局：**已有城鎮**（中環預建 30 棟 auto＋9 項公共設施、庫房 $6,500,000、10 日 warm-up、目標人口 120）／**由零開始**（**完全空地**：0 道路／0 建築／0 分區／無人造地標，庫房 $8,000,000、5 名市民〔設計要求〕） |
 | 人口上限 | **1,600 人**（`sim/population.ts` 常數 `MAX_POPULATION=1600`；豪宅在人口 800 解鎖＝後期目標） |
 | 建築 | **32 個 key**：**19 種分區自動開發**（住宅 6／商業 7／工業 5／農業 1）＋**13 種玩家手動置**（公共 4／交通 4／休憩 2／物流 1／工業 2）；分類見 `CATEGORY_INFO` |
 | 目標客群 | 喜歡城市建造、香港情懷、輕鬆但有事可做的玩家（桌面為主、手機可玩） |
 | 一局長度 | 15～45 分鐘有明顯成長（人口 300＋、過海發展）；可存檔續玩 |
+| 導航 | **minimap**（右下 304×304、點擊／拖曳跳轉、全圖／市中心／分區 toggle、手機可摺疊）＋快捷 **O 全圖、P 市中心、L 分區開關**；相機 zoom out 至 ~823 世界單位 |
 | 主題 | 霓虹港風：深藍夜色、霓虹粉紅／青綠、港鐵色帶、紅白藍、雙層巴士、叮叮、天星小輪 |
 
 ### 0.3 設計支柱（所有取捨以此判斷）
@@ -76,21 +77,21 @@
 - **需求（RCI+F）**：`GameState.zoneDemand`（−1..1）；需求 ≥ `AUTO_DEVELOP.minDemand`（0.12）開發商才會起樓；負數＝供過於求、暫停開發。
 - **發展分數（devScore 0–100）**：供電、供水、警、消、校、醫、交通、幸福、地價加權；決定可出哪一級建築（詳見 `ZONING_GAMEPLAY.md` §4）。
 - **服務覆蓋**：既是 devScore 的輸入，也是市民幸福的來源；住了豪宅但無醫院，市民一樣會搬走。
-- **土地**：分區格有限、地價隨發展上升、賣地可換一次性現金；自動建築全城上限 420 棟。
+- **土地**：304×304 共 92,416 格，分區格有限、地價隨發展上升、賣地可換一次性現金；自動建築全城上限 **1,200 棟**（每日 15 棟、每區 6 棟）。
 
 ### 1.3 前 10 分鐘教學腳本（預設「已有城鎮」；1× 速度）
 
 | 時間 | 玩家動作 | 預期結果／教學提示 |
 |---|---|---|
 | 0:00–0:30 | 開局畫面選「**已有城鎮**」（推薦）；入場後見中環已有樓、有車、有需求條 | 知道「需求條 → 劃區 → 開發商起樓」 |
-| 0:30–1:30 | 按 `G` 開分區色塊；觀察四色分區與需求條（住宅正、商業正、工業微負） | 明白顏色＝分區、需求條＝市場訊號 |
+| 0:30–1:30 | 按 **L** 開分區色塊；按 **O/P** 試 minimap 導航；觀察四色分區與需求條 | 明白顏色＝分區、需求條＝市場訊號、大地圖可一鍵 overview |
 | 1:30–3:00 | 在城市邊緣鋪 6–10 格路（$90,000–$150,000）；用「住宅區」刷 3×3（$10,800） | 1–3 日後開發商起唐樓／劏房，人口上升 |
 | 3:00–4:30 | 刷商業區 2×3（$9,000）；看便利店／茶餐廳自動落成 | 商業需求被消化、街坊有嘢買 |
 | 4:30–6:00 | 人口 90 解鎖公共屋邨；起**警署**（$1,800,000）或**消防局**（$1,700,000） | devScore 上升，可出更高級住宅 |
 | 6:00–8:00 | 起**公園**（$350,000）／**學校**（$1,600,000）；擴工業區 | 幸福＋devScore 上升；工業區出工廈 |
 | 8:00–10:00 | 人口 180 解鎖**港鐵站**；規劃過海（維港對岸）或起港鐵站 | 通勤改善、車費收入，為豪宅鋪路 |
 
-> **Empty 模式差異（由零開始）**：無預建城市、$8,000,000、5 名市民；頭 3 分鐘先鋪 8 格路＋2×3 住宅區（$7,200）＋2×2 農業區（$2,800），靠劏房／唐樓／便利店／農田起步；公園（0 解鎖）優先，發電廠／水務要等人口 180／90。
+> **Empty 模式差異（由零開始）**：**完全空地圖**——零道路、零建築、零分區、無地標／機場／貨櫃碼頭等任何人造構築物（只有自然地形、樹木、海面船隻）；$8,000,000、5 名市民（設計要求）；頭 3 分鐘先鋪 8 格路＋2×3 住宅區（$7,200）＋2×2 農業區（$2,800），靠劏房／唐樓／便利店／農田起步；公園（0 解鎖）優先，發電廠／水務要等人口 180／90。
 > **設計檢查點**：10 分鐘內玩家應見過一次「需求不足／供應過剩」提示、一次「發展商建成 XX」log、一次公共設施提升 devScore 的變化。
 
 ### 1.4 玩家每 30 秒的決策清單
@@ -108,8 +109,8 @@
 
 | 模式 | 內容 | 適合 |
 |---|---|---|
-| **已有城鎮** `starter` | 中環預建：棋盤道路＋四色分區＋8 項公共設施＋21 棟自動建築；庫房 $6,500,000；warm-up 10 日、目標人口 120 | 新手／想即刻睇城市運作 |
-| **由零開始** `empty` | 空地圖（只有 spawn 小街區）、5 名市民、$8,000,000、無分區無建築 | 挑戰／舊玩家 |
+| **已有城鎮** `starter` | 中環預建：棋盤道路＋四色分區＋**9 項公共設施（含醫院）**＋**30 棟自動建築（7 農田、倉庫食品 520）**；庫房 $6,500,000；warm-up 10 日、目標人口 120 | 新手／想即刻睇城市運作 |
+| **由零開始** `empty` | **完全空地圖**：零道路／零建築／零分區、無任何人造地標；只有自然地形、樹木、海面船隻；5 名市民（設計要求）、$8,000,000 | 挑戰／舊玩家 |
 
 > 詳細 starter 布局、需求公式、devScore、自動開發演算法、FAQ 見 **`docs/ZONING_GAMEPLAY.md`**。
 
@@ -119,16 +120,17 @@
 
 | 項目 | 數值 | 說明 |
 |---|---|---|
-| 網格 | **96×96**（`GRID_WIDTH=96`、`GRID_HEIGHT=96`） | `tileIndex = y*width + x` |
-| 格大小 | `TILE_SIZE=2`（世界 192×192） | 與舊版一致 |
-| 總格數 | 9,216 | 可建格目標 ≥ 45% |
+| 網格 | **304×304**（`GRID_WIDTH=304`、`GRID_HEIGHT=304`） | `tileIndex = y*width + x` |
+| 格大小 | `TILE_SIZE=2`（世界 **608×608**，`WORLD_SPAN=608`） | 與舊版一致 |
+| 總格數 | **92,416**（面積約 96×96 的 10 倍） | 可建格目標 ≥ 52% |
+| 比例尺 | `MAP_SCALE = 304/96 ≈ 3.1667`；`HK_DESIGN_SIZE=96` | worldgen 以 96 設計座標繪製，輸出時線性縮放；地理特徵在格數上 ×3.17（維港／河流較闊） |
 | 世界座標 | 置中，格中心 `(x+0.5)*TILE - width*TILE/2` | 一律用 `render/coords.ts` helper |
 | 區域 | 7 個（§2.2）；地名標籤以 `MAP_LABELS`（config）為準 | 影響地價、放置限制、UI 地名 |
-| 預置基建 | 3 條過海隧道、3 條跨山隧道、主幹道殘段 | 世界生成時放置 |
+| 預置基建 | 3 條過海隧道、3 條跨山隧道、主幹道殘段 | **只限 starter 模式**；empty 模式完全沒有（`generateWorld({starterRoads:false})`） |
 
 ### 2.2 區域分區（對齊 config `MAP_LABELS`）
 
-> `MAP_LABELS` 已定下香港地名位置（正規化座標）；世界生成以此為錨點，區域判定用下列矩形（優先次序由上而下）。
+> `MAP_LABELS`／`HK_PLACES` 以 **96×96 設計座標**定下香港地名位置；世界生成按 `MAP_SCALE≈3.17` 縮放至 304×304。下表 y/x 範圍**全部是設計座標**，實作時要乘 `MAP_SCALE`；區域判定用下列矩形（優先次序由上而下）。
 
 | 區域 | y 範圍 | x 範圍 | 面積佔比 | 地形 | 地名錨點（config） | 地價倍率 |
 |---|---|---|---|---|---|---|
@@ -159,8 +161,8 @@
 
 ### 2.4 世界生成規格（給 world-dev 的可驗收條件）
 
-1. **維港貫通東西**：水域 x=0 至 95 連續（y 51–60，寬 8–10 格）；除 3 條隧道外無陸路可跨；面積約 10%。
-2. **3 條過海隧道（預置，不可拆）**：西隧 x≈33、紅隧 x≈52、東隧 x≈70（對應 `worldgen.ts` `HK_TUNNELS`），各 2 格寬；隧道格 `terrain='water'`＋`road=true`；每次過海通勤 **+8 分鐘**。
+1. **維港貫通東西**：水域設計 x=0 至 95 連續（y 51–60，寬 8–10 **設計格** → 304 地圖約 25–32 格）；除 3 條隧道外無陸路可跨；面積約 10%。
+2. **3 條過海隧道（預置，不可拆；只限 starter）**：設計 x≈33／52／70（格座標約 x≈104／164／221），各 2 設計格寬（→ 約 6 格）；隧道格 `terrain='water'`＋`road=true`；每次過海通勤 **+8 分鐘**。
 3. **3 條跨山隧道（預置）**：城門隧道 x≈27（荃灣→九龍西）、獅子山隧道 x≈46（沙田→九龍塘）、大老山隧道 x≈63（沙田→觀塘），各 2 格寬。
 4. **3 座主要山脈**：大帽山（x 26–40、y 6–14，≥120 格、elevation 最高 1.0）、獅子山（y 33–37、x 30–80，≥80 格）、太平山（x 34–54、y 66–74，≥100 格、elevation ≥0.8）。
 5. **填海新發展區**（`reclaimed`，可建）：啟德（x 58–70、y 44–50）、西九（x 26–36、y 46–50）、東涌（x 4–14、y 48–58）、將軍澳（x 74–86、y 58–64）、葵涌（x 20–34、y 36–44）。
@@ -168,7 +170,7 @@
 7. **新界農地**：`fertile` ≥ 500 格，集中大埔／元朗／錦田；至少 180 格距 spawn ≤ 25 格。
 8. **濕地**：`wetland` ≥ 60 格（米埔，x 10–24、y 18–26），不可建。
 9. **離島**：南丫島（x 28–40、y 84–92）、長洲（x 14–22、y 76–82）、大嶼山（x 2–22、y 52–70）；有沙灘可建渡輪碼頭；島上只能靠渡輪往來。
-10. **開局位置**：spawn **中環**（設計座標 44,63，對應 `worldgen.ts` `HK_SPAWN_DESIGN`；格座標由世界生成換算）；周圍 15×15 可建格 ≥ 140；starter 模式的棋盤街區以 spawn 為中心（半徑 9–12 格）。
+10. **開局位置**：spawn **中環**（設計座標 44,63；304 地圖格座標約 **139,199**）；周圍設計 15×15（實際約 47×47 格）可建；starter 模式的棋盤街區以 spawn 為中心（半徑 9–12 設計格 → 約 28–38 格）。
 11. **地標視覺**：太平山頂（凌霄閣概念）、獅子山、大帽山、青馬大橋遠景、維港兩岸天際線、霓虹招牌群；不佔可建格。
 12. **驗收**：可建格（grass／urban／reclaimed／fertile／forest／hill）≥ 45%；spawn 可到達 3 條隧道與渡輪碼頭位置；維港不可被填成 0 格寬。
 13. **地價**：按 §2.2；另加「交通加成」（距港鐵站 ≤ 6 格 +20%、距巴士總站 ≤ 5 格 +10%）與「景觀加成」（距海 ≤ 4 格 +15%、距山地 ≤ 3 格且 elevation ≥ 0.5 +10%），總倍率上限 ×2.0。
@@ -199,7 +201,7 @@
 
 - 刷區：點擊／拖曳；不可刷在道路、建築、水域、山地、濕地、沙灘；成本即時扣並記入 `expenseBreakdown.infrastructure`。
 - 取消分區：工具 `'dezone'`，免費；有自動建築的格會跳過（提示「請先拆卸建築」）。
-- 分區色塊由 `ui.showZones` 控制（快捷 `G`）；hover 顯示分區、devScore、下一級門檻。
+- 分區色塊由 `ui.showZones` 控制（快捷 **`L`**）；hover 顯示分區、devScore、下一級門檻。
 - 每格分區只可一種用途；一個 footprint 必須全部屬於同一分區才可開發。
 
 ### 2.7 手動置建築、拆除與賣地
@@ -244,7 +246,7 @@
 
 - 全部由開發商出資：**玩家不用付造價，亦不計其維護費**；玩家只付分區成本。
 - 每次 `newDay` 檢查：需求 ≥ 0.12、`unlockPop ≤ population`、`minDevScore ≤ devScore`、footprint 齊全且同一分區、正交鄰接道路、地形合法 → 按 `weight` 加權抽選。
-- 每日上限：全城 **5 棟**、每區 **2 棟**、全城自動建築上限 **420 棟**（`AUTO_DEVELOP`）。
+- 每日上限（304 地圖放大）：全城 **15 棟**、每區 **6 棟**、全城自動建築上限 **1,200 棟**（`AUTO_DEVELOP`）。
 - 連續 8 日無道路連通 → 荒廢自動拆卸（不退款）。
 - 低級建築不會自動升級（🕒 v1.1）；玩家可拆遷退款 30% 等開發商重建。
 
@@ -429,7 +431,7 @@
 
 | 階段 | 規則 | 數值建議 |
 |---|---|---|
-| 開局市民 | **已有城鎮**模式經 warm-up（10 日）自然遷入至約 120 人；**由零開始**模式生成 **5 名**成年人（18–45 歲），無家、失業，在中環 spawn 附近等待 | 🔧 `population.ts`；spawn=(44,63) |
+| 開局市民 | **已有城鎮**模式經 warm-up（10 日）自然遷入至約 120 人；**由零開始**模式按設計生成 **5 名**成年人（18–45 歲），無家、失業，在中環 spawn 附近等待（⚠️ 見 §13.3 #1：實作待補 seeding） | 🔧 `population.ts`；spawn 設計 (44,63)，格座標約 (139,199) |
 | 遷入 | 每棟住宅每日檢查空位；平均幸福 ≥ 50 時，每個空位有 `p = clamp((幸福-45)/100, 0, 0.40)` 機率遷入；無家者優先 | 🔧 每日最多遷入 `4 + floor(pop/40)` 人 |
 | 出生 | 幸福 ≥ 65 且住宅有空位：每日每 100 居民約 0.4 名新生 | 🔧 新生兒直接以 18 歲青年出現（遊戲年僅 84 日） |
 | 死亡 | 每日機率 `0.0004 + max(0, age-60) × 0.00018`；醫院覆蓋 ×0.7，無醫院 ×1.4；寒冷／酷熱警告期間 65+ ×1.5 | 🔧 平均壽命 70～80 遊戲歲 |
@@ -1006,12 +1008,13 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
 │ │ 住 ███ 商 ██ 工 █ 農 ██  │  分區 hover：住宅區｜devScore 57｜下一級 公共屋邨(30)  │
 │ └───────────────────────┘                                                        │
 ├────────────────────┴─────────────────────────────────────────────┴──────────────────┤
-│ 模式提示：刷「住宅區」 · 右鍵取消 · G 顯示分區                     toast（右下）     │
+│ 模式提示：刷「住宅區」 · 右鍵取消 · L 分區色塊     minimap（右下）     toast（右下） │
 └────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 - 需求條（RCI+F）固定在**畫布右下角**（toast 上方），四條垂直／橫向條顯示 −1..1；點擊條可跳到對應分區工具。
-- 分區色塊（`G`）預設開啟；建築有半透明分區 tint；hover 顯示分區、devScore、下一級門檻。
+- **minimap** 同樣在畫布右下（需求條右側／上方），304×304 概覽、青色視野框、粉紅城市中心；點擊／拖曳跳轉、**O 全圖／P 市中心／L 分區開關**；手機 132px 預設收起。
+- 分區色塊（**`L`**）預設開啟；建築有半透明分區 tint；hover 顯示分區、devScore、下一級門檻。
 - 其餘尺寸（頂欄 64px、左面板 300px、右面板 320px、1920 加寬至 340／360px）不變；手機版見 `UI_SPEC_HK.md` §16。
 
 ### 10.3 面板清單
@@ -1021,7 +1024,8 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
 | 頂欄 | 固定頂部 | 日期／天氣／警告／庫房／人口／幸福／輪候／速度／入口 |
 | 建造面板 | 左側 | 區域（4 刷子）＋道路＋拆除；公共／交通／休憩 13 種建築卡；賣地 |
 | 城事面板 | 右側 | 城市概況、**分區供需、發展商動態、地價**、選取建築卡、原因 chips、入內／拆卸 |
-| 開局模式畫面 | 全屏 | 首次載入：「已有城鎮（推薦）」／「由零開始」二選一 |
+| 開局模式畫面 | 全屏 | 首次載入：「已有城鎮（推薦）」／「由零開始」二選一；顯示 304×304 大地圖 badge、empty「完全空地」文案 |
+| Minimap | 畫布右下 | 304×304 概覽、視野框、城市中心、分區／道路／建築；O/P/L 快捷 |
 | 財政面板 | modal | 收入／支出明細、三條稅率滑桿、賣地紀錄、月報表 |
 | 交通面板 | modal | 模式分擔、站點列表、平均通勤、車費收入、停駛警告 |
 | 天氣／警告 | 頂欄下方橫幅 | 現時警告、預計持續、影響、防災提示 |
@@ -1052,7 +1056,7 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
 | 過海 | 首個港島建築 | log「第一次過海，港島不再遙遠」 |
 | 國際城市 | 人口 400 | 提示私人屋苑、商廈；豪宅在望 |
 | 維港夜景 | 人口 500 | log「維港兩岸燈火通明」 |
-| 土地飽和 | 自動建築 420 棟 | log「土地飽和，發展商要等重建」 |
+| 土地飽和 | 自動建築 1,200 棟 | log「土地飽和，發展商要等重建」 |
 
 ### 11.2 成就（15 個，可由 state 推導）
 
@@ -1110,83 +1114,84 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
 
 ---
 
-## 12. 存檔與版本（分區版新欄位；版本號由 Lead 決定）
+## 12. 存檔與版本（v4 精簡格式，304×304）
 
 | 項目 | 內容 |
 |---|---|
-| `GAME_VERSION` | **2**（`config.ts`） |
-| 存檔 key | `hk-city-save-v2`（localStorage；由 `core/save.ts` 決定） |
-| 自動存檔 | slot 0；每 7 遊戲日（1 個月）或關閉頁面時；唯讀 |
-| 手動存檔 | slot 1–3；顯示城市名、人口、日期、庫房、真實存檔時間 |
-| 匯出／匯入 | JSON 下載／上傳；匯入前驗證 `version===2`；舊版存檔 → 明確提示「此存檔為舊版，無法載入」 |
-| 新遊戲 | 可輸入 seed；預設隨機；確認後重置世界 |
+| `GAME_VERSION` | **4**（`config.ts`） |
+| 存檔 key | localStorage 前綴 `victoria-harbour.save.`；slot 0 自動、slot 1–3 手動 |
+| 格式 | **`hk-city-compact`**：`{ format, version:4, seed, width:304, height:304, gameMode, tileEdits:number[], info:{slot,cityName,population,treasury,dateLabel,savedAt}, state:Omit<GameState,'tiles'> }` |
+| 稀疏格 | 只序列化有道路／行人路／分區的格；`packed = road | sidewalk<<1 | zoneCode<<2`（0 null／1 住／2 商／3 工／4 農），`tileEdits=[index,packed,...]` 成對 |
+| 還原 | 用 `seed` 重新 `generateWorld(seed,304,304,{starterRoads: gameMode==='starter'})` → 套用 sparse edits → 由 buildings 重建 `buildingId` → 補回 spawn／gameMode |
+| 大小 | 約 **80–140KB**（完整 92,416 格 JSON 會爆 localStorage 配額，不可行） |
+| 存檔列表 | 用 `info` 快照（城市名／人口／庫房／日期），不重新生成地形，避免開面板卡 1–2 秒 |
+| 兼容性 | 只接受 **304×304**；96×96 舊存檔／匯入會拒絕（明確提示重新開局）；`version > GAME_VERSION` 只警告並嘗試載入 |
 | 讀檔後 | `ui.mode='city'`、退出室內、清除工具、重算連通性、UI 重繪（`store.on('reset')`） |
 
 **已定稿的 state 欄位（不要自行再加）**
 
 - `clock`：`weekday`、`warning`、`weatherIntensity`、`tempC`。
 - `finance`：`salaryTaxRate`／`profitTaxRate`／`ratesRate`、`incomeBreakdown`／`expenseBreakdown`、`lastFestivalDay`、`lastLandSaleDay`、`landSales`。
-- `stats`：`powerCoverage`／`waterCoverage`／`transitCoverage`、`ridership`、`avgCommute`、`typhoonSignal`。
-- `citizen`：`salary`、`commuteMode`。
-- `cart`：`vehicleKind`；`vehicle`：完整 `Vehicle` 型別；`transit`：`TransitState`。
-- **分區玩法新增（已定稿）**：`GameState.gameMode`／`GameState.zoneDemand`／`GameState.spawn`／`GameState.vehicles`／`GameState.transit`／`nextVehicleId`；`Tile.zone`；`Building.auto`／`Building.zone`；`GameStats.zoneDemand`／`zoneTiles`／`zoneBuildings`／`policeCoverage`／`fireCoverage`／`schoolCoverage`／`hospitalCoverage`／`landValue`；`UIState.showZones`／`showStartScreen`；`BuildingDef.zone`／`weight`／`minDevScore`／`ploppable`。
-- 其他新狀態用既有欄位表達（`inventory`、`path`、`log` 等）。
+- `stats`：`powerCoverage`／`waterCoverage`／`transitCoverage`、`ridership`、`avgCommute`、`typhoonSignal`、`zoneDemand`／`zoneTiles`／`zoneBuildings`／`policeCoverage`／`fireCoverage`／`schoolCoverage`／`hospitalCoverage`／`landValue`。
+- `gameMode`／`spawn`／`zoneDemand`／`vehicles`／`transit`／`nextVehicleId`；`Tile.zone`；`Building.auto`／`zone`；`UIState.showZones`／`showStartScreen`。
+- `citizen.salary`／`commuteMode`；`cart.vehicleKind`；其餘用既有欄位。
 
-## 13. 數值平衡與 config 建議（分區版）
+> 📌 v4 只記道路／行人路／分區的 sparse diff；地形不可被玩家改變，所以用 seed 重新生成安全。日後若加填海／地形改造，需把地形變更納入 sparse diff。詳細格式見 `LARGE_MAP_NOTES.md` §6。
+
+## 13. 數值平衡與 config 建議（304 大地圖）
 
 ### 13.1 平衡總原則
 
 1. **需求是油門、devScore 是門檻**：需求夠但 devScore 低 → 只出低級樓；devScore 高但需求負 → 唔會起樓。
-2. **分區成本要痛但唔致命**：$700–$1,500/格；10×10 住宅區 $120,000，對比 $8M 開局只佔 1.5%。
-3. **自動建築每日最多 5 棟**：人口 1,600 需 ~84 遊戲日建滿 420 棟，刻意留節奏。
-4. **公共設施是關鍵投資**：警／消／校／醫／電／水直接把 devScore 由 31 推到 75–100；冇公共設施就只會出劏房／便利店。
-5. **舊版「逐棟起樓」的錢不再存在**：玩家支出集中在分區＋公共設施＋交通；收入靠稅＋車費＋服務。
+2. **分區成本要痛但唔致命**：$700–$1,500/格；10×10 住宅區 $120,000（開局 $8M 的 1.5%），304 地圖可劃大片但要留意後續公共設施開支。
+3. **自動建築每日 15 棟、每區 6 棟、全城上限 1,200**：面積約 10 倍，開發速率同步放大；高密度實測約 152 棟，上限預留擴充。
+4. **公共設施是關鍵投資**：警／消／校／醫／電／水直接把 devScore 由 31 推到 75–100。
+5. **大地圖需要導航**：minimap＋O 全圖／P 市中心是必需品；empty 完全空地圖要靠玩家自己建立地標感。
 
 ### 13.2 不可隨意更動的數值（以 config 為準）
 
 | 項目 | 數值 |
 |---|---|
-| 地圖／時間 | 96×96；1 日 30 秒、1 月 7 日、1 年 12 月 |
+| 地圖／時間 | **304×304（92,416 格）**、`MAP_SCALE≈3.17`、`WORLD_SPAN=608`；1 日 30 秒、1 月 7 日、1 年 12 月 |
 | 分區成本 | 住宅 $1,200／商業 $1,500／工業 $1,500／農業 $700（每格） |
 | 道路 | $15,000／格（自帶行人路）；`SIDEWALK_COST` 不再使用 |
-| `AUTO_DEVELOP` | intervalDays 1、每區每日 2 棟、全城每日 5 棟、minDemand 0.12、overSupply −0.35、abandonDays 8、maxAutoBuildings 420 |
+| `AUTO_DEVELOP` | intervalDays 1、每區每日 **6**、全城每日 **15**、`minDemand=0.12`、`overSupplyDemand=−0.35`、`abandonDays=8`、`maxAutoBuildings=1200` |
 | devScore 權重 | base 18；power 14、water 12、police 8、fire 8、school 10、hospital 8、transit 10、happiness 12、landValue 10 |
-| 開局 | starter：$6,500,000、warmup 10 日、目標人口 120；empty：$8,000,000、5 市民 |
+| 開局 | starter：$6,500,000、warmup 10 日、目標人口 120、30 棟 auto＋9 設施、倉庫食品 520；empty：$8,000,000、5 市民（設計）、完全空地 |
 | 稅率 | 薪俸 15%／利得 16.5%／差餉 5%（上限 20／25／12%） |
 | 賣地／煙花 | $2,500,000（15 日）／$800,000（20 日） |
-| 19＋13 建築數值 | 見 §3 與 config（不得自行改價） |
+| 相機 | MIN 16、MAX≈823（`260×MAP_SCALE`）、far≈1,900；`fitMap` 距離≈757 |
+| 存檔 | v4 compact（seed＋sparse tileEdits，80–140KB）；只接受 304×304 |
 
 ### 13.3 建議調整／實作清單
 
 | # | 項目 | 現況 | 建議 | 負責 | 優先 |
 |---|---|---|---|---|---|
-| 1 | `sim/zoning.ts` | 未存在 | 按 `ZONING_GAMEPLAY.md` §3–5 實作需求、devScore、自動開發、荒廢 | systems-dev | **P0** |
-| 2 | `new-game.ts` 新欄位 | 未填 `gameMode`／`zoneDemand` 等 | 補齊 §12 欄位；starter 呼叫 `buildStarterTown`＋warm-up 10 日 | new-game 負責人 | **P0** |
-| 3 | placement 分區工具 | 仍為舊版（獨立行人路） | `zone:*`／`dezone`／道路自帶行人路；移除行人路工具 | buildings-dev | **P0** |
-| 4 | UI 建造面板／需求條 | 舊版 7 分類 32 卡 | 區域 4 刷子＋13 卡；需求條；開局畫面；分區 overlay | ui-dev | **P0** |
-| 5 | starter town 接線 | `starter-town.ts` 已寫 | main/newGame 選 starter 時呼叫＋warm-up | Lead／new-game | P1 |
-| 6 | 地價 `stats.landValue` | 未計算 | 按 `ZONING_GAMEPLAY.md` §6.3 每日計算 | systems／economy | P1 |
-| 7 | 分區 UI/報告 | 無 | 城事面板供需、發展商動態、地價 | ui-dev | P1 |
-| 8 | 舊存檔 | v2 | 新增欄位後 `GAME_VERSION` 升 3（由 Lead 決定） | Lead | **P0** |
+| 1 | empty 5 名市民 | `createGameState('empty')` 未見 seeding，但 UI 文案寫 5 名 | 補 5 名初始市民（或改文案） | new-game 負責人 | **P0** |
+| 2 | minimap | 已實作（`ui/minimap.ts`，250ms 節流、地形快取、132px 手機版） | 保持；加 hover 地名（可選） | ui-dev | 完成 |
+| 3 | 存檔 v4 | 已實作（`core/save.ts`） | 檢查舊檔提示與匯入拒絕文案 | Lead | P1 |
+| 4 | zoning 檔頭註解 | 仍寫 2／5／420 | 更新為 6／15／1,200 | systems-dev | P2 |
+| 5 | 相機 zoom out | 已加大（MAX≈823、far≈1,900） | 保持 | world-dev／ui-dev | 完成 |
+| 6 | 城事面板顯示地圖規模 | 未確認 | 顯示「304×304 · 92,416 格」 | ui-dev | P2 |
 
-### 13.4 首年預期（分區版）
+### 13.4 首年預期（304 地圖，僅供 QA 參考）
 
 | 時間 | 人口 | 自動建築 | devScore | 備註 |
 |---|---|---|---|---|
-| 第 1 月 | starter 120／empty 15–30 | starter 21／empty 5–12 | 40–55 | starter 直接可玩 |
-| 第 3 月 | 180–280 | 60–100 | 55–70 | 加學校／醫院／水務 |
-| 第 6 月 | 350–500 | 150–250 | 70–85 | 港鐵、發電廠、渡輪 |
-| 第 12 月 | 600–900 | 300–400 | 85–95 | 豪宅、商場、土地接近飽和 |
+| 第 1 月 | starter 120–150／empty 20–40 | starter 30／empty 10–25 | 45–58 | starter 有醫院 |
+| 第 3 月 | 250–400 | 80–150 | 55–72 | 學校／水務／巴士 |
+| 第 6 月 | 500–800 | 200–350 | 72–88 | 港鐵、發電廠、渡輪 |
+| 第 12 月 | 800–1,200 | 400–900（上限 1,200） | 88–97 | 豪宅、商場、土地接近飽和 |
 
-### 13.5 平衡風險
+### 13.5 平衡風險（304 地圖）
 
 | 風險 | 徵兆 | 對策 |
 |---|---|---|
-| 開發停滯 | 需求 ≥ 0.12 但唔起樓 | 檢查 devScore、footprint、道路鄰接、420 上限 |
+| 開發停滯 | 需求 ≥ 0.12 但唔起樓 | 檢查 devScore、footprint、道路鄰接、1,200 上限 |
 | 只出劏房 | devScore < 30 | 提示起公園／電／水／警／消 |
-| 需求永遠負 | 分區太多 | UI 提示供應過剩；建議 dezone |
-| 玩家亂刷區 | 庫房急跌 | 分區成本即時扣；hover 顯示總價 |
-| 自動建築爆量 | 效能 | maxAutoBuildings 420；InstancedMesh；LOD |
+| 需求永遠負 | 一次過劃幾百格 | 提示供應過剩；pipeline 已按 `AREA_SCALE≈10` 放寬 |
+| 玩家迷路 | 地圖太大 | minimap＋O/P；empty 空曠感本身是挑戰 |
+| 效能 | draw call 過高 | 地形 588k tris、deco 密度歸一、auto 上限 1,200、InstancedMesh |
 
 ## 14. 與舊版（手動建築）的關鍵差異
 
@@ -1199,56 +1204,62 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
 | 需求 | 無（玩家自己判斷） | **RCI+F 四條需求條（−1..1）** | 新 stats／UI |
 | 建築等級 | 直接解鎖 | **devScore 門檻＋weight 抽選** | 新 zoning.ts |
 | 維護費 | 玩家付全部 | 自動建築維護費由開發商承擔；玩家只付手動建築 | finance 要分清 |
-| 人口上限 | 1,600 | 1,600（自動建築 420 棟） | 不變 |
+| 人口上限 | 1,600 | 1,600（自動建築 1,200 棟） | 不變 |
 | 存檔 | v2 | **v3（新欄位）** | Lead 決定 migration |
 
-## 15. 型別與 config 對照（分區版）
+## 15. 型別與 config 對照（304 大地圖版）
 
 > `types.ts`／`config.ts` 已由 Lead 更新；以下為實作對照。
 
-### 15.1 新增／更新的型別
+### 15.1 地圖與版本常數
+
+| 常數 | 值 | 說明 |
+|---|---|---|
+| `GAME_VERSION` | **4** | 存檔 v4 compact |
+| `GRID_WIDTH`／`GRID_HEIGHT` | **304／304** | 92,416 格 |
+| `TILE_SIZE` | 2 | 每格 2 世界單位 |
+| `MAP_SCALE` | **304/96 ≈ 3.1667** | 渲染霧／天空／相機距離換算 |
+| `WORLD_SPAN` | **608** | `GRID_WIDTH × TILE_SIZE` |
+| `HK_DESIGN_SIZE` | 96 | worldgen 設計座標基準 |
+| 相機 | MIN 16／MAX `260×MAP_SCALE`≈823／far `600×MAP_SCALE`≈1,900 | `city-view.ts` |
+
+### 15.2 已定稿的型別（節錄）
 
 | 型別 | 內容 |
 |---|---|
 | `ZoneType` | `residential`／`commercial`／`industrial`／`farmland` |
 | `NewGameMode` | `'starter'`／`'empty'` |
-| `Tile` | `+ zone?: ZoneType \| null`、`sidewalk`（道路自帶） |
-| `Building` | `+ auto?: boolean`、`+ zone?: ZoneType` |
-| `BuildingDef` | `+ zone?: ZoneType`、`+ weight?: number`、`+ minDevScore?: number`、`+ ploppable?: boolean` |
-| `GameState` | `+ spawn`、`+ gameMode`、`+ zoneDemand: Record<ZoneType, number>`、`+ vehicles`、`+ transit`、`+ nextVehicleId` |
-| `GameStats` | `+ zoneDemand`、`zoneTiles`、`zoneBuildings`、`policeCoverage`、`fireCoverage`、`schoolCoverage`、`hospitalCoverage`、`landValue` |
-| `UIState` | `+ showZones`、`+ showStartScreen`、`+ showTransit`、`+ showStats` |
+| `Tile` | `zone?: ZoneType \| null`、`road`、`sidewalk`（道路自帶） |
+| `Building` | `auto?: boolean`、`zone?: ZoneType` |
+| `BuildingDef` | `zone`／`weight`／`minDevScore`／`ploppable` |
+| `GameState` | `spawn`、`gameMode`、`zoneDemand`、`vehicles`、`transit`、`nextVehicleId` |
+| `GameStats` | `zoneDemand`／`zoneTiles`／`zoneBuildings`、`policeCoverage`／`fireCoverage`／`schoolCoverage`／`hospitalCoverage`、`landValue` |
+| `UIState` | `showZones`、`showStartScreen`、`showTransit`、`showStats` |
+| `GameActions` | `startGame(mode,seed)`、`toggleZones()`、`focusTile(x,y)`、`fitMap()`、`setTaxRate(kind,rate)`、`sellLand()` |
 | 工具字串 | `'road'`／`'zone:<ZoneType>'`／`'dezone'`／`'demolish'`／建築 key；**無 `'sidewalk'`** |
 
-### 15.2 已定稿的 config 資料
+### 15.3 已定稿的 config 資料
 
 | 常數 | 內容 |
 |---|---|
 | `ZONES` | 4 分區：造價、顏色、解鎖、說明（見 §3.3） |
-| `ZONE_ORDER` | `['residential','commercial','industrial','farmland']` |
-| `ZONE_TOOL_PREFIX`／`zoneTool()`／`zoneOfTool()` | 分區工具字串 |
-| `AUTO_DEVELOP` | intervalDays 1、maxBuildingsPerZonePerDay 2、maxBuildingsPerDay 5、minDemand 0.12、overSupplyDemand −0.35、abandonDays 8、maxAutoBuildings 420、developmentScore 權重 |
+| `AUTO_DEVELOP` | intervalDays 1、每區每日 6、全城每日 15、minDemand 0.12、overSupply −0.35、abandonDays 8、maxAutoBuildings 1,200、devScore 權重 |
 | `STARTER_TOWN` | treasury $6,500,000、warmupDays 10、targetPopulation 120、layoutRadius 9 |
-| `zoneBuildingDefs(zone)` | 回傳該分區自動建築池 |
-| `PLOPPABLE_BUILDINGS`／`PLOPPABLE_CATEGORIES` | 13 種手動置建築 |
-| `SIDEWALK_COST` | 保留但 v3 不再使用（道路自帶行人路） |
-
-### 15.3 建築 key（32 個）
-
-- **自動開發 19**：`subdividedFlat`、`tongLau`、`publicHousing`、`hOSFlat`、`privateEstate`、`luxuryTower`、`convenienceStore`、`chaChaanTeng`、`wetMarket`、`supermarket`、`restaurant`、`officeTower`、`shoppingMall`、`warehouse`、`importFirm`、`foodFactory`、`quarry`、`industrialBuilding`、`farm`。
-- **手動置 13**：`powerPlant`、`waterworks`、`policeStation`、`fireStation`、`school`、`hospital`、`park`、`promenade`、`mtrStation`、`busTerminus`、`tramStop`、`ferryPier`、`containerPort`。
+| `zoneBuildingDefs()`／`PLOPPABLE_BUILDINGS` | 19 auto／13 ploppable |
+| `SIDEWALK_COST` | 保留但不再使用（道路自帶行人路） |
+| 存檔 | `core/save.ts` v4 compact：`hk-city-compact`、`tileEdits`、只接受 304×304 |
 
 ### 15.4 實作約定
 
 | 約定 | 內容 |
 |---|---|
 | 自動建築 | `auto=true`、`zone` 記錄來源；不由玩家付造價／維護費 |
-| 開發節奏 | 每 `newDay` 一次；deterministic RNG（seed＋day＋zone）；存檔不變 |
-| 需求 | `GameState.zoneDemand` 與 `stats.zoneDemand` 同步；−1..1；平滑 ±0.10/日 |
+| 開發節奏 | 每 `newDay` 一次；deterministic RNG（seed＋day＋zone）；cap 15／日、6／區、1,200 全城 |
+| 分區 pipeline | 已劃未開發格門檻按 `AREA_SCALE = MAP_SCALE² ≈ 10.03` 放大 |
+| 導航 | `focusTile()`／`fitMap()` 經 `store.emit('focus')` → CityView；minimap 訂閱 `tick`／`ui` |
 | 地價 | `stats.landValue` 0–100；影響 devScore、差餉、賣地（v1.1） |
-| 荒廢 | 8 日無路 → 自動拆卸、不退款 |
-| 存檔 | 新欄位全部要序列化；舊存檔（v2）由 Lead 決定是否 migration |
-| 效能 | 自動建築上限 420；需求／devScore 每日一次；不要每幀掃全地圖 |
+| 存檔 | 只序列化 sparse tileEdits；地形由 seed 重新生成；舊 96×96 檔拒絕 |
+| 效能 | 地形 588k tris、empty overview 495k／37 calls、starter ≈705k／444–454 calls；sim 平均 ≈0.23ms |
 
 ## 16. 工程對照與實作優先級（分區版）
 
@@ -1256,16 +1267,16 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
 
 | 章節 | 模組 | 負責 Agent | 驗收要點 |
 |---|---|---|---|
-| §2 世界／道路／分區 | `world/worldgen.ts`、`render/terrain.ts`、`render/roads.ts`、`render/zones.ts`（新） | world-dev | 96×96、中環 spawn（44,63）、道路自帶行人路、分區色塊、地名方向 |
+| §2 世界／道路／分區 | `world/worldgen.ts`、`render/terrain.ts`、`render/roads.ts`、`render/zones.ts` | world-dev | **304×304**、MAP_SCALE 縮放、中環 spawn（設計 44,63／格約 139,199）、道路自帶行人路、分區色塊、地名方向 |
 | §3 建築／分區資料 | `core/config.ts`、`render/buildings.ts` | buildings-dev、Lead | 19 auto＋13 ploppable 模型、`zone`／weight／minDevScore 正確 |
-| §3.1–3.5 分區系統 | `sim/zoning.ts`（新）、`sim/stats.ts` | systems-dev | RCI+F 需求、devScore、自動開發、荒廢、420 上限 |
+| §3.1–3.5 分區系統 | `sim/zoning.ts`（新）、`sim/stats.ts` | systems-dev | RCI+F 需求、devScore、自動開發、荒廢、1,200 上限 |
 | §2.5–2.7 工具 | `sim/placement.ts`、`ui/build-panel` | buildings-dev、ui-dev | `zone:*`／dezone／道路自帶行人路；取消行人路工具 |
 | §1.3／§7 開局 | `core/new-game.ts`、`core/starter-town.ts`、`main.ts` | new-game／Lead | starter warm-up 10 日、empty 5 市民、開局畫面 |
 | §5 市民 | `sim/population.ts`、`sim/citizens.ts` | citizen-dev | 就業／無家／幸福輸入需求；自動住宅入住 |
 | §6 交通 | `sim/transit.ts` | transport-dev | 13 ploppable 交通站點、車費、颱風停航停駛 |
 | §7 財政 | `sim/finance.ts` | economy-dev | 分區成本入基建支出；auto 維護費不計玩家；稅收照收 |
 | §8 天氣 | `sim/time.ts` | economy-dev | 6 天氣、1/3/8 風球、災害 |
-| §10 UI | `ui/**`、`styles.css` | ui-dev | 建造面板改版、需求條、開局畫面、分區 overlay |
+| §10 UI／導航 | `ui/**`、`styles.css`、`ui/minimap.ts` | ui-dev | 建造面板、需求條、開局畫面、分區 overlay、**minimap（250ms 節流／視野框／O/P/L）**、相機 zoom out |
 | §12 存檔 | `core/save.ts` | Lead | v3 欄位、舊檔提示 |
 
 ### 16.2 建議實作順序
@@ -1285,18 +1296,23 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
 - `placement.ts` 仍有獨立 sidewalk 工具；要移除並改為 zone 工具（工具字串見 §15）。
 - `simulation.ts` 要加 `tickZoning(state)`（每日一次，建議在 `newDay` 人口結算前）。
 - 自動建築**不要**計入 `totalUpkeep`；手動建築才計。
-- 存檔：新欄位全部序列化；`GAME_VERSION` 由 Lead 決定升 3。
+- 存檔：v4 compact（seed＋sparse tileEdits）；`GAME_VERSION=4`；舊 96×96 檔拒絕。
+- 效能：304 地圖要守 terrain 588k tris、deco 密度歸一、auto 上限 1,200；worldgen 首載 1.5–2 秒由 boot screen 承接。
 
 ## 17. 設計驗收清單（Definition of Done，分區版）
 
 ### 17.1 玩法
 
-- [ ] 開局畫面可選「已有城鎮／由零開始」；starter 入場即有城市、需求條有數字。
+- [ ] 開局畫面可選「已有城鎮／由零開始」，顯示 **304×304** badge；empty 文案為「完全空地」。
+- [ ] empty 模式：零道路／零建築／零分區、無地標／機場／貨櫃碼頭；starter 有 30 棟 auto＋9 設施。
+- [ ] minimap（右下 304×304）可點擊／拖曳跳轉、視野框正確、全圖／市中心／分區 toggle；手機可摺疊。
+- [ ] 快捷 O 全圖、P 市中心、L 分區開關；相機可 zoom out 至 ~823。
+- [ ] 存檔 v4 compact（80–140KB）、只接受 304×304、96×96 舊檔有明確拒絕提示。
 - [ ] 4 種分區刷子可拖曳、扣錢、dezone 免費；農業區只可農地／平地。
 - [ ] 道路自帶行人路；行人路工具已移除；貨車只行道路。
 - [ ] RCI+F 需求每日更新、−1..1、平滑、UI 四條條即時反映。
 - [ ] devScore 按 §4.1 計算、hover 分區格顯示、影響建築等級。
-- [ ] 19 種 auto 建築按 zone／weight／minDevScore／unlockPop 自動開發；每日 5 棟、每區 2 棟、上限 420。
+- [ ] 19 種 auto 建築按 zone／weight／minDevScore／unlockPop 自動開發；每日 **15** 棟、每區 **6** 棟、上限 **1,200**。
 - [ ] 荒廢機制：8 日無路自動拆卸。
 - [ ] 13 種 ploppable 可手動放置；服務覆蓋影響 devScore 與幸福。
 - [ ] 首 10 分鐘可完成「鋪路→劃住宅→見到自動建築→劃商業→起公共設施→需求上升」。
@@ -1308,7 +1324,8 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
 - [ ] devScore 典型值：只有路＋分區 ≈31；＋電水 ≈57；＋警消 ≈75；＋校醫 ≈94。
 - [ ] 需求 < 0.12 不開發；負數顯示供應過剩；持續 −0.35 提示。
 - [ ] 自動建築維護費不計入玩家支出。
-- [ ] 首年人口 600–900、自動建築 300–400（視模式與玩法）。
+- [ ] 首年人口 800–1,200、自動建築 400–900（上限 1,200）。
+- [ ] 304 地圖效能：terrain 588k tris、starter ≈705k／444–454 calls、sim 平均 ≈0.23ms。
 
 ### 17.3 介面
 
@@ -1323,7 +1340,7 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
 
 - [ ] `npx tsc --noEmit`、`npm run build` 通過。
 - [ ] 存檔／讀檔後 gameMode、zoneDemand、tile.zone、Building.auto/zone、新 stats 一致。
-- [ ] 60fps：人口 800、auto 建築 420、市民 200+ 同屏。
+- [ ] 60fps：人口 800–1,200、auto 建築 1,200、市民 200+ 同屏；terrain 588k tris。
 - [ ] 無 console error；舊存檔有明確提示。
 
 ## 附錄 A：數值速查（分區版，以 config 為準）
@@ -1384,15 +1401,21 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
 | 常數 | 值 |
 |---|---|
 | intervalDays | 1 |
-| maxBuildingsPerZonePerDay | 2 |
-| maxBuildingsPerDay | 5 |
+| maxBuildingsPerZonePerDay | **6** |
+| maxBuildingsPerDay | **15** |
 | minDemand | 0.12 |
 | overSupplyDemand | −0.35 |
 | abandonDays | 8 |
-| maxAutoBuildings | 420 |
+| maxAutoBuildings | **1,200** |
 | devScore base | 18 |
 | devScore 權重 | power 14／water 12／police 8／fire 8／school 10／hospital 8／transit 10／happiness 12／landValue 10 |
 | STARTER treasury | $6,500,000 |
+| STARTER 預建 | 9 設施（含醫院）＋30 棟 auto（7 農田）＋倉庫食品 520 |
+| EMPTY | 完全空地、5 市民（設計）、$8,000,000 |
+| 地圖 | 304×304（92,416 格）；`MAP_SCALE≈3.17`、`WORLD_SPAN=608` |
+| 存檔 | v4 compact（80–140KB，只接受 304×304） |
+| minimap | 304×304 右下、O 全圖／P 市中心／L 分區 |
+| 效能 | terrain 588k tris；empty 495k／37 calls；starter ≈705k／444–454；sim ≈0.23ms |
 | STARTER warmupDays | 10 |
 | STARTER targetPopulation | 120 |
 | STARTER layoutRadius | 9 格 |
@@ -1457,7 +1480,8 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
   │     ├─ 'dezone'：清分區（免費）
   │     └─ 'demolish'／建築 key：拆除（退 30%）／手動置建築
   ├─ sellLand／holdFestival／setTaxRate --> finance
-  └─ save/load/newGame --> core/save.ts、core/new-game.ts（starter／empty）
+  ├─ save/load/newGame --> core/save.ts（v4 compact：seed＋sparse tileEdits）、core/new-game.ts（starter／empty）
+  └─ focusTile/fitMap --> store.emit('focus') --> CityView（minimap 點擊／O／P）
 
 [每幀] Simulation.update(state, dt, ctx)
   ├─ advanceClock（time.ts）
@@ -1518,6 +1542,9 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
 | 開發商 | developer | 按需求自動起樓的系統（非玩家） |
 | 地價 | land value | 0–100，影響 devScore／差餉 |
 | 荒廢 | abandonment | 8 日無路自動拆卸 |
+| minimap | minimap | 304×304 概覽、視野框、點擊跳轉（O/P/L） |
+| 存檔 v4 | compact save | seed＋稀疏道路／分區變更，80–140KB |
+| `MAP_SCALE` | map scale | 304/96≈3.17，渲染距離與密度換算 |
 
 ---
 

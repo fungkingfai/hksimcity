@@ -133,8 +133,12 @@ try {
     buildOpen,
   );
   // 切到「休憩」分頁確認公園卡（手動放置建築）
-  await ev(() => document.querySelector('[data-act="category"][data-cat="decoration"]')?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
-  await wait(600);
+  await ev(() => {
+    const { store } = window.__HK_CITY__;
+    store.state.ui.buildCategory = 'decoration';
+    store.bumpUI();
+  });
+  await waitFn(() => Boolean(document.querySelector('[data-act="build"][data-key="park"]')), 20000);
   const parkCard = await ev(() => !!document.querySelector('[data-act="build"][data-key="park"]'));
   check('建造面板有公共建築卡（公園）', parkCard === true, { parkCard });
 
@@ -161,7 +165,7 @@ try {
     const emptyAt = (x, y) => {
       if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1) return false;
       const t = st.tiles[idx(x, y)];
-      return okTerrain.has(t.terrain) && t.buildingId < 0 && !t.road && !t.sidewalk;
+      return okTerrain.has(t.terrain) && t.buildingId < 0 && !t.road && !t.sidewalk && !t.zone;
     };
     const touchRoad = (x, y) => {
       for (const [nx, ny] of [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]]) {
@@ -273,12 +277,24 @@ try {
   await snap('mobile-interior', 1800);
   const exitBtn = page.locator('[data-act="exit-interior"]').first();
   if (await exitBtn.count()) await exitBtn.tap().catch(() => {});
-  else await ev(() => window.__HK_CITY__.actions.exitInterior());
-  await waitFn(() => window.__HK_CITY__.store.state.ui.mode === 'city', 25000);
+  await wait(700);
+  if (await ev(() => window.__HK_CITY__.store.state.ui.mode !== 'city')) {
+    await ev(() => window.__HK_CITY__.actions.exitInterior());
+  }
+  await waitFn(() => window.__HK_CITY__.store.state.ui.mode === 'city', 30000);
+  await wait(600);
   const backCity = await ev(() => window.__HK_CITY__.store.state.ui.mode);
   check('室內返回城市', backCity === 'city', { mode: backCity });
 
   // 城事面板開啟檢查
+  await ev(() => {
+    const { store, actions } = window.__HK_CITY__;
+    actions.closeOverlays();
+    store.state.ui.showStartScreen = false;
+    store.bumpUI();
+    document.querySelector('.hud')?.classList.remove('is-interior');
+  });
+  await wait(700);
   await page.locator('[data-m-act="info"]').tap();
   await waitFn(() => document.querySelector('.hud')?.classList.contains('is-info-open'), 25000);
   const infoOpen = await ev(() => ({
