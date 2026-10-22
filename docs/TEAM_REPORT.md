@@ -157,3 +157,58 @@ interiors-dev 共用材質庫而不互相覆寫）。Lead 在開發中途同步�
 - [x] 分區色塊 overlay（白天＋夜晚截圖）與 start screen 截圖
 - [x] 1600 人 simulation 平均 <1ms/幀（logistics 優化）
 - [x] 重新部署 Cloudflare：<https://victoria-harbour-city.changeable-citron.workers.dev/>
+
+---
+
+# 第三輪改版：304×304 大地圖＋完全空地開局（Round 3）
+
+> 玩家第三輪回饋：①「試試將地圖整大 10 倍，而家好細」；②「由零開始應該是一間屋都無，全部空地」；
+> ③ 用 GitHub token push 到 <https://github.com/fungkingfai/hksimcity>，讓 Cloudflare `hksimcity.fungkingfai.workers.dev` 同步更新。
+> 日期：2026-10-22 深夜 ~ 10-23 凌晨。
+
+## R3.1 改動總覽
+
+| 項目 | 改動 |
+|---|---|
+| **地圖 ×10 面積** | `GRID_WIDTH/GRID_HEIGHT: 96 → 304`（92,416 格，面積 ×10.03）；新增 `MAP_SCALE=304/96≈3.1667`、`WORLD_SPAN=608`；worldgen 沿用 96 設計座標、以 `sx/sy` 換算（地理特徵線性放大 ×3.17，維港／河流較寬） |
+| **完全空地 empty 模式** | `generateWorld(...,{starterRoads: gameMode==='starter'})`：empty 模式**零道路、零隧道、零建築、零分區**；強制 render gate 關閉**所有靜態人造物**（fake 市區樓群、地標、機場跑道／客運大樓、貨櫃碼頭貨櫃、人造菜田、城市霓虹燈光），只保留自然地形／樹木／沙灘／濕地與海面動態船隻；玩家起第一棟樓後城市燈光自動亮返；5 名市民＋$800 萬（首次 tick 進場） |
+| **starter 城鎮 rebalance** | 更密集道路網＋更大 R/C/I 區（北住宅、中商業、南工業）；30 棟 auto 建築（含 7 農田、2 貨倉、寫字樓、工廈）；9 種公共設施（加醫院）；倉庫預放食品 520／日用品 180；starter 貨幣 $650 萬 |
+| **大地圖相機／導航** | 相機 far 600 → 1,900、zoom out 上限 260 → 823、`fitMap()` 距離 ≈757；新增 `GameActions.focusTile/fitMap`＋`StoreEvent 'focus'`；`CityView.getCameraInfo()` 供 minimap 視野框 |
+| **Minimap（新）** | 右下 304×304 Canvas：水陸地形 offscreen 快取、道路、四色分區、建築點、城市標記、鏡頭視野框；點擊／拖曳跳轉（80ms throttle）、全圖 / 市中心 / 分區 toggle、可摺疊；手機 46px 圓形收起／152px 展開；`O` 全圖、`P` 返回市中心 |
+| **存檔 v4（compact）** | 存檔只記 `seed + gameMode + 稀疏 tileEdits(road/sidewalk/zone) + state(不含 tiles) + info 快照`；載入時以 seed 重新 generateWorld 再套 sparse edits＋重建 buildingId；約 **78–136KB**（完整 92k 格 JSON 會超過 localStorage 5MB 配額）；只接受 304×304，舊 96×96 存檔會被忽略；`GAME_VERSION=4` |
+| **開發速率按地圖放大** | `AUTO_DEVELOP.maxBuildingsPerDay 5→15`、`maxBuildingsPerZonePerDay 2→6`、`maxAutoBuildings 420→1200` |
+| **世界／渲染縮放（world-dev）** | terrain tris **3.43M → 588k（-83%）**；empty overview **495k tris / 37–47 calls**；starter ~**705k tris / 444–454 calls**；天空球 unit sphere 自適應 camera.far、雲／霧／雨雪／星星／鳥／燈光半徑 ×3.17；`fogRange` 近遠 ×3.17；地名 billboard 尺寸 ×4.9；樹木／假樓群密度按 `1/(kx*ky)` 歸一（榕樹 4181→495、假樓群回落至 ~96 地圖水平） |
+| **sim 縮放（systems-dev）** | Weighted A*（長途 15.9→**1.79ms**）、cache 上限按面積 16k→52k＋增量 `notifyRoadAdded()`；zoning 每日 survey O(92k)（tickZoning 11.4→**2.4–3.1ms**）；stats 每幀 92k 掃描清零（**0.03–0.05ms**）；logistics 貨車速度 ×MAP_SCALE＋3.5ms 搜尋預算（**0.00–0.02ms/幀**） |
+| **市民（citizens-dev）** | `walkNetworkSignature` 由每 5 分鐘全掃 92k tiles 改為 `worldRevisionOf()` O(1) 簽章（重算 54→3 次/600 幀）＋修正 stale walk-component cache（新路即日影響就業／通勤） |
+
+## R3.2 效能與平衡實測（304 地圖）
+
+| 情境 | 數據 |
+|---|---|
+| 首次生成 | worldgen 304 ≈ 1.3–2s（node bench 1.5s；瀏覽器 boot 有載入畫面） |
+| starter warm-up（10 日） | pop **146–148**、建築 49–50（auto 41–44）、道路 424、幸福 70–73、倉庫食品充足 |
+| starter 實時 +20 日 | pop **569–573**、建築 98–127（auto 89–118）、normal frame **avg 0.23ms / p95 0.34 / p99 3.62ms**；跨日結算 ~6.8ms |
+| empty 60 日（自鋪路＋四區） | pop **368**、auto 116（R/C/I/F=68/16/20/11）、normal frame avg 0.21ms |
+| 800 人受控 | normal frame ~0.1–0.3ms；tickZoning 每日 2.43ms；貨車長途 path 145 格正常 |
+| empty 確認 | createGameState 後 **buildings=0 / roads=0 / zones=0**；spawn 附近 67% 可建，玩家可立即鋪路 |
+| 邊界／離島 | 最北／最南／最東及 3 個離島皆可鋪路、長距離 path 優雅返回 null、無 crash |
+
+## R3.3 第二輪遺留問題處理
+
+- 地價、失業、糧食：starter 加大 C/I 區＋農田＋食品儲備後，warm-up 糧食 1.9 日→充足；中期失業由 ~28% 改善（更多商業／工業職位）。
+- 高人口 p95：normal frame 全部 <3ms；跨日結算 6.8–9ms 屬每遊戲日一次尖峰（報告註明預期）。
+- 舊存檔：v4 與 96×96 不相容，UI 會顯示空存檔格（不再讀取舊資料）。
+
+## R3.4 驗收與部署
+
+- [x] `npx tsc --noEmit` 0 error
+- [x] `npm test` 26/26（304 地圖測試已更新，timeout 放寬至 30s）
+- [x] `npm run build` 成功
+- [x] Playwright 全流程 `scripts/verify-hk.mjs`：**28 / 28 checks** 全綠（304×304 地圖、starter/empty 兩種開局、empty 完全零道路／建築／分區、工業區自動建築 API、開發商住宅／商業／農田自動建屋、道路整合行人路、分區需求平衡、公共設施與服務覆蓋、颱風／雪、32 種室內、compact 存檔跨頁面、渲染負載 799 calls / 711k tris）
+- [x] 真實 UI 點擊 `scripts/ui-click-test.mjs`：**21 / 21 checks** 全綠（empty 開局→真實滑鼠鋪路／劃區、開發商建屋、公共設施放置、雙擊入室內、財政／交通／存檔／說明、倍速快捷鍵）
+- [x] 手機版 `scripts/mobile-test.mjs`：**17 / 17 checks** 全綠（iPhone 13、手機開局畫面、分區刷子 sheet、觸控劃區＋自動建屋、城事需求面板、入室內／返回、單指平移、雙指縮放、桌面回歸）
+- [x] 截圖：start（304 開局畫面）、empty（完全空地圖）、zoning（starter 分區城市）、map（304 全圖 overview）、hero/city/night/weather/interior/finance/transit/save、mobile-*
+- [x] GitHub push：<https://github.com/fungkingfai/hksimcity>（main；token 只經 `~/.config/huaxia/github-pat` 讀取，未寫入會話／repo）
+- [x] GitHub push：<https://github.com/fungkingfai/hksimcity>（main；token 由 `~/.config/huaxia/github-pat` 讀取，未寫入會話／repo）
+- [x] 臨時 Cloudflare 預覽（立即可玩）：<https://hksimcity.foamy-cold-ca3.workers.dev/>（`wrangler deploy --temporary`；HTTP 200、starter 城鎮 304×304／50 棟／147 人／minimap 正常、無 console error）
+- [ ] Cloudflare `hksimcity.fungkingfai.workers.dev` 自動同步：push 後 URL 仍回 Cloudflare **error 1042（Worker 不存在）**；`wrangler whoami` 顯示本機未登入用戶 Cloudflare 帳戶、repo 無 Actions workflow／secrets。需在 Cloudflare Dashboard → Workers & Pages → 建立 `hksimcity` Worker 並連接 GitHub `fungkingfai/hksimcity`（Build command `npm run build`、Deploy command `npx wrangler deploy`），或提供 Cloudflare API token 由 Lead 直接部署。

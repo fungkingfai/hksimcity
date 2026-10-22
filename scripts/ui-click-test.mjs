@@ -141,7 +141,7 @@ try {
     const emptyAt = (x, y) => {
       if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1) return false;
       const t = st.tiles[idx(x, y)];
-      return buildable.has(t.terrain) && t.buildingId < 0 && !t.road && !t.sidewalk;
+      return buildable.has(t.terrain) && t.buildingId < 0 && !t.road && !t.sidewalk && !t.zone;
     };
     const touchStreet = (x, y) => {
       for (const [nx, ny] of [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]]) {
@@ -299,8 +299,8 @@ try {
     document.querySelector('.hud')?.classList.add('is-build-collapsed', 'is-info-collapsed');
   });
   await wait(300);
-  // 找一個 2×2 空位放公園（貼近道路、未劃區）
-  const parkSpot = await ev(() => {
+  // 找多個 2×2 空位（貼近道路、未劃區），再揀一個喺畫面內嘅放公園
+  const parkSpots = await ev(() => {
     const st = window.__HK_CITY__.store.state;
     const W = st.width;
     const H = st.height;
@@ -336,29 +336,40 @@ try {
       }
       return false;
     };
-    for (let r = 0; r <= 22; r++) {
-      for (let dy = -r; dy <= r; dy++) {
-        for (let dx = -r; dx <= r; dx++) {
+    const spots = [];
+    for (let r = 0; r <= 12 && spots.length < 40; r++) {
+      for (let dy = -r; dy <= r && spots.length < 40; dy++) {
+        for (let dx = -r; dx <= r && spots.length < 40; dx++) {
           const x = sx + dx;
           const y = sy + dy;
           if (!freeAt(x, y) || !nearRoad(x, y)) continue;
-          return { x, y };
+          if (!spots.some((p) => p.x === x && p.y === y)) spots.push({ x, y });
         }
       }
     }
-    return null;
+    return spots;
   });
   const beforePark = await ev(() => window.__HK_CITY__.store.state.buildings.length);
   let parkPoint = null;
   let elementAtPark = null;
-  if (parkSpot) {
-    parkPoint = await screenOf(parkSpot.x, parkSpot.y);
-    elementAtPark = await ev(({ x, y }) => {
+  const canvasRect = await ev(() => {
+    const c = document.getElementById('game-canvas');
+    const r = c.getBoundingClientRect();
+    return { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+  });
+  for (const spot of parkSpots) {
+    const point = await screenOf(spot.x, spot.y);
+    if (point.x < canvasRect.left + 20 || point.x > canvasRect.right - 20 || point.y < canvasRect.top + 70 || point.y > canvasRect.bottom - 20) continue;
+    const el = await ev(({ x, y }) => {
       const e = document.elementFromPoint(x, y);
       return e ? e.id || e.className || e.tagName : null;
-    }, parkPoint);
-    await page.mouse.click(parkPoint.x, parkPoint.y);
+    }, point);
+    if (el !== 'game-canvas') continue;
+    parkPoint = point;
+    elementAtPark = el;
+    await page.mouse.click(point.x, point.y);
     await wait(1100);
+    break;
   }
   const afterPark = await ev(() => window.__HK_CITY__.store.state.buildings.length);
   const parkDebug = await ev(() => {
@@ -371,7 +382,7 @@ try {
       treasury: Math.round(st.finance.treasury),
     };
   });
-  check('真實滑鼠在 3D 地圖放置公共設施', afterPark > beforePark, { before: beforePark, after: afterPark, spot: parkSpot, point: parkPoint, elementAtPark, ...parkDebug });
+  check('真實滑鼠在 3D 地圖放置公共設施', afterPark > beforePark, { before: beforePark, after: afterPark, spot: parkSpots[0] ?? null, point: parkPoint, elementAtPark, ...parkDebug });
 
   // ── 4. 雙擊進入自動開發建築室內／返回城市 ──
   const target = await ev(() => {
