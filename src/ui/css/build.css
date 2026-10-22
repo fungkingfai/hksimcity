@@ -1,0 +1,817 @@
+/**
+ * 建造面板：分類霓虹頁籤、建築卡（Emoji 圖示 + 霓虹色暈）、
+ * 馬路／行人路／拆卸工程工具、hover 詳細說明卡。
+ */
+
+.build-panel {
+  top: calc(var(--topbar-h) + var(--warning-h, 0px) + 10px);
+  left: var(--hud-pad);
+  width: 336px;
+  max-height: calc(100% - var(--topbar-h) - var(--warning-h, 0px) - 24px);
+}
+
+.hud.is-build-collapsed .build-panel {
+  transform: translateX(calc(-100% - 24px));
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ── 分類頁籤 ── */
+
+.category-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  padding: 10px 12px 8px;
+  flex: 0 0 auto;
+}
+
+.category-tabs button {
+  position: relative;
+  height: 27px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  color: var(--ink-dim);
+  border-radius: 5px;
+  border: 1px solid var(--line-soft);
+  background: rgba(234, 244, 255, 0.035);
+  transition: color 0.16s, background 0.16s, border-color 0.16s, box-shadow 0.16s;
+}
+
+.category-tabs button::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 2px;
+  width: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--cat, var(--cyan));
+  box-shadow: 0 0 8px var(--cat, var(--cyan));
+  transform: translateX(-50%);
+  transition: width 0.2s ease;
+}
+
+.category-tabs button:hover {
+  color: var(--ink);
+  border-color: color-mix(in srgb, var(--cat, var(--cyan)) 40%, transparent);
+}
+
+.category-tabs button.active {
+  color: #fff;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--cat, var(--cyan)) 26%, transparent),
+    color-mix(in srgb, var(--cat, var(--cyan)) 8%, transparent)
+  );
+  border-color: color-mix(in srgb, var(--cat, var(--cyan)) 55%, transparent);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--cat, var(--cyan)) 24%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  text-shadow: 0 0 8px color-mix(in srgb, var(--cat, var(--cyan)) 70%, transparent);
+}
+
+.category-tabs button.active::after {
+  width: 16px;
+}
+
+/* ── 建築卡列表 ── */
+
+.build-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px 10px 8px;
+}
+
+.build-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.build-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 9px 7px 7px;
+  text-align: left;
+  border-radius: 6px;
+  color: var(--ink);
+  border: 1px solid rgba(36, 224, 255, 0.1);
+  background: linear-gradient(160deg, rgba(24, 42, 74, 0.55), rgba(8, 16, 30, 0.65));
+  box-shadow: inset 0 1px 0 rgba(234, 244, 255, 0.04);
+  transition: transform 0.14s ease, border-color 0.16s, box-shadow 0.16s, background 0.16s;
+}
+
+.build-card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: 2px;
+  background: transparent;
+  transition: background 0.16s, box-shadow 0.16s;
+}
+
+.build-card:hover {
+  transform: translateX(2px);
+  border-color: rgba(255, 61, 127, 0.42);
+  background: linear-gradient(160deg, rgba(35, 55, 92, 0.68), rgba(10, 18, 34, 0.78));
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28), 0 0 16px rgba(255, 61, 127, 0.14);
+}
+
+.build-card:hover::before {
+  background: linear-gradient(180deg, var(--pink), var(--purple));
+  box-shadow: 0 0 10px rgba(255, 61, 127, 0.8);
+}
+
+.build-card.active {
+  border-color: rgba(36, 224, 255, 0.6);
+  background: linear-gradient(160deg, rgba(36, 224, 255, 0.16), rgba(8, 18, 34, 0.85));
+  box-shadow: 0 0 0 1px rgba(36, 224, 255, 0.3), 0 0 22px rgba(36, 224, 255, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.build-card.active::before {
+  background: linear-gradient(180deg, var(--cyan), #8ff2ff);
+  box-shadow: 0 0 10px rgba(36, 224, 255, 0.9);
+}
+
+.build-card.locked {
+  opacity: 0.5;
+  filter: saturate(0.4);
+  cursor: not-allowed;
+}
+
+.build-card.locked:hover {
+  transform: none;
+  border-color: rgba(36, 224, 255, 0.1);
+  box-shadow: none;
+  background: linear-gradient(160deg, rgba(24, 42, 74, 0.55), rgba(8, 16, 30, 0.65));
+}
+
+.build-card.locked:hover::before {
+  background: transparent;
+  box-shadow: none;
+}
+
+.b-icon {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 35px;
+  height: 35px;
+  flex: 0 0 auto;
+  font-size: 17px;
+  line-height: 1;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--c, #24e0ff) 45%, transparent);
+  background:
+    radial-gradient(100% 100% at 30% 15%, color-mix(in srgb, var(--c, #24e0ff) 38%, transparent), transparent 70%),
+    linear-gradient(160deg, rgba(20, 36, 62, 0.9), rgba(7, 14, 28, 0.9));
+  box-shadow: inset 0 0 12px color-mix(in srgb, var(--c, #24e0ff) 18%, transparent),
+    0 0 10px color-mix(in srgb, var(--c, #24e0ff) 16%, transparent);
+  text-shadow: 0 0 10px color-mix(in srgb, var(--c, #24e0ff) 65%, transparent);
+}
+
+.b-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.b-name {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--ink);
+}
+
+.b-main small {
+  font-size: 10px;
+  color: var(--ink-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.b-side {
+  flex: 0 0 auto;
+  text-align: right;
+}
+
+.b-cost {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--gold-hi);
+  text-shadow: 0 0 8px rgba(255, 209, 102, 0.3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.b-lock {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.b-lock .ico {
+  width: 10px;
+  height: 10px;
+}
+
+/* ── 工程工具 ── */
+
+.build-tools {
+  flex: 0 0 auto;
+  padding: 9px 12px 11px;
+  border-top: 1px solid var(--line-soft);
+  background: linear-gradient(180deg, rgba(4, 9, 18, 0.18), rgba(4, 9, 18, 0.42));
+}
+
+.tools-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  color: var(--ink-faint);
+}
+
+.tools-pop {
+  letter-spacing: 0.5px;
+  color: var(--cyan);
+  font-variant-numeric: tabular-nums;
+}
+
+.tool-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.tool-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  padding: 7px 8px 8px;
+  border-radius: 6px;
+  text-align: left;
+  border: 1px solid var(--line-soft);
+  background: linear-gradient(160deg, rgba(20, 36, 62, 0.62), rgba(7, 14, 28, 0.72));
+  transition: border-color 0.16s, box-shadow 0.16s, background 0.16s, transform 0.14s;
+}
+
+.tool-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(36, 224, 255, 0.4);
+  box-shadow: 0 0 16px rgba(36, 224, 255, 0.14);
+}
+
+.tool-card.active {
+  border-color: rgba(36, 224, 255, 0.65);
+  background: linear-gradient(160deg, rgba(36, 224, 255, 0.18), rgba(7, 18, 34, 0.85));
+  box-shadow: 0 0 0 1px rgba(36, 224, 255, 0.25), 0 0 20px rgba(36, 224, 255, 0.2);
+}
+
+.tool-card.tool-danger:hover {
+  border-color: rgba(255, 90, 90, 0.5);
+  box-shadow: 0 0 16px rgba(255, 90, 90, 0.18);
+}
+
+.tool-card.tool-danger.active {
+  border-color: rgba(255, 90, 90, 0.65);
+  background: linear-gradient(160deg, rgba(255, 90, 90, 0.18), rgba(30, 8, 14, 0.85));
+  box-shadow: 0 0 0 1px rgba(255, 90, 90, 0.25), 0 0 20px rgba(255, 90, 90, 0.2);
+}
+
+.tool-card.tool-land .tool-ico {
+  color: var(--gold);
+  background: rgba(255, 209, 102, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(255, 209, 102, 0.26);
+}
+
+.tool-card.tool-land:hover {
+  border-color: rgba(255, 209, 102, 0.45);
+  box-shadow: 0 0 16px rgba(255, 209, 102, 0.16);
+}
+
+.tool-card:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.tool-cd {
+  position: absolute;
+  right: 6px;
+  bottom: 5px;
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: var(--gold);
+  font-variant-numeric: tabular-nums;
+}
+
+.b-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+}
+
+.b-short {
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  color: var(--danger);
+  white-space: nowrap;
+}
+
+.tool-ico {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  color: var(--cyan);
+  background: rgba(36, 224, 255, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(36, 224, 255, 0.2);
+}
+
+.tool-card.tool-danger .tool-ico {
+  color: var(--danger);
+  background: rgba(255, 90, 90, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(255, 90, 90, 0.24);
+}
+
+.tool-ico .ico {
+  width: 14px;
+  height: 14px;
+}
+
+.tool-meta {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.tool-meta b {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--ink);
+}
+
+.tool-meta small {
+  font-size: 9.5px;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+.tool-card kbd {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  min-width: 16px;
+  height: 15px;
+  padding: 0 3px;
+  font-size: 8.5px;
+  border-radius: 3px;
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+.cancel-tool {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  height: 30px;
+  margin-top: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  color: var(--pink-hi);
+  border-radius: 5px;
+  border: 1px dashed rgba(255, 61, 127, 0.4);
+  background: rgba(255, 61, 127, 0.07);
+}
+
+.cancel-tool:hover {
+  background: rgba(255, 61, 127, 0.15);
+}
+
+.cancel-tool .ico {
+  width: 12px;
+  height: 12px;
+}
+
+.cancel-tool kbd {
+  height: 16px;
+  font-size: 8.5px;
+}
+
+.tools-hint {
+  margin: 7px 0 0;
+  font-size: 9.5px;
+  letter-spacing: 0.4px;
+  text-align: center;
+  color: var(--ink-faint);
+  min-height: 13px;
+}
+
+/* ── hover 說明卡 ── */
+
+.build-tooltip {
+  position: fixed;
+  z-index: 60;
+  width: 306px;
+  max-height: min(430px, calc(100vh - 120px));
+  overflow: hidden auto;
+  padding: 12px 13px;
+  pointer-events: none;
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(24, 44, 78, 0.4), transparent 30%),
+    linear-gradient(160deg, rgba(14, 28, 54, 0.97), rgba(6, 12, 24, 0.97));
+  border: 1px solid var(--line-strong);
+  box-shadow: var(--shadow-deep), 0 0 26px rgba(36, 224, 255, 0.14);
+  backdrop-filter: blur(16px);
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.14s ease, transform 0.14s ease;
+}
+
+.build-tooltip.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.tip-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.tip-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  font-size: 17px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--c, #24e0ff) 50%, transparent);
+  background:
+    radial-gradient(100% 100% at 30% 15%, color-mix(in srgb, var(--c, #24e0ff) 40%, transparent), transparent 70%),
+    linear-gradient(160deg, rgba(20, 36, 62, 0.9), rgba(7, 14, 28, 0.9));
+  box-shadow: 0 0 14px color-mix(in srgb, var(--c, #24e0ff) 22%, transparent);
+}
+
+.tip-icon.tool {
+  color: var(--cyan);
+}
+
+.tip-icon.tool .ico {
+  width: 18px;
+  height: 18px;
+}
+
+.tip-icon.tool.danger {
+  color: var(--danger);
+  border-color: rgba(255, 90, 90, 0.5);
+  background: linear-gradient(160deg, rgba(60, 16, 24, 0.9), rgba(20, 6, 10, 0.9));
+  box-shadow: 0 0 14px rgba(255, 90, 90, 0.18);
+}
+
+.tip-title {
+  min-width: 0;
+}
+
+.tip-title b {
+  display: block;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  color: var(--ink);
+}
+
+.tip-title em {
+  display: block;
+  margin-top: 1px;
+  font-style: normal;
+  font-size: 10px;
+  letter-spacing: 0.6px;
+  color: var(--ink-faint);
+}
+
+.tip-desc {
+  margin: 8px 0;
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--ink-dim);
+}
+
+.tip-rows {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1px;
+  margin: 0;
+}
+
+.tip-rows > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+  border-bottom: 1px dashed rgba(234, 244, 255, 0.07);
+}
+
+.tip-rows dt {
+  flex: 0 0 auto;
+  font-size: 10px;
+  letter-spacing: 0.8px;
+  color: var(--ink-faint);
+}
+
+.tip-rows dd {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-dim);
+  text-align: right;
+}
+
+.tip-lock {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 8px 0 0;
+  padding: 5px 8px;
+  font-size: 10px;
+  color: var(--gold);
+  border-radius: 4px;
+  background: rgba(255, 209, 102, 0.08);
+  border: 1px solid rgba(255, 209, 102, 0.24);
+}
+
+.tip-lock .ico {
+  width: 11px;
+  height: 11px;
+}
+
+/* 賣地冷卻中：保留 hover 說明，但不執行拍賣 */
+.tool-card.tool-land.is-cooldown {
+  opacity: 0.6;
+  filter: saturate(0.6);
+}
+
+.tool-card.tool-land.is-cooldown .tool-cd {
+  color: var(--gold-hi);
+}
+
+/* ─────────────── 分區（Zoning）區塊 ─────────────── */
+
+.zone-block {
+  flex: 0 0 auto;
+  padding: 9px 12px 10px;
+  border-bottom: 1px solid var(--line-soft);
+  background:
+    radial-gradient(120% 100% at 0% 0%, rgba(255, 61, 127, 0.08), transparent 55%),
+    linear-gradient(180deg, rgba(4, 9, 18, 0.18), rgba(4, 9, 18, 0.4));
+}
+
+.zone-block .tools-label {
+  margin-bottom: 7px;
+}
+
+.zone-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.zone-brush {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 9px 7px;
+  text-align: left;
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  background:
+    radial-gradient(130% 130% at 0% 0%, color-mix(in srgb, var(--zone) 16%, transparent), transparent 62%),
+    linear-gradient(160deg, rgba(22, 40, 70, 0.55), rgba(7, 14, 28, 0.72));
+  border: 1px solid color-mix(in srgb, var(--zone) 28%, transparent);
+  transition: transform 0.16s, border-color 0.16s, box-shadow 0.16s, background 0.16s;
+}
+
+.zone-brush::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--zone);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--zone) 70%, transparent);
+  opacity: 0.85;
+}
+
+.zone-brush:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--zone) 65%, transparent);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.3), 0 0 18px color-mix(in srgb, var(--zone) 26%, transparent);
+}
+
+.zone-brush.active {
+  background:
+    radial-gradient(130% 130% at 0% 0%, color-mix(in srgb, var(--zone) 34%, transparent), transparent 66%),
+    linear-gradient(160deg, rgba(26, 44, 76, 0.72), rgba(8, 16, 30, 0.85));
+  border-color: var(--zone);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--zone) 55%, transparent),
+    0 0 22px color-mix(in srgb, var(--zone) 30%, transparent);
+}
+
+.zone-brush.active::before {
+  opacity: 1;
+  box-shadow: 0 0 14px var(--zone);
+}
+
+.zb-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.zb-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  color: var(--zone);
+  background: color-mix(in srgb, var(--zone) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--zone) 36%, transparent);
+  box-shadow: inset 0 0 10px color-mix(in srgb, var(--zone) 16%, transparent);
+}
+
+.zb-icon .ico {
+  width: 15px;
+  height: 15px;
+}
+
+.zone-brush kbd {
+  min-width: 17px;
+  height: 16px;
+  padding: 0 4px;
+  font-size: 8.5px;
+  border-radius: 4px;
+  opacity: 0.75;
+}
+
+.zb-name {
+  font-size: 12.5px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  color: var(--ink);
+  line-height: 1.2;
+}
+
+.zb-cost {
+  font-size: 9.5px;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.zb-demand {
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 0 6px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 15px;
+  letter-spacing: 0.3px;
+  border-radius: 999px;
+  color: var(--ink-faint);
+  background: rgba(234, 244, 255, 0.05);
+  border: 1px solid var(--line-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.zb-demand.high {
+  color: var(--zone);
+  background: color-mix(in srgb, var(--zone) 13%, transparent);
+  border-color: color-mix(in srgb, var(--zone) 45%, transparent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--zone) 22%, transparent);
+}
+
+.zb-demand.low {
+  color: #ffb3b3;
+  background: rgba(255, 90, 90, 0.09);
+  border-color: rgba(255, 90, 90, 0.35);
+}
+
+.zone-tools {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 6px;
+}
+
+.zone-tools .tool-card {
+  padding: 6px 7px 7px;
+}
+
+.zone-tools .tool-meta small {
+  font-size: 8.5px;
+}
+
+/* 可手動建造建築的分頁 */
+.build-tabs-wrap {
+  flex: 0 0 auto;
+  padding: 8px 12px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.build-tabs-wrap .tools-label {
+  margin-bottom: 5px;
+}
+
+.build-tabs-wrap .category-tabs {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  padding: 0 0 8px;
+}
+
+.build-tabs-wrap .category-tabs button {
+  height: 25px;
+  font-size: 11px;
+  letter-spacing: 1px;
+}
+
+/* 說明卡：分區提示 */
+.tip-icon.zone {
+  color: var(--c, var(--cyan));
+}
+
+.tip-icon.zone .ico {
+  width: 19px;
+  height: 19px;
+}
+
+.tip-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 6px 8px;
+  font-size: 10px;
+  line-height: 1.6;
+  color: var(--ink-faint);
+  border-radius: var(--radius-sm);
+  background: rgba(36, 224, 255, 0.05);
+  border: 1px solid rgba(36, 224, 255, 0.16);
+}
+
+.tip-note .ico {
+  width: 12px;
+  height: 12px;
+  margin-top: 2px;
+  flex: 0 0 auto;
+  color: var(--cyan);
+}
+
+/* 手機：分區刷子維持 2×2，工具列 3 欄 */
+.hud.is-mobile-ui .zone-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.hud.is-mobile-ui .zone-brush {
+  min-height: 74px;
+}
+
+.hud.is-mobile-ui .zone-tools {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}

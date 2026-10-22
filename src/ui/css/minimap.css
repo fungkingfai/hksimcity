@@ -1,0 +1,360 @@
+/**
+ * 大地圖 Minimap（304×304）：桌面右下浮動、可摺疊；手機縮成 132px 小地圖。
+ *
+ * 位置：桌面放在城事面板左邊的畫布右下角；< 1100px 時貼右下角；
+ * 手機固定右下、底部導覽上方，預設收起。bottom sheet／modal z-index 較高會蓋住。
+ */
+
+.minimap {
+  position: absolute;
+  right: calc(var(--hud-pad) + 362px);
+  bottom: 18px;
+  z-index: 18;
+  display: flex;
+  flex-direction: column;
+  width: 190px;
+  padding: 8px;
+  pointer-events: auto;
+  border-radius: var(--radius-sm);
+  background:
+    linear-gradient(180deg, rgba(18, 34, 62, 0.9), rgba(6, 12, 24, 0.94));
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55), 0 0 24px rgba(36, 224, 255, 0.1);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  transition: width 0.2s ease, padding 0.2s ease, border-radius 0.2s ease;
+}
+
+.minimap::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  background: linear-gradient(90deg, transparent, var(--pink) 24%, var(--cyan) 70%, transparent);
+  opacity: 0.9;
+}
+
+.hud.is-interior .minimap,
+.hud.is-start-screen .minimap {
+  display: none;
+}
+
+/* ── 標題列 ── */
+
+.mm-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;
+}
+
+.mm-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: var(--cyan);
+}
+
+.mm-title .ico {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  filter: drop-shadow(0 0 5px rgba(36, 224, 255, 0.6));
+}
+
+.mm-title b {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+.mm-scale {
+  margin-left: auto;
+  font-size: 8.5px;
+  letter-spacing: 0.3px;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.mm-collapse {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  margin-left: 2px;
+  color: var(--ink-faint);
+  border-radius: 5px;
+  border: 1px solid var(--line-soft);
+  background: rgba(255, 255, 255, 0.04);
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+
+.mm-collapse:hover {
+  color: var(--cyan);
+  border-color: var(--line-strong);
+  background: rgba(36, 224, 255, 0.1);
+}
+
+.mm-collapse .ico {
+  width: 11px;
+  height: 11px;
+  transition: transform 0.2s ease;
+}
+
+.minimap:not(.collapsed) .mm-collapse .ico {
+  transform: rotate(90deg);
+}
+
+/* ── 地圖本體 ── */
+
+.mm-body {
+  position: relative;
+  margin-top: 6px;
+}
+
+.mm-canvas {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  cursor: crosshair;
+  border-radius: 4px;
+  border: 1px solid rgba(36, 224, 255, 0.28);
+  background: #040b14;
+  box-shadow: inset 0 0 14px rgba(0, 0, 0, 0.6), 0 0 12px rgba(36, 224, 255, 0.1);
+  touch-action: none;
+}
+
+.mm-hint {
+  display: block;
+  margin-top: 4px;
+  font-size: 8.5px;
+  line-height: 1.4;
+  letter-spacing: 0.2px;
+  text-align: center;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 工具列 ── */
+
+.mm-tools {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.mm-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  flex: 1 1 0;
+  min-width: 0;
+  height: 25px;
+  padding: 0 4px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: var(--ink-dim);
+  border-radius: 5px;
+  border: 1px solid var(--line-soft);
+  background: rgba(234, 244, 255, 0.04);
+  transition: color 0.15s, background 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+
+.mm-btn .ico {
+  width: 11px;
+  height: 11px;
+  flex: 0 0 auto;
+}
+
+.mm-btn:hover {
+  color: var(--cyan-hi);
+  border-color: var(--line-strong);
+  background: rgba(36, 224, 255, 0.1);
+}
+
+.mm-btn.active {
+  color: var(--cyan-hi);
+  border-color: rgba(36, 224, 255, 0.45);
+  background: rgba(36, 224, 255, 0.12);
+  box-shadow: 0 0 10px rgba(36, 224, 255, 0.16);
+}
+
+.mm-btn kbd {
+  display: none;
+}
+
+/* ── 摺疊狀態（桌面） ── */
+
+.minimap.collapsed {
+  width: 92px;
+  padding: 5px 7px;
+}
+
+.minimap.collapsed .mm-body,
+.minimap.collapsed .mm-tools,
+.minimap.collapsed .mm-scale {
+  display: none;
+}
+
+.minimap.collapsed .mm-title b {
+  display: none;
+}
+
+.minimap.collapsed .mm-title {
+  gap: 0;
+}
+
+/* ── 響應式：跟城事面板寬度（348／330／316）調整右邊距 ── */
+
+@media (max-width: 1450px) {
+  .minimap {
+    right: calc(var(--hud-pad) + 344px);
+  }
+}
+
+@media (max-width: 1250px) {
+  .minimap {
+    right: calc(var(--hud-pad) + 330px);
+    width: 178px;
+  }
+}
+
+@media (max-width: 1100px) {
+  .minimap {
+    right: var(--hud-pad);
+    bottom: 80px;
+  }
+}
+
+@media (max-width: 980px) {
+  .minimap {
+    right: 10px;
+    bottom: 74px;
+  }
+}
+
+/* ── 手機：132px 小地圖、預設收起、底部導覽上方 ── */
+
+.hud.is-mobile-ui .minimap {
+  right: 8px;
+  bottom: calc(var(--mobile-nav-h) + env(safe-area-inset-bottom, 0px) + 10px);
+  z-index: 21;
+  width: 152px;
+  padding: 6px;
+}
+
+.hud.is-mobile-ui .minimap .mm-title b {
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+
+.hud.is-mobile-ui .minimap .mm-scale {
+  font-size: 8px;
+}
+
+.hud.is-mobile-ui .minimap .mm-body {
+  margin-top: 5px;
+}
+
+.hud.is-mobile-ui .minimap .mm-hint {
+  font-size: 8px;
+  margin-top: 3px;
+}
+
+.hud.is-mobile-ui .minimap .mm-tools {
+  margin-top: 5px;
+  gap: 3px;
+}
+
+.hud.is-mobile-ui .minimap .mm-btn {
+  height: 24px;
+  font-size: 8.5px;
+}
+
+.hud.is-mobile-ui .minimap .mm-btn .ico {
+  width: 10px;
+  height: 10px;
+}
+
+/* 手機收起：只有 46px 圓形按鈕 */
+.hud.is-mobile-ui .minimap.collapsed {
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.55), 0 0 16px rgba(36, 224, 255, 0.18);
+}
+
+.hud.is-mobile-ui .minimap.collapsed::before {
+  border-radius: 50%;
+  height: 1px;
+}
+
+.hud.is-mobile-ui .minimap.collapsed .mm-head {
+  justify-content: center;
+  min-height: 0;
+}
+
+.hud.is-mobile-ui .minimap.collapsed .mm-title .ico {
+  width: 20px;
+  height: 20px;
+}
+
+.hud.is-mobile-ui .minimap.collapsed .mm-collapse {
+  display: none;
+}
+
+/* 橫向手機：小地圖縮細少少 */
+@media (orientation: landscape) and (max-height: 540px) {
+  .hud.is-mobile-ui .minimap {
+    bottom: calc(var(--mobile-nav-h) + env(safe-area-inset-bottom, 0px) + 6px);
+    width: 140px;
+  }
+  .hud.is-mobile-ui .minimap.collapsed {
+    width: 42px;
+    height: 42px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .minimap,
+  .mm-collapse .ico {
+    transition: none;
+  }
+}
+
+/* 手機：工具列文字不換行、提示單行 */
+.hud.is-mobile-ui .minimap .mm-btn {
+  padding: 0 2px;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.hud.is-mobile-ui .minimap .mm-btn span {
+  overflow: hidden;
+  text-overflow: clip;
+}
+
+.hud.is-mobile-ui .minimap .mm-hint {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 1450px) {
+  .minimap .mm-hint {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
