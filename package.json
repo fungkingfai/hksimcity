@@ -15,7 +15,8 @@
     "verify:ui": "node scripts/ui-click-test.mjs",
     "verify:mobile": "node scripts/mobile-test.mjs",
     "capture": "node scripts/capture-showcase.mjs",
-    "deploy": "npm run build && wrangler deploy"
+    "deploy": "npm run build && wrangler deploy",
+    "postinstall": "node scripts/ci-build.mjs"
   },
   "keywords": [
     "three.js",
