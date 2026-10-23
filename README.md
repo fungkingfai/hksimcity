@@ -11,10 +11,9 @@
 > 大地圖導航：右下 **minimap** 點擊跳轉、`O` 全圖 overview、`P` 返回市中心。
 
 🌐 **進入遊戲**
-- **線上（臨時預覽，立即可玩）**：<https://hksimcity.foamy-cold-ca3.workers.dev/>
-  - `wrangler deploy --temporary` 臨時預覽帳戶（60 分鐘內可 claim）；長期託管見下方 GitHub／Cloudflare 設定。
-- **GitHub 原始碼**：<https://github.com/fungkingfai/hksimcity>
-- **Cloudflare 正式網址**：<https://hksimcity.fungkingfai.workers.dev/>（**待連接**：Cloudflare 帳戶未見 `hksimcity` Worker，Dashboard → Workers & Pages → 建立／連接 GitHub `fungkingfai/hksimcity`，Build command `npm run build`、Deploy command `npx wrangler deploy`）
+- **線上（Cloudflare Workers，已上線）**：<https://hksimcity.fungkingfai.workers.dev/>
+- **GitHub 原始碼**：<https://github.com/fungkingfai/hksimcity>（push 後 Cloudflare Workers Builds 自動部署）
+  - CI 注意：Cloudflare Builds 只執行 `npx wrangler deploy`、冇獨立 build step，因此 repo 用 `postinstall`（`scripts/ci-build.mjs`）自動建置 `dist/`，同時 commit 已建置的 `dist/` 作 fallback。
 - 本機：`npm run dev` → <http://127.0.0.1:5273>（區網：`http://<你的IP>:5273`）
 - 生產建置預覽：`npm run build && npm run preview` → <http://127.0.0.1:4273>
 
@@ -101,7 +100,7 @@ npm run preview    # 預覽生產建置：http://127.0.0.1:4273
 
 ```bash
 npm run dev        # 開發伺服器（5273）
-npm run build      # tsc --noEmit + vite build
+npm run build      # tsc --noEmit + vite build（CI 由 postinstall 自動執行）
 npm run preview    # 預覽生產建置（4273）
 npm test           # vitest 單元／整合測試
 npm run shot       # 無頭瀏覽器截圖
