@@ -543,13 +543,15 @@ export function weatherLightFactor(weather: Weather): number {
  * 冬季基礎 0.35～0.6，寒潮（snow）再加；太平山／獅子山較低，大帽山最高。
  */
 export function mountainSnowAmount(season: Season, weather: Weather, tempC: number, elevation: number): number {
-  if (elevation < 0.55) return 0;
-  const high = clamp01((elevation - 0.55) / 0.35);
-  const cold = clamp01((14 - tempC) / 12);
+  // 真實 DTM 高程映射為 0.3–0.92（大帽山 957m ≈ 0.92），舊門檻 0.55 會令
+  // 大量山腰變白色階梯方塊。雪線提高到 0.8（≈ 550m 以上），且只在真正寒潮／
+  // 下雪天才有明顯積雪。香港冬季一般 15–20°C，晴天不應有雪。
+  if (elevation < 0.8) return 0;
+  const high = clamp01((elevation - 0.8) / 0.12);
+  const cold = clamp01((10 - tempC) / 10);
   let base = 0;
-  if (season === 'winter') base = 0.25 + cold * 0.35;
-  if (weather === 'snow') base = Math.max(base, 0.55 + cold * 0.4);
-  if (season === 'winter' && weather === 'clear' && tempC < 10) base = Math.max(base, 0.5);
+  if (weather === 'snow') base = 0.6 + cold * 0.35;
+  else if (season === 'winter' && tempC <= 6) base = 0.2 + cold * 0.3;
   return clamp01(base * high);
 }
 

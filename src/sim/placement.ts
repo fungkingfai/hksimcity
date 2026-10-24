@@ -89,6 +89,83 @@ function bumpZoneRevision(): void {
   zoneRevision++;
 }
 
+// ─────────────────────────── 大地圖 tile 索引（typed arrays） ───────────────────────────
+
+/**
+ * 480×480 = 230,400 格，逐格讀 `state.tiles[i].zone/road/buildingId`（object）好貴
+ * （一次全掃 5–20ms）。呢度用 Uint8Array 索引，讓 zoning/stats 可以快速掃描／檢查相鄰格，
+ * 提升大 map 效能；索引喺第一次需要時由現有 tiles 建立，之後由擺放／拆除函式增量更新。
+ * 新局／讀檔會建立新 GameState → WeakMap miss → 自動重建，不會 stale。
+ */
+export interface TileIndex {
+  /** 每格分區 code：0 無、1 住宅、2 商業、3 工業、4 農業 */
+  zone: Uint8Array;
+  /** 每格是否有馬路（1/0） */
+  road: Uint8Array;
+  /** 每格是否有建築（1/0） */
+  building: Uint8Array;
+}
+
+const ZONE_CODE: Record<ZoneType, number> = { residential: 1, commercial: 2, industrial: 3, farmland: 4 };
+/** zone → tile index code（供 zoning 使用） */
+export const ZONE_CODES: Record<ZoneType, number> = ZONE_CODE;
+/** code → ZoneType（index 0 = null） */
+export const ZONE_CODE_NAMES: readonly (ZoneType | null)[] = [
+  null,
+  'residential',
+  'commercial',
+  'industrial',
+  'farmland',
+];
+
+const tileIndexCache = new WeakMap<GameState, TileIndex>();
+
+/** 取得（必要時建立）tile 索引；建索引係一次 O(n) 掃描，之後 O(1) 更新。 */
+export function tileIndexOf(state: GameState): TileIndex {
+  const cached = tileIndexCache.get(state);
+  if (cached) return cached;
+  const n = state.tiles.length;
+  const index: TileIndex = {
+    zone: new Uint8Array(n),
+    road: new Uint8Array(n),
+    building: new Uint8Array(n),
+  };
+  const tiles = state.tiles;
+  for (let i = 0; i < n; i++) {
+    const tile = tiles[i];
+    const zone = tile.zone;
+    if (zone) index.zone[i] = ZONE_CODE[zone] ?? 0;
+    if (tile.road) index.road[i] = 1;
+    if (tile.buildingId >= 0) index.building[i] = 1;
+  }
+  tileIndexCache.set(state, index);
+  return index;
+}
+
+/** 若索引已建立就更新（未建立時唔需要，因為之後建立會讀最新 tiles）。 */
+function tileIndexIfAny(state: GameState): TileIndex | null {
+  return tileIndexCache.get(state) ?? null;
+}
+
+/** 設定／清除某格分區（索引已存在時同步） */
+function noteZoneTile(state: GameState, idx: number, zone: ZoneType | null): void {
+  const index = tileIndexIfAny(state);
+  if (index) index.zone[idx] = zone ? ZONE_CODE[zone] ?? 0 : 0;
+}
+
+/** 設定／清除某格馬路（索引已存在時同步） */
+function noteRoadTile(state: GameState, idx: number, isRoad: boolean): void {
+  const index = tileIndexIfAny(state);
+  if (index) index.road[idx] = isRoad ? 1 : 0;
+}
+
+/** 標記／清除建築 footprint（索引已存在時同步） */
+function noteBuildingTiles(state: GameState, tiles: number[], filled: boolean): void {
+  const index = tileIndexIfAny(state);
+  if (!index) return;
+  for (const idx of tiles) index.building[idx] = filled ? 1 : 0;
+}
+
 // ─────────────────────────── 地形規則 ───────────────────────────
 
 /** 地形可否鋪路／行人路／起樓（與 config TERRAIN_INFO.buildable 一致） */
@@ -419,6 +496,7 @@ export function placeBuilding(state: GameState, key: string, x: number, y: numbe
     expenseThisMonth: 0,
   };
   for (const idx of footprint) state.tiles[idx].buildingId = building.id;
+  noteBuildingTiles(state, footprint, true);
   state.buildings.push(building);
   building.connected = isBuildingStreetConnected(state, building);
   building.active = building.connected || !buildingNeedsRoad(key);
@@ -451,6 +529,7 @@ export function placeRoad(state: GameState, x: number, y: number): PlaceResult {
   tile.road = true;
   // 馬路兩側自動鋪設行人路邊（同一格 sidewalk 供行人尋路／渲染）
   tile.sidewalk = true;
+  noteRoadTile(state, y * state.width + x, true);
   state.finance.treasury -= ROAD_COST;
   state.finance.expenseThisMonth += ROAD_COST;
   state.finance.expenseBreakdown.infrastructure =
@@ -536,6 +615,7 @@ export function paintZone(state: GameState, x: number, y: number, zone: ZoneType
   if (state.finance.treasury < cost) return { ok: false, reason: '庫房不足，無法劃區', cost };
 
   tile.zone = zone;
+  noteZoneTile(state, y * state.width + x, zone);
   payZoneCost(state, cost);
   bumpZoneRevision();
   return { ok: true, cost };
@@ -554,6 +634,7 @@ export function eraseZone(state: GameState, x: number, y: number): ZoneOpResult 
   const cost = ZONES[zone]?.costPerTile ?? 0;
   const refund = Math.floor(cost * ZONE_REFUND_RATE);
   tile.zone = null;
+  noteZoneTile(state, y * state.width + x, null);
   recordRefund(state, refund);
   bumpZoneRevision();
   return { ok: true, cost, refund };
@@ -645,6 +726,7 @@ export function placeAutoBuilding(state: GameState, key: string, x: number, y: n
     zone: def.zone,
   };
   for (const idx of footprint) state.tiles[idx].buildingId = building.id;
+  noteBuildingTiles(state, footprint, true);
   state.buildings.push(building);
   building.connected = isBuildingStreetConnected(state, building);
   building.active = building.connected || !buildingNeedsRoad(key);
@@ -700,6 +782,7 @@ export function demolishAt(
   if (tile.road) {
     const refund = streetRefund(ROAD_COST);
     tile.road = false;
+    noteRoadTile(state, y * state.width + x, false);
     recordRefund(state, refund);
     invalidatePathCache();
     updateConnectedBuildings(state);
@@ -756,6 +839,18 @@ export function demolishBuildingById(state: GameState, id: number): number {
       const tile = state.tiles[ty * state.width + tx];
       if (tile.buildingId === building.id) tile.buildingId = -1;
     }
+  }
+  {
+    const footprint: number[] = [];
+    for (let yd = 0; yd < building.h; yd++) {
+      for (let xd = 0; xd < building.w; xd++) {
+        const tx = building.x + xd;
+        const ty = building.y + yd;
+        if (tx < 0 || ty < 0 || tx >= state.width || ty >= state.height) continue;
+        footprint.push(ty * state.width + tx);
+      }
+    }
+    noteBuildingTiles(state, footprint, false);
   }
   state.buildings.splice(index, 1);
   recordRefund(state, refund);

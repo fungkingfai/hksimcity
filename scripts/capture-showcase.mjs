@@ -370,7 +370,7 @@ try {
     st.clock.speed = 1;
     window.__HK_CITY__.actions.closeOverlays();
   });
-  await frame({ distance: 88, pitch: 0.95, yaw: -0.68 });
+  await frame({ distance: 115, pitch: 0.95, yaw: -0.68 });
   await page.waitForTimeout(2500);
   await snap('hero', 2500);
 
@@ -519,11 +519,37 @@ try {
     store.bumpUI();
     // 304×304 大地圖：用 fitMap 拉遠至全圖 overview
     view.target.set(0, 0, 0);
-    view.distance = 780;
+    view.distance = 1250;
     view.pitch = 1.3;
     view.yaw = -0.35;
   });
   await snap('map', 3200);
+
+  // 12) 真實東區：杏花邨／柴灣／小西灣 existing 高樓群（starter 模式）
+  await ev(() => {
+    const { actions, store, view } = window.__HK_CITY__;
+    actions.startGame('starter', 20261021);
+    const st = store.state;
+    st.ui.showTutorial = false;
+    st.ui.showStartScreen = false;
+    st.ui.showStats = false;
+    st.ui.paused = true;
+    st.clock.paused = true;
+    document.querySelectorAll('.toast').forEach((n) => n.remove());
+    const dayStart = Math.floor(st.clock.minutes / 1440) * 1440;
+    st.clock.minutes = dayStart + 15 * 60;
+    st.clock.weather = 'clear';
+    st.clock.weatherIntensity = 0;
+    window.__HK_CITY__.deriveClockFields(st.clock);
+    const T = 2;
+    const tile = { x: 316, y: 303 };
+    view.target.set((tile.x + 0.5) * T - (st.width * T) / 2, 0, (tile.y + 0.5) * T - (st.height * T) / 2);
+    view.distance = 190;
+    view.pitch = 1.02;
+    view.yaw = -0.82;
+    store.bumpUI();
+  });
+  await snap('east', 3200);
 
   result.ok = errors.length === 0;
   result.shots = fs.readdirSync(outDir).filter((f) => f.endsWith('.png'));

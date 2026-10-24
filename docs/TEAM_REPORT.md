@@ -211,3 +211,50 @@ interiors-dev 共用材質庫而不互相覆寫）。Lead 在開發中途同步�
 - [x] GitHub push：<https://github.com/fungkingfai/hksimcity>（main；token 只經 `~/.config/huaxia/github-pat` 讀取，未寫入會話／repo）
 - [x] GitHub push：<https://github.com/fungkingfai/hksimcity>（main；token 由 `~/.config/huaxia/github-pat` 讀取，未寫入會話／repo）
 - [x] **Cloudflare `hksimcity.fungkingfai.workers.dev` 已上線**：<https://hksimcity.fungkingfai.workers.dev/>（HTTP 200；304×304、starter 52 棟／146 人、minimap 正常、empty 模式 0 道路／0 建築／0 分區、無 console error）。部署除錯：Cloudflare Workers Builds 只執行 `npx wrangler deploy` 而無 build step，首次 build 因 `dist` 不存在失敗（`assets.directory ... /opt/buildhome/repo/dist`）；修正為 commit `scripts/ci-build.mjs`＋`postinstall` 自動 `npm run build`，並把建置好的 `dist/` 一併 commit 作 fallback，push 後自動部署成功。
+
+---
+
+# 第四輪改版：真實香港地理數據 480×480 大地圖（Round 4）
+
+> 玩家第五輪要求：參考 CSDI／香港地理空間數據「盡可能修正地形、建築物等設計，特別是杏花邨、柴灣等地方；可以再加大地圖大小」。
+> 日期：2026-10-24。
+
+## R4.1 資料來源與生成
+
+| 資料 | 用途 | 來源 |
+|---|---|---|
+| **DTM 5m**（LandsD 數碼地形模型） | 真實海岸線、山脈高程、平地／山地分佈 | `https://www.landsd.gov.hk/landsd_psi_data/SMO/data/Whole_HK_DTM_5m.zip`（data.gov.hk `hk-landsd-openmap-5m-grid-dtm`） |
+| **Building Outlines（公共）** | 342,233 個真實建築輪廓 → 每格 building density／平均高度 | CSDI Portal（metadataInfoPanel）／`https://static.csdi.gov.hk/csdi-webpage/download/51d63757e2675874af80eef94afb6a35/geojson` |
+
+- `tools/build-hk-data.py`（離線，約 40–65 秒）讀取上述數據，用 HK1980 Grid（EPSG:2326 TM 公式）換算，輸出 `src/world/hk-map-data.generated.ts`（約 0.97MB：terrain RLE、elevation/density/buildingHeight base64、69 個真實地名、6 個地標、15 個市區／機場／貨櫃區塊、3 條隧道、spawn）。
+- 地圖：**480×480 格、每格 140m**（67.2km 見方，範圍 HK1980 E 798,275–865,475、N 790,400–857,600），`MAP_SCALE=5`、`WORLD_SPAN=960`、`GAME_VERSION=5`。
+- 真實地形統計：水域 75.6%、可建 22.4%（urban 5.2%、hill 7.5%、grass 4.5%、forest 3.8%、fertile 0.7%、reclaimed 0.7%）；符合香港「山多平地少」。
+- Empty 模式：`starterRoads:false` → **0 道路／0 建築／0 分區／0 隧道**，render 亦隱藏所有假樓群、地標、機場、貨櫃碼頭、霓虹；只保留真實自然地形、樹木、海面船隻與地名。
+- Starter：spawn 中環 (259,299)，**連通優先道路網**（BFS 分量＋格網生長，修復 Round 3 真實地形下 9 個斷開路網造成失業 35%／農田缺工／服務覆蓋 0% 的 P0），均衡四區＋34 棟 auto＋10 公共設施（含 2 學校、醫院）＋7 農田＋倉庫食品 520；QA warm-up 約 146 人、幸福 70、失業 <10%、糧食充足、警/消/校/醫覆蓋 79–100%。
+
+## R4.2 渲染（world-dev）
+
+- **以真實 density／buildingHeight 驅動現有樓群**：starter 模式按每格密度與高度生成約 **4,089 座**樓（3 個 InstancedMesh：tower/block/office），**杏花邨／柴灣／小西灣高層住宅群**、中環 CBD 商廈、尖沙咀／觀塘／荃灣／沙田／將軍澳／東涌新市鎮樓群真實分佈；empty 完全不生成。
+- **白色階梯 bug 修正**：根因真實 DTM 高程（0.3–0.92）撞舊雪線 0.55，冬季把山腰染白；新雪線 elevation ≥0.8（≈550m）且只在 `weather==='snow'` 或冬季 ≤6°C 生效。
+- **無邊海面**：4 塊巨型外框 quads 共用原水 shader，消除 overview 方形／菱形硬邊與 z-fighting；水面 detail scale 按 MAP_SCALE 修正摩爾紋。
+- **69 個真實地名 LOD**：螢幕空間固定大小、TOP 16（中環／尖沙咀／維港／大帽山等）overview 顯示，major/minor 中近景才顯示；杏花邨／柴灣／小西灣／太古／筲箕灣清晰正向。
+- **地標／機場／碼頭**：凌霄閣、天壇大佛、青馬大橋、摩天輪、鐘樓、會展按真實位置，scale ×1.7；赤鱲角兩條東西向跑道＋客運大樓／飛機；葵涌貨櫃碼頭按真實 region。
+- **道路視覺**：電車走廊／紅白磚人行道改用真實的港島北岸／九龍舊區設計座標；3 條隧道入口牌對應新位置。
+- 效能：starter overview **1.327M tris / 402 calls**；empty overview **1.032M tris / 37 calls**；render raw terrain 1.164M tris（water 348k、trees ~450k、buildings density 3 InstancedMesh）。
+
+## R4.3 Sim／UI／QA 適配
+
+- systems-dev：`placement.ts` 新增 230,400 格 typed TileIndex（zone/road/building Uint8Array 增量維護）；pathfinding 快取按面積升至 82k 條／1.0M 點；zoning survey 改用 typed index（每日 13.8→0.19–1.05ms）；logistics 街口送貨 cache；stats zoneTiles typed index＋景觀 cache。480 starter normal frame avg 0.20ms/p99 2.99ms；1000 人 avg 0.44/p95 1.41/p99 5.79ms。
+- ui-dev：全 UI 304→480、CSDI 數據來源 badge／說明書；minimap 重構為 480 canvas＋真實 density 紋理＋500ms throttle（overlay 2.8ms、每 250ms draw <1ms）；手機 minimap 照舊可摺疊。
+- citizens-dev QA：starter 146 人／empty 60 日 398 人；東區（杏花邨／柴灣／小西灣）真實地形可劃區、自動建屋、市民入住 ✓；效能 800–1000 人達標；世界生成 0.2–1.0s；save/load 正常。
+
+## R4.4 驗收（Round 4）
+
+- [x] `npx tsc --noEmit` 0 error
+- [x] `npm test` 26/26（測試更新為 480 真實地圖；精簡存檔體積 <2MB）
+- [x] `npm run build` 成功
+- [x] Playwright 全流程 `scripts/verify-hk.mjs`：**28 / 28 checks**（480 真實地圖、兩種開局、empty 0 路 0 樓、四區自動建屋、道路整合行人路、需求平衡、公共設施、颱風／雪、32 種室內、compact 存檔跨頁面、渲染負載 ~1.19M tris / 568 calls）
+- [x] 真實 UI 點擊 `scripts/ui-click-test.mjs`：**21 / 21 checks**（empty 開局真實地形鋪路／劃區、開發商建屋、公共設施、室內、面板、存檔）
+- [x] 手機版 `scripts/mobile-test.mjs`：**17 / 17 checks**（iPhone 13、真實地圖、minimap、觸控劃區＋自動建屋、室內、手勢）
+- [x] 線上部署（GitHub push 後 Cloudflare Workers Builds 自動部署；HTTP 200）
+- [x] 截圖：real480 系列（overview／central／east 杏花邨柴灣／airport／container／night／empty）＋遊戲內 showcase 更新

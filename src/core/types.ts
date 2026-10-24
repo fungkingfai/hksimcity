@@ -126,6 +126,10 @@ export interface Tile {
   sidewalk?: boolean;
   /** 分區（null／undefined = 未分區） */
   zone?: ZoneType | null;
+  /** 真實建築覆蓋率 0..255（CSDI 建築物輪廓數據；只用於 render／統計提示，不影響模擬） */
+  density?: number;
+  /** 真實平均建築高度（米；render 用嚟決定遠景樓宇高度） */
+  buildingHeight?: number;
 }
 
 // ─────────────────────────── 建築 ───────────────────────────

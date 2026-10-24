@@ -207,8 +207,9 @@ describe('分區玩法整合', () => {
     expect(placeBuilding(state, 'supermarket', bx + 2, by + 2).ok).toBe(false);
     // 公共設施：公園（解鎖 0）
     expect(placeBuilding(state, 'park', bx + 2, by + 1).ok).toBe(true);
-    // 高人口解鎖後可放警署／發電廠
+    // 高人口解鎖後可放警署／發電廠（真實地形可能有成本倍率，補足庫房）
     state.stats.population = 300;
+    state.finance.treasury = 30_000_000;
     expect(placeBuilding(state, 'policeStation', bx + 5, by + 1).ok).toBe(true);
     expect(placeBuilding(state, 'powerPlant', bx + 9, by + 4).ok).toBe(true);
     // placeAutoBuilding 只接受分區建築

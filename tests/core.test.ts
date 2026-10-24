@@ -54,10 +54,10 @@ beforeEach(() => {
 // ─────────────────────────── 設定資料表 ───────────────────────────
 
 describe('香港設定資料表', () => {
-  it('地圖為 304×304（96×96 的約 10 倍面積）、起始庫房與道路造價合理', () => {
-    expect(GRID_WIDTH).toBe(304);
-    expect(GRID_HEIGHT).toBe(304);
-    expect(GRID_WIDTH * GRID_HEIGHT).toBeGreaterThanOrEqual(96 * 96 * 10);
+  it('地圖為 480×480（真實香港地理數據；96×96 的 25 倍面積）、起始庫房與道路造價合理', () => {
+    expect(GRID_WIDTH).toBe(480);
+    expect(GRID_HEIGHT).toBe(480);
+    expect(GRID_WIDTH * GRID_HEIGHT).toBeGreaterThanOrEqual(96 * 96 * 25);
     expect(START_TREASURY).toBeGreaterThan(1_000_000);
     expect(ROAD_COST).toBeGreaterThan(0);
     expect(SIDEWALK_COST).toBeGreaterThan(0);
@@ -213,15 +213,15 @@ describe('香港設定資料表', () => {
 // ─────────────────────────── 香港地圖 ───────────────────────────
 
 describe('香港地圖世界生成', () => {
-  it('生成 304×304、tile 陣列與 spawn', () => {
+  it('生成 480×480、tile 陣列與 spawn', () => {
     const world = generateWorld(20261021);
-    expect(world.width).toBe(304);
-    expect(world.height).toBe(304);
-    expect(world.tiles.length).toBe(304 * 304);
+    expect(world.width).toBe(480);
+    expect(world.height).toBe(480);
+    expect(world.tiles.length).toBe(480 * 480);
     expect(world.spawn.x).toBeGreaterThan(0);
     expect(world.spawn.y).toBeGreaterThan(0);
-    expect(world.spawn.x).toBeLessThan(304);
-    expect(world.spawn.y).toBeLessThan(304);
+    expect(world.spawn.x).toBeLessThan(480);
+    expect(world.spawn.y).toBeLessThan(480);
     for (const tile of world.tiles) {
       expect(tile.buildingId).toBe(-1);
       expect(tile.elevation).toBeGreaterThanOrEqual(0);
@@ -341,11 +341,12 @@ describe('存檔系統', () => {
     expect(normalizeState({ width: 10, height: 10, tiles: [], buildings: [] })).toBeNull();
   });
 
-  it('存檔 JSON 可序列化且體積合理', () => {
+  it('精簡存檔可序列化且體積合理（480 地圖唔會爆 localStorage）', async () => {
+    const { serializeCompact } = await import('../src/core/save');
     const state: GameState = createGameState(3);
-    const json = JSON.stringify(state);
+    const json = serializeCompact(state, 1);
     expect(json.length).toBeGreaterThan(1000);
-    expect(json.length).toBeLessThan(20_000_000);
+    expect(json.length).toBeLessThan(2_000_000);
     expect(JSON.parse(json).version).toBe(state.version);
   });
 });

@@ -22,11 +22,11 @@ import type {
 
 // ─────────────────────────── 世界常數 ───────────────────────────
 
-export const GAME_VERSION = 4;
+export const GAME_VERSION = 5;
 
-/** 香港地圖：304×304 格（= 96×96 的約 10 倍面積；維港、港島、九龍、新界、離島、填海區） */
-export const GRID_WIDTH = 304;
-export const GRID_HEIGHT = 304;
+/** 香港地圖：480×480 格（由 CSDI／地政總署真實地理數據生成；約舊版 96×96 的 25 倍面積） */
+export const GRID_WIDTH = 480;
+export const GRID_HEIGHT = 480;
 /** 相對 Round 2（96×96）的地圖線性放大倍率；渲染模組用嚟換算霧、天空、相機距離 */
 export const MAP_SCALE = GRID_WIDTH / 96;
 /** 地圖世界尺寸（格 × TILE_SIZE；TILE_SIZE=2） */
@@ -1007,7 +1007,7 @@ export const STARTER_TOWN = {
   /** 開局預建後跑多少日模擬，讓市民遷入及建築運作（main.ts warm-up） */
   warmupDays: 10,
   /** 預建人口目標（會經模擬自然遷入，不用硬塞） */
-  targetPopulation: 120,
+  targetPopulation: 145,
   /** 道路／分區布局半徑（格） */
   layoutRadius: 9,
 };

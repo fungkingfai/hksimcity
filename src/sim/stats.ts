@@ -33,7 +33,7 @@ import { BUILDINGS, TRANSIT_SPEED } from '../core/config';
 import type { Building, GameState, ResourceKey, ZoneType } from '../core/types';
 import { utilityStatus } from './production';
 import { amenityBonus, baseDevelopmentScore, zoneDemandOf } from './zoning';
-import { worldRevisionOf, zoneRevisionOf } from './placement';
+import { tileIndexOf, worldRevisionOf, ZONE_CODE_NAMES, zoneRevisionOf } from './placement';
 
 /** 每人每日食品需求（單位；與 citizens-dev 的 FOOD_PER_CITIZEN_PER_DAY 一致） */
 export const FOOD_PER_CITIZEN_PER_DAY = 0.5;
@@ -314,8 +314,12 @@ function zoneCounts(state: GameState): {
   let tilesEntry = zoneTilesCache.get(state);
   if (!tilesEntry || tilesEntry.signature !== tilesSig) {
     const tiles: Record<ZoneType, number> = { residential: 0, commercial: 0, industrial: 0, farmland: 0 };
-    for (let idx = 0; idx < state.tiles.length; idx++) {
-      const zone = state.tiles[idx].zone;
+    // 480 地圖 230k 格：用 Uint8Array 索引（object 逐格掃描太貴）
+    const zoneArr = tileIndexOf(state).zone;
+    for (let i = 0; i < zoneArr.length; i++) {
+      const code = zoneArr[i];
+      if (!code) continue;
+      const zone = ZONE_CODE_NAMES[code];
       if (zone) tiles[zone]++;
     }
     tilesEntry = { signature: tilesSig, tiles };
@@ -353,11 +357,17 @@ export function landValueOf(state: GameState): number {
   if (cached && cached.signature === signature) return cached.value;
 
   const base = baseDevelopmentScore(state);
+  // 公園／海濱中心點只預算一次，避免每棟建築都掃全部 buildings（O(n²)）
+  const parks: { x: number; y: number }[] = [];
+  for (const building of buildings) {
+    if (building.key !== 'park' && building.key !== 'promenade') continue;
+    parks.push({ x: building.x + building.w / 2, y: building.y + building.h / 2 });
+  }
   let total = 0;
   for (const building of buildings) {
     const cx = Math.floor(building.x + building.w / 2);
     const cy = Math.floor(building.y + building.h / 2);
-    total += Math.min(100, base + amenityBonus(state, cx, cy));
+    total += Math.min(100, base + amenityBonus(state, cx, cy, parks));
   }
   const value = Math.max(0, Math.min(100, Math.round(total / buildings.length)));
   landValueCache.set(state, { signature, value });

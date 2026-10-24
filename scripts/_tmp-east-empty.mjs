@@ -1,0 +1,12 @@
+import { chromium } from 'playwright';
+import fs from 'node:fs';
+const browser=await chromium.launch({args:['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader','--no-sandbox','--disable-dev-shm-usage']});
+const page=await browser.newPage({viewport:{width:1200,height:760},locale:'zh-TW'});
+await page.goto('http://127.0.0.1:5273/?lite=1',{waitUntil:'domcontentloaded',timeout:120000});
+await page.waitForFunction(()=>Boolean(window.__HK_CITY__),null,{timeout:180000});
+await page.evaluate(()=>{const {actions,store}=window.__HK_CITY__;actions.startGame('empty',20261021);const s=store.state;s.ui.showTutorial=false;s.ui.showStats=false;s.ui.showZones=false;store.bumpUI();const T=2;const v=window.__HK_CITY__.view;v.target.set((316+0.5)*T-(s.width*T)/2,0,(300+0.5)*T-(s.height*T)/2);v.distance=110;v.pitch=0.9;v.yaw=-0.72;});
+await page.waitForTimeout(2500);
+const cdp=await page.context().newCDPSession(page);
+const {data}=await cdp.send('Page.captureScreenshot',{format:'png'});
+fs.writeFileSync('/tmp/east-empty.png',Buffer.from(data,'base64'));
+console.log('ok');await browser.close();process.exit(0);

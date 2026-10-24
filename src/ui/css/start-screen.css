@@ -690,3 +690,22 @@
   box-shadow: 0 0 12px rgba(36, 224, 255, 0.12);
   white-space: nowrap;
 }
+
+/* 開局畫面：真實地理數據來源 */
+.ss-data-src {
+  display: block;
+  margin-top: 5px;
+  font-size: 8.5px;
+  letter-spacing: 0.5px;
+  color: var(--ink-faint);
+  text-align: center;
+}
+
+@media (max-width: 900px) {
+  .ss-data-src {
+    font-size: 8px;
+    letter-spacing: 0.2px;
+    padding: 0 4px;
+    line-height: 1.5;
+  }
+}

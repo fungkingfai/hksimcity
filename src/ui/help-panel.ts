@@ -48,7 +48,7 @@ const MAP_LABEL = `${MAP_W}×${MAP_H}`;
 const ZONING_TUTORIAL_STEPS: { title: string; text: string }[] = [
   {
     title: '歡迎來到維港之城',
-    text: `你是香港城市規劃師。這一代玩法改為分區城市建造：你負責鋪馬路、劃分區，開發商會按需求與環境自動起樓。目標是建成宜居、繁榮、可持續的國際都會。地圖 ${MAP_LABEL}（約 ${num(MAP_CELLS)} 格，約舊版 10 倍面積）：可用右下小地圖或按 O 睇全圖、P 返市中心。`,
+    text: `你是香港城市規劃師。這一代玩法改為分區城市建造：你負責鋪馬路、劃分區，開發商會按需求與環境自動起樓。目標是建成宜居、繁榮、可持續的國際都會。地圖 ${MAP_LABEL}（約 ${num(MAP_CELLS)} 格，約舊版 25 倍面積）：可用右下小地圖或按 O 睇全圖、P 返市中心。`,
   },
   {
     title: '第一步：鋪馬路',
@@ -209,7 +209,7 @@ export function createHelpPanel(container: HTMLElement, store: GameStore, action
     const isMobile = getUiMode() === 'mobile';
     const body = `
       <div class="help-intro">
-        <p><b>《維港之城》</b>是以 three.js 打造的香港分區城市建造模擬：鋪馬路、劃分區，開發商按 RCI+F 需求與環境自動起樓；你再以公共設施、交通與稅收政策塑造城市。<b>你不再直接興建住宅或商店</b>，而是規劃土地，讓城市自然生長。</p>
+        <p><b>《維港之城》</b>是以 three.js 打造的香港分區城市建造模擬：鋪馬路、劃分區，開發商按 RCI+F 需求與環境自動起樓；你再以公共設施、交通與稅收政策塑造城市。<b>你不再直接興建住宅或商店</b>，而是規劃土地，讓城市自然生長。地圖以 CSDI／地政總署真實地理數據生成，海岸線、維港、山脈與市區密度皆參考真實香港。</p>
         <p class="mini">目前城市：${esc(state.cityName || '維港之城')} · 地圖 ${state.width}×${state.height}（約 ${num(state.width * state.height)} 格）· 可手動建造建築 ${num(PLOPPABLE_BUILDINGS.length)} 種（${esc(ploppableCounts())}）</p>
       </div>
 
@@ -245,7 +245,8 @@ export function createHelpPanel(container: HTMLElement, store: GameStore, action
         <section class="help-block">
           <h3>${ico('map')}地圖與導航</h3>
           <ul>
-            <li>大地圖 <b>${state.width}×${state.height}</b>（約 ${num(state.width * state.height)} 格）——面積約為舊版地圖的 10 倍，zoom out 範圍已加大。</li>
+            <li>大地圖 <b>${state.width}×${state.height}</b>（約 ${num(state.width * state.height)} 格）——面積約為舊版地圖的 25 倍，zoom out 範圍已加大。</li>
+            <li>地形參考<b>香港地理空間數據共享平台（CSDI）</b>及<b>地政總署 DTM 5m／建築物輪廓開放數據</b>，重現真實海岸線、維港、山脈與市區建築密度。</li>
             <li><b>小地圖（Minimap）</b>：桌面右下／手機右下角；顯示水域、道路、四色分區、建築、城市中心與鏡頭視野框。</li>
             <li>在小地圖<b>點擊或拖曳</b>可即時跳到該位置；標題列可摺疊。</li>
             <li><b>全圖（O）</b>拉遠至全地圖 overview；<b>市中心（P）</b>返回開局市中心。</li>

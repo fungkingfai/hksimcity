@@ -207,12 +207,28 @@ const INF = 0x3fffffff;
  * 除條目數外亦限制總 path 點數，避免大地圖／長路徑食爆記憶體。
  */
 const BASE_CACHE_LIMIT = 16384;
-const MAX_PATH_POINTS = 400_000;
+const BASE_MAX_PATH_POINTS = 400_000;
 
-/** 依地圖面積調整快取條目上限（92k 格 → 約 52k） */
+/** 地圖面積相對 96×96 的線性放大倍率（480 地圖 ≈ 5×） */
+function areaScaleFor(state: GameState): number {
+  return Math.max(1, Math.sqrt(state.tiles.length / (96 * 96)));
+}
+
+/**
+ * 依地圖面積調整快取條目上限（96→16k、304→~52k、480→~82k，上限 120k）。
+ * 條目多但要靠總 path 點數限制記憶體。
+ */
 function cacheLimitFor(state: GameState): number {
-  const areaScale = state.tiles.length / (96 * 96);
-  return Math.min(65536, Math.round(BASE_CACHE_LIMIT * Math.max(1, Math.sqrt(areaScale))));
+  return Math.min(120_000, Math.round(BASE_CACHE_LIMIT * areaScaleFor(state)));
+}
+
+/**
+ * 每個 cache 可儲存嘅總 path 點數上限（按地圖面積放大）。
+ * 480 地圖長途 path 可達 300–700 格，固定 400k 會在幾千個建築對後就不斷清空；
+ * 呢度 480 → ~1.0M points（≈8MB raw，連 3 個 cache 仍可接受）。
+ */
+function maxPathPointsFor(state: GameState): number {
+  return Math.round(BASE_MAX_PATH_POINTS * Math.max(1, areaScaleFor(state) * 0.5));
 }
 
 /** 各 cache 已儲存 path 點數（用於總量上限） */
@@ -281,9 +297,10 @@ function storeCached(
   state: GameState,
 ): void {
   const limit = cacheLimitFor(state);
+  const maxPoints = maxPathPointsFor(state);
   const points = cachePoints[kind];
   const size = path?.length ?? 0;
-  if (cache.size >= limit || points + size > MAX_PATH_POINTS) {
+  if (cache.size >= limit || points + size > maxPoints) {
     cache.clear();
     cachePoints[kind] = 0;
   }

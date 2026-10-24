@@ -31,6 +31,7 @@ import {
   fogRange,
   sampleSkyPalette,
   mapViewScale,
+  tileTopY,
   weatherLightFactor,
   windStrength,
   type SkyPalette,
@@ -294,15 +295,24 @@ const LABEL_VERT = /* glsl */ `
   attribute vec3 aCenter;
   attribute vec2 aOffset;
   attribute vec2 aUv;
+  attribute float aMajor;
   uniform vec3 uCamRight;
   uniform vec3 uCamUp;
+  uniform float uSizeScale;
   varying vec2 vUv;
   varying float vDist;
+  varying float vMajor;
   void main() {
-    vec3 world = aCenter + uCamRight * aOffset.x + uCamUp * aOffset.y;
+    // 螢幕空間固定大小：offset 隨相機距離放大，令 480 大地圖 zoom out 時
+    // 地名標籤仍然清楚，又唔會近景變巨型文字。
+    vec4 centerMv = viewMatrix * vec4(aCenter, 1.0);
+    float dist = max(length(centerMv.xyz), 1.0);
+    float s = dist * uSizeScale;
+    vec3 world = aCenter + uCamRight * aOffset.x * s + uCamUp * aOffset.y * s;
     vec4 mv = viewMatrix * vec4(world, 1.0);
     vUv = aUv;
-    vDist = length(mv.xyz);
+    vDist = dist;
+    vMajor = aMajor;
     gl_Position = projectionMatrix * mv;
   }
 `;
@@ -314,13 +324,24 @@ const LABEL_FRAG = /* glsl */ `
   uniform float uFadeNearB;
   uniform float uFadeFarA;
   uniform float uFadeFarB;
+  uniform float uMinorFadeA;
+  uniform float uMinorFadeB;
+  uniform float uMidFadeA;
+  uniform float uMidFadeB;
   varying vec2 vUv;
   varying float vDist;
+  varying float vMajor;
   void main() {
     vec4 tex = texture2D(uMap, vUv);
     if (tex.a < 0.02) discard;
     // 遠處淡出，避免與霧混在一起
     float fade = smoothstep(uFadeNearA, uFadeNearB, vDist) * (1.0 - smoothstep(uFadeFarA, uFadeFarB, vDist) * 0.55);
+    // 三層 LOD：0 = 近景才顯示；1 = 中景；2 = overview 都顯示
+    float fadeMinor = 1.0 - smoothstep(uMinorFadeA, uMinorFadeB, vDist);
+    float fadeMid = 1.0 - smoothstep(uMidFadeA, uMidFadeB, vDist);
+    float lodFade = mix(fadeMinor, fadeMid, step(0.5, vMajor));
+    lodFade = mix(lodFade, 1.0, step(1.5, vMajor));
+    fade *= lodFade;
     gl_FragColor = vec4(tex.rgb, tex.a * uOpacity * fade);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
@@ -357,10 +378,23 @@ export function createEnvironmentView(scene: THREE.Scene, _state: GameState): En
   const VIEW_SCALE = mapViewScale(_state.width, _state.height);
   /** 地圖世界全長（304×2 = 608；96×2 = 192） */
   const MAP_SPAN = Math.max(_state.width, _state.height) * 2;
+  /** 最頂層地名：overview 全圖都顯示（約 16 個，避免白色一團） */
+  const TOP_LABELS = new Set([
+    '中環', '尖沙咀', '旺角', '觀塘', '荃灣', '沙田', '屯門', '元朗', '大埔', '將軍澳',
+    '東涌', '維多利亞港', '大帽山', '太平山', '獅子山', '赤鱲角',
+  ]);
+  /** 主要地名：中景（camera 較近）才顯示；其餘次要地名只在中近景顯示 */
+  const MAJOR_LABELS = new Set([
+    '中環', '銅鑼灣', '尖沙咀', '旺角', '觀塘', '荃灣', '沙田', '屯門', '元朗', '大埔',
+    '上水', '將軍澳', '東涌', '香港仔', '赤鱲角',
+    '維多利亞港', '吐露港', '城門河', '大潭水塘', '船灣淡水湖', '萬宜水庫', '香港仔避風塘',
+    '大帽山', '鳳凰山', '太平山', '獅子山', '大老山', '青山',
+    '長洲', '南丫島', '坪洲', '香港國際機場', '米埔',
+  ]);
+  /** 海上地名標籤浮空高度（世界 y） */
+  const WATER_LABEL_Y = 2.4;
   /** 天球半徑：需大於「鏡頭最遠距離 + 地圖半對角線」，同時小於相機 far plane */
   const SKY_RADIUS = Math.max(1400, MAP_SPAN * 2.6);
-  /** 地名標籤尺寸倍率（相對 96 地圖） */
-  const LABEL_SCALE = Math.max(1, VIEW_SCALE * 1.55);
 
   // 背景色（天球未覆蓋處的備援）與霧
   scene.background = new THREE.Color(0x9ec8e8);
@@ -740,6 +774,7 @@ export function createEnvironmentView(scene: THREE.Scene, _state: GameState): En
       const centers = new Float32Array(verts * 3);
       const offsets = new Float32Array(verts * 2);
       const uvs = new Float32Array(verts * 2);
+      const majors = new Float32Array(verts);
       const indices: number[] = [];
       const kx = _state.width / 96;
       const ky = _state.height / 96;
@@ -751,26 +786,25 @@ export function createEnvironmentView(scene: THREE.Scene, _state: GameState): En
         const tx = Math.max(0, Math.min(_state.width - 1, Math.round(p.x * kx)));
         const ty = Math.max(0, Math.min(_state.height - 1, Math.round(p.y * ky)));
         const tile = _state.tiles[ty * _state.width + tx];
-        let baseY = 7.2;
+        // 標籤高度基準：貼近該格地形頂面（billboard 世界尺寸由 shader 按距離縮放）
+        let baseY = tileTopY(tile) + 2.4;
         let height = 1.5;
         if (p.kind === 'mountain') {
-          baseY = 3.8 + tile.elevation * 4.0;
+          baseY = tileTopY(tile) + 2.6;
           height = 2.0;
         } else if (p.kind === 'water') {
-          baseY = 4.6;
+          baseY = WATER_LABEL_Y;
           height = 1.7;
         } else if (p.kind === 'island') {
-          baseY = 5.4;
+          baseY = tileTopY(tile) + 2.2;
           height = 1.45;
         } else if (p.kind === 'landmark') {
-          baseY = 6.2;
+          baseY = tileTopY(tile) + 2.8;
           height = 1.05;
         } else if (p.kind === 'reservoir') {
-          baseY = 4.4;
+          baseY = tileTopY(tile) + 2.2;
           height = 1.0;
         }
-        // 304 地圖：地名 billboard 隨地圖放大，否則 zoom out 全圖時細到睇唔到
-        height *= LABEL_SCALE;
         const rect = atlas.rects[i];
         const w = height * rect.aspect;
         // UV 對應：CanvasTexture 預設 flipY=true，v=0 對應畫布底部、v=1 對應畫布頂部。
@@ -782,6 +816,7 @@ export function createEnvironmentView(scene: THREE.Scene, _state: GameState): En
           [w / 2, height / 2, rect.u1, rect.v1],
           [-w / 2, height / 2, rect.u0, rect.v1],
         ];
+        const isMajor = TOP_LABELS.has(p.name) ? 2 : MAJOR_LABELS.has(p.name) ? 1 : 0;
         for (let k = 0; k < 4; k++) {
           const v = i * 4 + k;
           centers[v * 3] = x;
@@ -791,6 +826,7 @@ export function createEnvironmentView(scene: THREE.Scene, _state: GameState): En
           offsets[v * 2 + 1] = corners[k][1];
           uvs[v * 2] = corners[k][2];
           uvs[v * 2 + 1] = corners[k][3];
+          majors[v] = isMajor;
         }
         const b = i * 4;
         indices.push(b, b + 1, b + 2, b, b + 2, b + 3);
@@ -800,6 +836,7 @@ export function createEnvironmentView(scene: THREE.Scene, _state: GameState): En
       geo.setAttribute('aCenter', new THREE.BufferAttribute(centers, 3));
       geo.setAttribute('aOffset', new THREE.BufferAttribute(offsets, 2));
       geo.setAttribute('aUv', new THREE.BufferAttribute(uvs, 2));
+      geo.setAttribute('aMajor', new THREE.BufferAttribute(majors, 1));
       geo.setIndex(indices);
       labelMat = track(
         new THREE.ShaderMaterial({
@@ -808,17 +845,25 @@ export function createEnvironmentView(scene: THREE.Scene, _state: GameState): En
             uOpacity: { value: 1 },
             uCamRight: { value: new THREE.Vector3(1, 0, 0) },
             uCamUp: { value: new THREE.Vector3(0, 1, 0) },
-            // 304 地圖：標籤淡入／淡出距離按 VIEW_SCALE 放大，俯瞰全圖時仍然可見
-            uFadeNearA: { value: 30 * VIEW_SCALE },
-            uFadeNearB: { value: 55 * VIEW_SCALE },
-            uFadeFarA: { value: 260 * VIEW_SCALE },
-            uFadeFarB: { value: 400 * VIEW_SCALE },
+            // 螢幕空間固定大小（offset 乘 dist * uSizeScale）
+            uSizeScale: { value: 0.016 },
+            // 近景／遠景淡入淡出（世界距離）
+            uFadeNearA: { value: 25 },
+            uFadeNearB: { value: 60 },
+            uFadeFarA: { value: 2400 },
+            uFadeFarB: { value: 3300 },
+            // 次要地名在 overview 隱藏，中近景才顯示
+            uMinorFadeA: { value: 650 },
+            uMinorFadeB: { value: 950 },
+            // 中層地名：中景才顯示（overview ~1250+ 距離會隱藏）
+            uMidFadeA: { value: 700 },
+            uMidFadeB: { value: 1000 },
           },
           vertexShader: LABEL_VERT,
           fragmentShader: LABEL_FRAG,
           transparent: true,
           depthWrite: false,
-          depthTest: true,
+          depthTest: false,
           fog: false,
         }),
       );
