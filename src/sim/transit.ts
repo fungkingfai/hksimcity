@@ -27,9 +27,18 @@
  * 座標：建築中心 = (x + w/2, y + h/2)，半徑以格為單位（歐氏距離）。
  */
 
-import { BUILDINGS, TRANSIT_INFO, TRANSIT_SPEED, WEATHER_EFFECT } from '../core/config';
-import type { Building, GameState, SimContext, TransitMode } from '../core/types';
+import { BUILDINGS, TRANSIT_INFO, TRANSIT_LINE_CONFIG, TRANSIT_SPEED, WEATHER_EFFECT } from '../core/config';
+import type {
+  Building,
+  GameState,
+  SimContext,
+  TransitLine,
+  TransitLineInput,
+  TransitLineMode,
+  TransitMode,
+} from '../core/types';
 import { pickCommuteMode } from './citizen-common';
+import { findPathBetweenBuildings, roadAccessTiles } from './pathfinding';
 
 // pickCommuteMode 由 citizens-dev 擁有（市民通勤用），在此 re-export 方便 UI／測試／其他模組引用。
 export { pickCommuteMode };
@@ -117,6 +126,12 @@ export interface ModeCoverage {
   workersServed: number;
   /** 需求（載客）÷ 容量；> 1 代表繁忙時間擠迫 */
   load: number;
+  /** Round 5：只計舊站點半徑（未計路線站點）的服務人口／容量，用於 70/30 split */
+  legacyResidentsServed?: number;
+  legacyWorkersServed?: number;
+  legacyCapacity?: number;
+  /** Round 5：舊站點（未計路線）平均票價 */
+  legacyFare?: number;
 }
 
 /** 全城覆蓋率（任一模式可達） */
@@ -146,6 +161,13 @@ interface TransitRuntime {
   lastStormLogDay: number;
   lastOvercrowdLogDay: number;
   faresToday: number;
+  // ── Round 5：巴士／小巴路線 ──
+  /** 路線每日結算（同日重複呼叫 no-op） */
+  lineLastDay: number;
+  lineSummary: TransitLineDailySummary | null;
+  /** line.id → 合併道路 path 快取（key 含 ui.revision／站點／loop） */
+  linePathCache: Map<number, { key: string; path: number[] | null }>;
+  lastLineLogDay: number;
 }
 
 const runtimes = new WeakMap<GameState, TransitRuntime>();
@@ -160,6 +182,10 @@ function runtimeOf(state: GameState): TransitRuntime {
       lastStormLogDay: -999,
       lastOvercrowdLogDay: -999,
       faresToday: 0,
+      lineLastDay: -1,
+      lineSummary: null,
+      linePathCache: new Map(),
+      lastLineLogDay: -999,
     };
     runtimes.set(state, rt);
   }
@@ -229,6 +255,40 @@ function populationPoints(state: GameState): {
   return { homes, jobs, totalResidents, totalWorkers };
 }
 
+/** 覆蓋率計算用嘅站點規格（舊站點與 Round 5 路線站點共用） */
+interface StationSpec {
+  x: number;
+  y: number;
+  /** 半徑平方 */
+  r2: number;
+  capacity: number;
+  fare: number;
+}
+
+/** 把一批站點標記到住宅／就業點陣列（用 Uint8Array 去重） */
+function markServedSpecs(
+  specs: StationSpec[],
+  homes: PopulationPoint[],
+  jobs: PopulationPoint[],
+  servedHome: Uint8Array,
+  servedJob: Uint8Array,
+): void {
+  for (const spec of specs) {
+    for (let i = 0; i < homes.length; i++) {
+      if (servedHome[i]) continue;
+      const dx = homes[i].x - spec.x;
+      const dy = homes[i].y - spec.y;
+      if (dx * dx + dy * dy <= spec.r2) servedHome[i] = 1;
+    }
+    for (let i = 0; i < jobs.length; i++) {
+      if (servedJob[i]) continue;
+      const dx = jobs[i].x - spec.x;
+      const dy = jobs[i].y - spec.y;
+      if (dx * dx + dy * dy <= spec.r2) servedJob[i] = 1;
+    }
+  }
+}
+
 /** 容量折扣：tripDemand 超過 capacity 時覆蓋率按比例下降（最低 6 折） */
 function capacityDiscount(capacity: number, tripDemand: number): number {
   if (tripDemand <= 0) return 1;
@@ -256,45 +316,88 @@ export function computeTransitCoverage(state: GameState, force = false): Transit
   let totalCapacity = 0;
 
   for (const mode of TRANSIT_MODES) {
-    const stations = transitBuildings(state, mode).filter((b) => b.active);
-    let capacity = 0;
-    let fareSum = 0;
     const servedHome = new Uint8Array(homes.length);
     const servedJob = new Uint8Array(jobs.length);
 
-    for (const station of stations) {
+    // 舊玩法：交通建築本身的 radius／capacity（bus 為巴士總站；tram/mtr/ferry 不變）
+    const legacySpecs: StationSpec[] = [];
+    for (const station of transitBuildings(state, mode)) {
+      if (!station.active) continue;
       const transit = BUILDINGS[station.key]?.transit;
       if (!transit) continue;
-      capacity += transit.capacity;
-      fareSum += transit.fare;
       const center = buildingCenter(station);
-      const r2 = transit.radius * transit.radius;
+      legacySpecs.push({
+        x: center.x,
+        y: center.y,
+        r2: transit.radius * transit.radius,
+        capacity: transit.capacity,
+        fare: transit.fare,
+      });
+    }
+    markServedSpecs(legacySpecs, homes, jobs, servedHome, servedJob);
+    let legacyResidentsServed = 0;
+    let legacyWorkersServed = 0;
+    for (let i = 0; i < homes.length; i++) if (servedHome[i]) legacyResidentsServed += homes[i].weight;
+    for (let i = 0; i < jobs.length; i++) if (servedJob[i]) legacyWorkersServed += jobs[i].weight;
+    let legacyCapacity = 0;
+    let legacyFareWeight = 0;
+    let legacyFareSum = 0;
+    for (const spec of legacySpecs) {
+      legacyCapacity += spec.capacity;
+      legacyFareSum += spec.fare * spec.capacity;
+      legacyFareWeight += spec.capacity;
+    }
+    if (legacyFareWeight > 0) legacyFareSum /= legacyFareWeight;
+    else legacyFareSum = legacySpecs.length > 0 ? legacySpecs[0].fare : 0;
 
-      for (let i = 0; i < homes.length; i++) {
-        const home = homes[i];
-        const dx = home.x - center.x;
-        const dy = home.y - center.y;
-        if (dx * dx + dy * dy <= r2) {
-          servedHome[i] = 1;
-          coveredHomes[i] = 1;
+    // Round 5：路線站點（3 格）併入 bus 模式覆蓋（巴士＋小巴都計 bus 模式）
+    const lineSpecs: StationSpec[] = [];
+    let lineCapacity = 0;
+    let lineFareWeighted = 0;
+    let lineFareWeight = 0;
+    if (mode === 'bus') {
+      const seenStops = new Set<number>();
+      for (const line of getTransitLines(state)) {
+        if (line.suspended) continue;
+        let validStops = 0;
+        for (const stopId of line.stopIds) {
+          const stop = findBuildingById(state, stopId);
+          if (!stop || !stop.active || !isLineStopBuilding(stop, line.mode)) continue;
+          validStops++;
+          if (seenStops.has(stop.id)) continue;
+          seenStops.add(stop.id);
+          const center = buildingCenter(stop);
+          lineSpecs.push({
+            x: center.x,
+            y: center.y,
+            r2: LINE_STOP_RADIUS * LINE_STOP_RADIUS,
+            capacity: 0,
+            fare: 0,
+          });
         }
-      }
-      for (let i = 0; i < jobs.length; i++) {
-        const job = jobs[i];
-        const dx = job.x - center.x;
-        const dy = job.y - center.y;
-        if (dx * dx + dy * dy <= r2) {
-          servedJob[i] = 1;
-          coveredJobs[i] = 1;
+        if (validStops >= 2) {
+          const lineCap =
+            line.vehicleCount *
+            TRANSIT_LINE_CONFIG.capacityPerVehicle[line.mode] *
+            TRANSIT_LINE_CONFIG.tripsPerVehiclePerDay[line.mode];
+          lineCapacity += lineCap;
+          lineFareWeighted += line.fare * lineCap;
+          lineFareWeight += lineCap;
         }
       }
     }
-    totalCapacity += capacity;
+    markServedSpecs(lineSpecs, homes, jobs, servedHome, servedJob);
+
+    const capacity = legacyCapacity + lineCapacity;
+    const stationCount = legacySpecs.length + lineSpecs.length;
 
     let residentsServed = 0;
     for (let i = 0; i < homes.length; i++) if (servedHome[i]) residentsServed += homes[i].weight;
     let workersServed = 0;
     for (let i = 0; i < jobs.length; i++) if (servedJob[i]) workersServed += jobs[i].weight;
+    for (let i = 0; i < homes.length; i++) if (servedHome[i]) coveredHomes[i] = 1;
+    for (let i = 0; i < jobs.length; i++) if (servedJob[i]) coveredJobs[i] = 1;
+    totalCapacity += capacity;
 
     const residentialCoverage = totalResidents > 0 ? clamp(residentsServed / totalResidents, 0, 1) : 0;
     const employmentCoverage = totalWorkers > 0 ? clamp(workersServed / totalWorkers, 0, 1) : 0;
@@ -307,18 +410,26 @@ export function computeTransitCoverage(state: GameState, force = false): Transit
     const tripDemand = servedCommuters * TRIPS_PER_COMMUTER;
     const discount = capacityDiscount(capacity, tripDemand);
     const load = capacity > 0 ? tripDemand / capacity : 0;
+    const averageFare =
+      legacyFareWeight + lineFareWeight > 0
+        ? (legacyFareSum * legacyFareWeight + lineFareWeighted) / (legacyFareWeight + lineFareWeight)
+        : legacyFareSum;
 
     modes.push({
       mode,
-      stations: stations.length,
+      stations: stationCount,
       capacity,
-      fare: stations.length > 0 ? fareSum / stations.length : 0,
+      fare: averageFare,
       coverage: proximity * discount,
       residentialCoverage,
       employmentCoverage,
       residentsServed,
       workersServed,
       load,
+      legacyResidentsServed,
+      legacyWorkersServed,
+      legacyCapacity,
+      legacyFare: legacyFareSum,
     });
   }
 
@@ -449,6 +560,9 @@ function averageCommuteDistance(state: GameState): number {
 export function tickTransit(state: GameState, ctx: SimContext): void {
   const rt = runtimeOf(state);
   const { clock, transit, finance, stats } = state;
+  // Round 5：先結算巴士／小巴路線（同日 idempotent；main/simulation 之後再加呼叫都安全）
+  const lineSummary = tickTransitLines(state, ctx);
+  const linesActive = lineSummary.activeLines > 0;
   const coverage = computeTransitCoverage(state, true);
   const stormy = clock.weather === 'storm';
   const wasSuspended = transit.suspended;
@@ -484,6 +598,8 @@ export function tickTransit(state: GameState, ctx: SimContext): void {
   const weatherFactors: Record<TransitMode, number> = { mtr: 1, bus: 1, tram: 1, ferry: 1 };
   let potentialSum = 0;
   for (const mode of TRANSIT_MODES) {
+    // 有路線營運時，bus 由 tickTransitLines 單獨結算（下面 override），唔參與按比例分配
+    if (mode === 'bus' && linesActive) continue;
     const modeCoverage = coverage.modes.find((m) => m.mode === mode);
     if (!modeCoverage || modeCoverage.stations === 0 || modeCoverage.capacity <= 0) continue;
     const weatherFactor = modeWeatherFactor(mode, state);
@@ -522,12 +638,36 @@ export function tickTransit(state: GameState, ctx: SimContext): void {
     const rounded = Math.round(ridership);
     dailyByMode[mode] = rounded;
     loadByMode[mode] = load;
-    totalTrips += rounded;
   }
+
+  // ── Round 5：有路線營運時，bus 模式 = 路線載客 + 舊站點半徑 30%（避免 double count） ──
+  let busFareOverride: number | null = null;
+  if (linesActive) {
+    const busEntry = coverage.modes.find((m) => m.mode === 'bus');
+    const legacyResidents = busEntry?.legacyResidentsServed ?? 0;
+    const legacyWorkers = busEntry?.legacyWorkersServed ?? 0;
+    const legacyWeather = Math.max(0, modeWeatherFactor('bus', state));
+    const legacyBusRides = Math.round(
+      Math.min(legacyResidents, legacyWorkers) * participation * TRIPS_PER_COMMUTER * legacyWeather,
+    );
+    const keptLegacy = Math.round(legacyBusRides * LINE_LEGACY_BUS_SHARE);
+    dailyByMode.bus = lineSummary.ridership + keptLegacy;
+    loadByMode.bus =
+      busEntry && busEntry.capacity > 0 ? clamp(dailyByMode.bus / busEntry.capacity, 0, 1) : 0;
+    busFareOverride = Math.round(
+      lineSummary.fares + keptLegacy * (busEntry?.legacyFare ?? 5) * CONCESSION_RATIO,
+    );
+  }
+  for (const mode of TRANSIT_MODES) totalTrips += dailyByMode[mode];
 
   // ── 車費收入入帳（本模組負責；finance.ts 不可重複計算；faresThisMonth 清零交給 systems-dev） ──
   let faresToday = 0;
   for (const mode of TRANSIT_MODES) {
+    // bus：路線收入已於 tickTransitLines 入帳，呢度只補舊站點半徑部分（避免 double count）
+    if (mode === 'bus' && busFareOverride !== null) {
+      faresToday += busFareOverride;
+      continue;
+    }
     const fare = coverage.modes.find((m) => m.mode === mode)?.fare ?? 0;
     faresToday += dailyByMode[mode] * fare * CONCESSION_RATIO;
   }
@@ -622,6 +762,673 @@ export function tickTransit(state: GameState, ctx: SimContext): void {
   }
 }
 
+
+// ─────────────────────────── Round 5：巴士／小巴路線 ───────────────────────────
+
+/** 路線站點服務半徑（格）：居民／職位以此計潛在客流 */
+const LINE_STOP_RADIUS = 3;
+/** 每格路線預計行車分鐘（雙向 ×2；簡化用於班距計算） */
+const LINE_MINUTES_PER_TILE = 1;
+/** 班距（分鐘）門檻：>15 吸引力 ×0.5、>30 ×0.2 */
+const LINE_HEADWAY_FAIR = 15;
+const LINE_HEADWAY_POOR = 30;
+/** 有路線營運時，舊「巴士總站半徑」玩法只保留 30% 載客（其餘由路線提供，避免 double count） */
+const LINE_LEGACY_BUS_SHARE = 0.3;
+/** 同時存在的路線數上限 */
+const MAX_ACTIVE_LINES = 30;
+/** 票價 ≤ 此值無吸引力懲罰（ROUND5_CONTRACTS §3.2：$6） */
+const LINE_FARE_BASE = 6;
+/** 票價每 +$1 的吸引力跌幅 */
+const LINE_FARE_STEP_PENALTY = 0.08;
+/** 票價吸引力下限 */
+const LINE_MIN_ATTRACTIVENESS = 0.3;
+/** 假日通勤客流係數 */
+const LINE_WEEKEND_DEMAND = 0.62;
+
+/** 建立／修改／刪除路線的回傳（GameActions 直接用） */
+export interface TransitLineActionResult {
+  ok: boolean;
+  reason?: string;
+  id?: number;
+  cost?: number;
+}
+
+export interface TransitLineUpdateResult {
+  ok: boolean;
+  reason?: string;
+  cost?: number;
+  refund?: number;
+}
+
+/** 路線每日結算摘要（tickTransitLines 回傳；tickTransit 內部整合用） */
+export interface TransitLineDailySummary {
+  day: number;
+  /** 營運中路線數（未停駛） */
+  activeLines: number;
+  ridership: number;
+  fares: number;
+  costs: number;
+  profit: number;
+}
+
+/** UI 用：單一路線統計 */
+export interface TransitLineStatsRow {
+  id: number;
+  name: string;
+  mode: TransitLineMode;
+  color: string;
+  loop: boolean;
+  suspended: boolean;
+  /** 站點數 */
+  stops: number;
+  vehicleCount: number;
+  fare: number;
+  /** 當日載客 */
+  ridership: number;
+  /** 當日容量（車數 × 載客量 × 班次 × 天氣係數） */
+  capacity: number;
+  /** 載客率 0..1+ */
+  loadPct: number;
+  /** 當日收入 */
+  fares: number;
+  /** 當日營運成本 */
+  costs: number;
+  /** 當日盈利 */
+  profit: number;
+  /** 本月累計車費 */
+  monthlyFares: number;
+  /** 路線總長（格） */
+  routeTiles: number;
+  /** 預計班距（分鐘） */
+  headwayMinutes: number;
+}
+
+export interface TransitLineStats {
+  lines: TransitLineStatsRow[];
+  count: number;
+  /** 營運中路線數 */
+  activeCount: number;
+  totalRidership: number;
+  totalRevenue: number;
+  totalCost: number;
+  totalProfit: number;
+  totalVehicles: number;
+}
+
+// ── 路線基本工具 ──
+
+/** 確保 state.transitLines 存在（新局／舊存檔兼容） */
+export function getTransitLines(state: GameState): TransitLine[] {
+  if (!state.transitLines) state.transitLines = [];
+  return state.transitLines;
+}
+
+function findBuildingById(state: GameState, id: number): Building | undefined {
+  for (const building of state.buildings) if (building.id === id) return building;
+  return undefined;
+}
+
+/** 該建築可否作為指定模式的路線站（busStop／busTerminus，小巴站／小巴車廠） */
+function isLineStopBuilding(building: Building, mode: TransitLineMode): boolean {
+  const def = BUILDINGS[building.key];
+  if (!def) return false;
+  if (def.stopMode === mode) return true;
+  // minibusDepot：config 暫未有 stopMode；按規格可作小巴站（兼容兩種情況）
+  return mode === 'minibus' && building.key === 'minibusDepot';
+}
+
+/** 指定模式可作路線站的建築（UI 選站用） */
+export function stopBuildingsForMode(state: GameState, mode: TransitLineMode): Building[] {
+  const result: Building[] = [];
+  for (const building of state.buildings) {
+    if (isLineStopBuilding(building, mode)) result.push(building);
+  }
+  return result;
+}
+
+function lineModeLabel(mode: TransitLineMode): string {
+  return mode === 'bus' ? '巴士' : '小巴';
+}
+
+/** 線路總站／車廠（depot）：bus 線需 ≥1 busTerminus；小巴線需 ≥1 minibusDepot */
+function hasLineDepot(state: GameState, mode: TransitLineMode): boolean {
+  const depotKey = mode === 'bus' ? 'busTerminus' : 'minibusDepot';
+  for (const building of state.buildings) {
+    if (building.key === depotKey && building.active) return true;
+  }
+  return false;
+}
+
+function parseCssColorInt(color: string): number | null {
+  if (typeof color !== 'string') return null;
+  const match = /^#([0-9a-fA-F]{6})$/.exec(color.trim());
+  if (!match) return null;
+  return parseInt(match[1], 16);
+}
+
+function lineColorInt(line: TransitLine): number {
+  return parseCssColorInt(line.color) ?? 0xd9b23f;
+}
+
+/** 路線站點（Building 陣列，過濾已拆／停用） */
+function lineStopBuildings(state: GameState, line: TransitLine): Building[] {
+  const result: Building[] = [];
+  for (const id of line.stopIds) {
+    const building = findBuildingById(state, id);
+    if (building) result.push(building);
+  }
+  return result;
+}
+
+/** 路線營運所需：所有站點存活、active、貼路 */
+function lineStopsOperational(state: GameState, line: TransitLine): boolean {
+  if (line.stopIds.length < 2) return false;
+  for (const id of line.stopIds) {
+    const building = findBuildingById(state, id);
+    if (!building || !building.active || !isLineStopBuilding(building, line.mode)) return false;
+    if (roadAccessTiles(state, building).length === 0) return false;
+  }
+  return true;
+}
+
+/** 逐對站點驗證道路連通；回傳第一個不通的站名（全部可通回傳 null） */
+function findUnreachableStopPair(state: GameState, line: TransitLine): string | null {
+  const stops = lineStopBuildings(state, line);
+  if (stops.length < 2) return '站點不足';
+  const pairs: number[] = [];
+  for (let i = 0; i < stops.length - 1; i++) pairs.push(i);
+  if (line.loop) pairs.push(stops.length - 1);
+  for (const i of pairs) {
+    const from = stops[i];
+    const to = stops[(i + 1) % stops.length];
+    if (from.id === to.id) continue;
+    if (!findPathBetweenBuildings(state, from.id, to.id)) {
+      return `${BUILDINGS[from.key]?.name ?? '站'} 同 ${BUILDINGS[to.key]?.name ?? '站'}`;
+    }
+  }
+  return null;
+}
+
+/**
+ * 路線合併道路 path（站點之間順序連接；循環線最後補回起點，形成閉環）。
+ * 結果快取（line.id + ui.revision + 站點 + loop）；道路／建築變更會令 ui.revision 改變。
+ */
+export function lineRoadPath(state: GameState, line: TransitLine): number[] | null {
+  const rt = runtimeOf(state);
+  const stopsKey = `${line.stopIds.join(',')}:${line.loop ? 1 : 0}`;
+  const key = `${state.ui.revision}:${stopsKey}`;
+  const cached = rt.linePathCache.get(line.id);
+  if (cached && cached.key === key) return cached.path;
+
+  const stops = lineStopBuildings(state, line);
+  let path: number[] | null = [];
+  if (stops.length < 2) {
+    path = null;
+  } else {
+    const pairs: number[] = [];
+    for (let i = 0; i < stops.length - 1; i++) pairs.push(i);
+    if (line.loop) pairs.push(stops.length - 1);
+    for (const i of pairs) {
+      const from = stops[i];
+      const to = stops[(i + 1) % stops.length];
+      if (from.id === to.id) continue;
+      const segment = findPathBetweenBuildings(state, from.id, to.id);
+      if (!segment || segment.length === 0) {
+        path = null;
+        break;
+      }
+      if (path.length === 0) path.push(...segment);
+      else path.push(...segment.slice(1));
+    }
+    // 循環線：補回起點，令車輛可由尾格直接回捲到頭格
+    if (path && line.loop && path.length > 1 && path[0] !== path[path.length - 1]) path.push(path[0]);
+    if (path && path.length < 2) path = null;
+  }
+  rt.linePathCache.set(line.id, { key, path });
+  return path;
+}
+
+/** 路線站點 3 格內的住宅人口與在職人數（跨站去重） */
+function lineServedPopulation(
+  state: GameState,
+  line: TransitLine,
+): { residents: number; jobs: number; stops: number } {
+  const seenHome = new Set<number>();
+  const seenJob = new Set<number>();
+  let residents = 0;
+  let jobs = 0;
+  const stops = lineStopBuildings(state, line);
+  const r2 = LINE_STOP_RADIUS * LINE_STOP_RADIUS;
+  for (const stop of stops) {
+    const center = buildingCenter(stop);
+    for (const building of state.buildings) {
+      const def = BUILDINGS[building.key];
+      if (!def) continue;
+      const c = buildingCenter(building);
+      const dx = c.x - center.x;
+      const dy = c.y - center.y;
+      if (dx * dx + dy * dy > r2) continue;
+      if (def.housing > 0 && building.residents.length > 0 && !seenHome.has(building.id)) {
+        seenHome.add(building.id);
+        residents += building.residents.length;
+      }
+      if (
+        def.workers > 0 &&
+        building.active &&
+        building.workers.length > 0 &&
+        !seenJob.has(building.id)
+      ) {
+        seenJob.add(building.id);
+        jobs += building.workers.length;
+      }
+    }
+  }
+  return { residents, jobs, stops: stops.length };
+}
+
+/** 票價吸引力：≤$6 全額，每 +$1 扣 8%，最低 0.3 */
+function lineFareAttractiveness(fare: number): number {
+  if (fare <= LINE_FARE_BASE) return 1;
+  return Math.max(LINE_MIN_ATTRACTIVENESS, 1 - (fare - LINE_FARE_BASE) * LINE_FARE_STEP_PENALTY);
+}
+
+/** 簡化班距（分鐘）：roundTrip = 2 × 路線長 × 每格分鐘 + 站數 × 1.2；headway = roundTrip / 車數 */
+function lineHeadwayMinutes(line: TransitLine, routeTiles: number): number {
+  const roundTrip = Math.max(10, 2 * routeTiles * LINE_MINUTES_PER_TILE + line.stopIds.length * 1.2);
+  return roundTrip / Math.max(1, line.vehicleCount);
+}
+
+/** 班距吸引力：>15 分鐘 ×0.5、>30 分鐘 ×0.2 */
+function lineHeadwayAttractiveness(headway: number): number {
+  if (headway > LINE_HEADWAY_POOR) return 0.2;
+  if (headway > LINE_HEADWAY_FAIR) return 0.5;
+  return 1;
+}
+
+/** 路線每日容量（車數 × 載客量 × 班次）；天氣係數另乘 */
+function lineDailyCapacity(line: TransitLine): number {
+  return (
+    line.vehicleCount *
+    TRANSIT_LINE_CONFIG.capacityPerVehicle[line.mode] *
+    TRANSIT_LINE_CONFIG.tripsPerVehiclePerDay[line.mode]
+  );
+}
+
+function lineWeatherFactor(state: GameState): number {
+  const factor = WEATHER_EFFECT[state.clock.weather]?.transit ?? 1;
+  return Math.max(0.2, factor);
+}
+
+// ── 建立／修改／刪除路線 ──
+
+/**
+ * 建立巴士／小巴路線（GameActions.createTransitLine 直接呼叫）。
+ * 驗證：模式、≥2 站、無重複、同 mode 站點、active＋貼路、道路連通、車數 1–12、票價 $3–$20、需有車廠／總站、庫房足夠。
+ * 成本 = 車數 × 車價 + 開線費，即時扣庫房並記入 infrastructure。
+ */
+export function createTransitLine(state: GameState, input: TransitLineInput): TransitLineActionResult {
+  const cfg = TRANSIT_LINE_CONFIG;
+  const fail = (reason: string): TransitLineActionResult => ({ ok: false, reason });
+  const mode = input?.mode;
+  if (mode !== 'bus' && mode !== 'minibus') return fail('路線模式唔啱（只接受巴士／小巴）');
+  const lines = getTransitLines(state);
+  if (lines.length >= MAX_ACTIVE_LINES) return fail(`路線數目已達上限（最多 ${MAX_ACTIVE_LINES} 條）`);
+
+  // 循環線若重複輸入起終點，去掉尾站
+  let stopIds = Array.isArray(input.stopIds) ? [...input.stopIds] : [];
+  if (input.loop && stopIds.length >= 3 && stopIds[0] === stopIds[stopIds.length - 1]) {
+    stopIds = stopIds.slice(0, -1);
+  }
+  if (stopIds.length < 2) return fail('最少要 2 個站');
+  if (stopIds.length > cfg.maxStops) return fail(`最多 ${cfg.maxStops} 個站`);
+  if (new Set(stopIds).size !== stopIds.length) return fail('站點重複');
+
+  const stopNames: string[] = [];
+  for (const stopId of stopIds) {
+    const building = findBuildingById(state, stopId);
+    if (!building) return fail('有站點已經唔存在');
+    const name = BUILDINGS[building.key]?.name ?? '站點';
+    stopNames.push(name);
+    if (!isLineStopBuilding(building, mode)) {
+      return fail(`「${name}」唔啱呢條${lineModeLabel(mode)}線`);
+    }
+    if (!building.active) return fail(`「${name}」未啟用（要先連接道路）`);
+    if (roadAccessTiles(state, building).length === 0) return fail(`「${name}」未貼路`);
+  }
+
+  // depot：巴士線需巴士總站；小巴線需小巴車廠（可不在線內）
+  if (!hasLineDepot(state, mode)) {
+    return fail(mode === 'bus' ? '巴士線需要至少一座巴士總站' : '小巴線需要至少一座小巴車廠');
+  }
+
+  const vehicleCount = Math.round(Number(input.vehicleCount));
+  if (!Number.isFinite(vehicleCount) || vehicleCount < cfg.vehicleMin || vehicleCount > cfg.vehicleMax) {
+    return fail(`車數要 ${cfg.vehicleMin}–${cfg.vehicleMax} 架`);
+  }
+  const fare = Math.round(Number(input.fare));
+  if (!Number.isFinite(fare) || fare < cfg.fareMin || fare > cfg.fareMax) {
+    return fail(`票價要 $${cfg.fareMin}–$${cfg.fareMax}`);
+  }
+
+  const draft: TransitLine = {
+    id: 0,
+    mode,
+    name: input.name?.trim() || '',
+    color: input.color ?? '',
+    stopIds,
+    loop: !!input.loop,
+    vehicleCount,
+    fare,
+    createdDay: state.clock.totalDays,
+    ridershipToday: 0,
+    faresThisMonth: 0,
+    lastMonthRidership: 0,
+    suspended: false,
+  };
+  const unreachable = findUnreachableStopPair(state, draft);
+  if (unreachable) return fail(`${unreachable} 之間冇道路連通`);
+
+  const cost = vehicleCount * cfg.vehicleCost[mode] + cfg.openFee;
+  if (state.finance.treasury < cost) {
+    return fail(`庫房不足：開線需要 $${cost.toLocaleString('zh-HK')}`);
+  }
+
+  // ── 入帳（基建支出；與其他建造費一致：即時扣庫房） ──
+  state.finance.treasury -= cost;
+  state.finance.expenseThisMonth += cost;
+  state.finance.expenseBreakdown.infrastructure = (state.finance.expenseBreakdown.infrastructure ?? 0) + cost;
+
+  const id = state.nextTransitLineId ?? 1;
+  state.nextTransitLineId = id + 1;
+  const defaultName = `${lineModeLabel(mode)} ${id} 號線`;
+  const color = parseCssColorInt(draft.color) !== null
+    ? draft.color
+    : cfg.colors[(id - 1) % cfg.colors.length];
+  const line: TransitLine = { ...draft, id, name: draft.name || defaultName, color };
+  lines.push(line);
+  const rt = runtimeOf(state);
+  rt.linePathCache.delete(id);
+
+  return { ok: true, id, cost };
+}
+
+/**
+ * 修改路線（車數／票價／名稱／顏色／循環／停駛）。
+ * 加車：每架收全價；減車：退 50%；退款／補款即時調整庫房與基建支出。
+ */
+export function updateTransitLine(
+  state: GameState,
+  id: number,
+  patch: Partial<Pick<TransitLine, 'vehicleCount' | 'fare' | 'name' | 'color' | 'loop' | 'suspended'>>,
+): TransitLineUpdateResult {
+  const cfg = TRANSIT_LINE_CONFIG;
+  const fail = (reason: string): TransitLineUpdateResult => ({ ok: false, reason });
+  const line = getTransitLines(state).find((item) => item.id === id);
+  if (!line) return fail('路線唔存在');
+
+  // ── 先驗證所有欄位（避免部分套用後才失敗） ──
+  let nextVehicleCount = line.vehicleCount;
+  let cost = 0;
+  let refund = 0;
+  if (patch.vehicleCount !== undefined) {
+    const next = Math.round(Number(patch.vehicleCount));
+    if (!Number.isFinite(next) || next < cfg.vehicleMin || next > cfg.vehicleMax) {
+      return fail(`車數要 ${cfg.vehicleMin}–${cfg.vehicleMax} 架`);
+    }
+    const diff = next - line.vehicleCount;
+    if (diff > 0) {
+      cost = diff * cfg.vehicleCost[line.mode];
+      if (state.finance.treasury < cost) {
+        return fail(`庫房不足：加 ${diff} 架車需要 $${cost.toLocaleString('zh-HK')}`);
+      }
+    } else if (diff < 0) {
+      refund = Math.round(-diff * cfg.vehicleCost[line.mode] * 0.5);
+    }
+    nextVehicleCount = next;
+  }
+  let nextFare = line.fare;
+  if (patch.fare !== undefined) {
+    const fare = Math.round(Number(patch.fare));
+    if (!Number.isFinite(fare) || fare < cfg.fareMin || fare > cfg.fareMax) {
+      return fail(`票價要 $${cfg.fareMin}–$${cfg.fareMax}`);
+    }
+    nextFare = fare;
+  }
+  let nextName = line.name;
+  if (patch.name !== undefined) {
+    const name = String(patch.name).trim();
+    if (!name) return fail('路線名唔可以空白');
+    if (name.length > 24) return fail('路線名太長（最多 24 個字）');
+    nextName = name;
+  }
+  let nextColor = line.color;
+  if (patch.color !== undefined) {
+    if (parseCssColorInt(String(patch.color)) === null) return fail('路線顏色格式要 #rrggbb');
+    nextColor = String(patch.color);
+  }
+
+  // ── 套用（車數加減即時補／退錢） ──
+  if (cost > 0) {
+    state.finance.treasury -= cost;
+    state.finance.expenseThisMonth += cost;
+    state.finance.expenseBreakdown.infrastructure =
+      (state.finance.expenseBreakdown.infrastructure ?? 0) + cost;
+  }
+  if (refund > 0) {
+    state.finance.treasury += refund;
+    // 退款沖減本月基建支出（避免當成收入）；本月支出不足則只沖到 0
+    const infra = state.finance.expenseBreakdown.infrastructure ?? 0;
+    const applied = Math.min(infra, refund);
+    state.finance.expenseBreakdown.infrastructure = infra - applied;
+    state.finance.expenseThisMonth = Math.max(0, state.finance.expenseThisMonth - applied);
+  }
+  line.vehicleCount = nextVehicleCount;
+  line.fare = nextFare;
+  line.name = nextName;
+  line.color = nextColor;
+  if (patch.loop !== undefined) line.loop = !!patch.loop;
+  if (patch.suspended !== undefined) line.suspended = !!patch.suspended;
+  return { ok: true, cost, refund };
+}
+
+/** 刪除路線：退 50% 車輛成本、移除相關車輛、清快取 */
+export function deleteTransitLine(state: GameState, id: number): boolean {
+  const cfg = TRANSIT_LINE_CONFIG;
+  const lines = getTransitLines(state);
+  const index = lines.findIndex((line) => line.id === id);
+  if (index < 0) return false;
+  const line = lines[index];
+  const refund = Math.round(line.vehicleCount * cfg.vehicleCost[line.mode] * 0.5);
+  state.finance.treasury += refund;
+  const infra = state.finance.expenseBreakdown.infrastructure ?? 0;
+  const applied = Math.min(infra, refund);
+  state.finance.expenseBreakdown.infrastructure = infra - applied;
+  state.finance.expenseThisMonth = Math.max(0, state.finance.expenseThisMonth - applied);
+
+  lines.splice(index, 1);
+  runtimeOf(state).linePathCache.delete(id);
+
+  // 移除路線車輛（Vehicle.lineId）
+  for (let i = state.vehicles.length - 1; i >= 0; i--) {
+    if (state.vehicles[i].lineId === id) state.vehicles.splice(i, 1);
+  }
+  if (state.ui.selectedLineId === id) state.ui.selectedLineId = null;
+  return true;
+}
+
+/** 每日路線營運結算（同日重複呼叫會 no-op；tickTransit 會先自動呼叫） */
+export function tickTransitLines(state: GameState, ctx: SimContext): TransitLineDailySummary {
+  const rt = runtimeOf(state);
+  const clock = state.clock;
+  const lines = getTransitLines(state);
+
+  // 每月清零 line.faresThisMonth 由 finance（monthlyFinance）呼叫 resetTransitLineMonthly；
+  // 本檔只負責每日累加。
+  if (rt.lineLastDay === clock.totalDays && rt.lineSummary) return rt.lineSummary;
+  rt.lineLastDay = clock.totalDays;
+
+  const weather = clock.weather;
+  const stormy = weather === 'storm';
+  const weatherFactor = lineWeatherFactor(state);
+  const isWeekend = clock.weekday === 0 || clock.weekday === 6;
+  const demandDayFactor = isWeekend ? LINE_WEEKEND_DEMAND : 1;
+  const cfg = TRANSIT_LINE_CONFIG;
+
+  let totalRiders = 0;
+  let totalFares = 0;
+  let totalCosts = 0;
+  let activeLines = 0;
+  let invalidLines = 0;
+
+  for (const line of lines) {
+    // 站點被拆／未連接：暫時停駛，待玩家修正
+    if (!lineStopsOperational(state, line)) {
+      line.ridershipToday = 0;
+      invalidLines++;
+      continue;
+    }
+    const path = lineRoadPath(state, line);
+    if (!path) {
+      line.ridershipToday = 0;
+      invalidLines++;
+      continue;
+    }
+    if (line.suspended) {
+      line.ridershipToday = 0;
+      continue;
+    }
+    activeLines++;
+    const { residents, jobs } = lineServedPopulation(state, line);
+    const potential = residents * 0.55 + jobs * 0.75;
+    const capacityRaw = lineDailyCapacity(line);
+    const capacity = stormy ? 0 : capacityRaw * weatherFactor;
+    const headway = lineHeadwayMinutes(line, path.length);
+    const attractiveness = stormy
+      ? 0
+      : lineFareAttractiveness(line.fare) *
+        lineHeadwayAttractiveness(headway) *
+        Math.max(0.25, weatherFactor) *
+        demandDayFactor;
+    const ridership = Math.max(0, Math.round(Math.min(potential * attractiveness, capacity * 0.9)));
+    const fares = Math.round(ridership * line.fare);
+    const costs = line.vehicleCount * cfg.dailyCostPerVehicle[line.mode];
+
+    line.ridershipToday = ridership;
+    line.faresThisMonth += fares;
+    totalRiders += ridership;
+    totalFares += fares;
+    totalCosts += costs;
+
+    // 帳目：票價收入（fares）＋營運成本（infrastructure，因為 ExpenseKind 未有 transitOps）
+    if (fares > 0) {
+      state.finance.treasury += fares;
+      state.finance.incomeThisMonth += fares;
+      state.finance.incomeBreakdown.fares = (state.finance.incomeBreakdown.fares ?? 0) + fares;
+    }
+    if (costs > 0) {
+      state.finance.treasury -= costs;
+      state.finance.expenseThisMonth += costs;
+      state.finance.expenseBreakdown.infrastructure =
+        (state.finance.expenseBreakdown.infrastructure ?? 0) + costs;
+    }
+  }
+
+  const summary: TransitLineDailySummary = {
+    day: clock.totalDays,
+    activeLines,
+    ridership: totalRiders,
+    fares: totalFares,
+    costs: totalCosts,
+    profit: totalFares - totalCosts,
+  };
+  rt.lineSummary = summary;
+
+  // 提示（每 7 日一次）：路線有問題／整體虧蝕
+  if (clock.totalDays - rt.lastLineLogDay >= 7) {
+    if (invalidLines > 0) {
+      rt.lastLineLogDay = clock.totalDays;
+      ctx.log(`有 ${invalidLines} 條巴士／小巴路線因站點被拆或未連接道路而停駛，請檢查路線。`, 'warn');
+    } else if (summary.profit < -3000) {
+      rt.lastLineLogDay = clock.totalDays;
+      ctx.log(
+        `巴士／小巴路線整體虧蝕 $${Math.abs(Math.round(summary.profit)).toLocaleString('zh-HK')}/日，考慮減車、加價或縮短路線。`,
+        'warn',
+      );
+    }
+  }
+  return summary;
+}
+
+/**
+ * 月結後清零路線每月車費累計（由 finance.monthlyFinance 呼叫）。
+ * 同時把上月最後一日載客記入 lastMonthRidership，供 UI 顯示上月表現。
+ */
+export function resetTransitLineMonthly(state: GameState): void {
+  for (const line of getTransitLines(state)) {
+    line.lastMonthRidership = line.ridershipToday ?? 0;
+    line.faresThisMonth = 0;
+  }
+}
+
+/** UI 用：各路線當日營運統計（交通面板「路線」列表） */
+export function getTransitLineStats(state: GameState): TransitLineStats {
+  const cfg = TRANSIT_LINE_CONFIG;
+  const weatherFactor = lineWeatherFactor(state);
+  const stormy = state.clock.weather === 'storm';
+  const rows: TransitLineStatsRow[] = [];
+  let totalRidership = 0;
+  let totalRevenue = 0;
+  let totalCost = 0;
+  let totalVehicles = 0;
+  let activeCount = 0;
+
+  for (const line of getTransitLines(state)) {
+    const path = lineRoadPath(state, line);
+    const routeTiles = path?.length ?? 0;
+    const capacityRaw = lineDailyCapacity(line);
+    const capacity = stormy ? 0 : capacityRaw * weatherFactor;
+    const ridership = line.ridershipToday ?? 0;
+    const fares = Math.round(ridership * line.fare);
+    const costs = line.suspended ? 0 : line.vehicleCount * cfg.dailyCostPerVehicle[line.mode];
+    if (!line.suspended) activeCount++;
+    totalRidership += ridership;
+    totalRevenue += fares;
+    totalCost += costs;
+    totalVehicles += line.vehicleCount;
+    rows.push({
+      id: line.id,
+      name: line.name,
+      mode: line.mode,
+      color: line.color,
+      loop: line.loop,
+      suspended: !!line.suspended,
+      stops: line.stopIds.length,
+      vehicleCount: line.vehicleCount,
+      fare: line.fare,
+      ridership,
+      capacity,
+      loadPct: capacity > 0 ? ridership / capacity : 0,
+      fares,
+      costs,
+      profit: fares - costs,
+      monthlyFares: line.faresThisMonth ?? 0,
+      routeTiles,
+      headwayMinutes: Math.round(lineHeadwayMinutes(line, routeTiles) * 10) / 10,
+    });
+  }
+
+  return {
+    lines: rows,
+    count: rows.length,
+    activeCount,
+    totalRidership,
+    totalRevenue,
+    totalCost,
+    totalProfit: totalRevenue - totalCost,
+    totalVehicles,
+  };
+}
+
 // ─────────────────────────── UI 查詢 ───────────────────────────
 
 /** UI 交通面板：單一模式 */
@@ -665,6 +1472,15 @@ export interface TransitStats {
   avgCommute: number;
   /** 整體容量負荷 0..1 */
   load: number;
+  /** Round 5：巴士／小巴路線營運摘要（交通面板「路線」tab） */
+  lines?: {
+    count: number;
+    activeCount: number;
+    ridership: number;
+    revenue: number;
+    costs: number;
+    profit: number;
+  };
 }
 
 /** 給 UI 的交通統計（每幀可呼叫；覆蓋率有快取） */
@@ -710,5 +1526,16 @@ export function getTransitStats(state: GameState): TransitStats {
     typhoonSignal: typhoonSignalFor(state),
     avgCommute: state.stats.avgCommute,
     load: totalCapacity > 0 ? Math.min(1, totalRidership / totalCapacity) : 0,
+    lines: (() => {
+      const lineStats = getTransitLineStats(state);
+      return {
+        count: lineStats.count,
+        activeCount: lineStats.activeCount,
+        ridership: lineStats.totalRidership,
+        revenue: lineStats.totalRevenue,
+        costs: lineStats.totalCost,
+        profit: lineStats.totalProfit,
+      };
+    })(),
   };
 }

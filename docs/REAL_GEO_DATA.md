@@ -1,6 +1,7 @@
 # 《維港之城》真實地理數據（REAL_GEO_DATA.md）
 
-> 文件版本：1.0（2026-10-24）｜撰寫：game-designer
+> 文件版本：1.1（2026-10-24）｜撰寫：game-designer
+> **Round 5 更新**：地圖將重新生成為 **600×600（360,000 格、每格 112m、同一 67.2km 範圍）**；`tools/build-hk-data.py` 需參數化 `W/H/TILE_M` 並加入水塘水面／土地利用數據，使海岸線、水塘、農地、填海更精細；規格見 `GAME_DESIGN_HK.md` §18.1。本文 Round 4 480 數據保留作歷史對照。
 > 專案：`hk-city/`《維港之城》｜用途：記錄 Round 4「真實香港地理 480×480 地圖」的**資料來源、生成流程、投影與座標、地形／密度分類規則、授權與限制**。
 > 相關文件：`docs/LARGE_MAP_NOTES.md`（480 地圖實作與效能）、`docs/GAME_DESIGN_HK.md`（§2 地圖）、`docs/UI_SPEC_HK.md`（§5 minimap）、`tools/README.md`（原始下載步驟，Lead 維護）。
 > **本文件只寫 docs/，不改 code／README。** 所有數據統計由 `src/world/hk-map-data.generated.ts` 解碼核對（2026-10-24 版本）。

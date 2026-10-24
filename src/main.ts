@@ -18,7 +18,7 @@ import { applyUiMode, isMobileUi } from './core/device';
 import { createGameState, deriveClockFields } from './core/new-game';
 import { GameStore } from './core/store';
 import * as saves from './core/save';
-import type { GameActions, GameState, LogKind, NewGameMode, SimContext } from './core/types';
+import type { GameActions, GameState, LogKind, NewGameMode, SimContext, TransitLine, TransitLineInput, TransitLineMode } from './core/types';
 import { CityView } from './render/city-view';
 import { buildingAnchor } from './render/coords';
 import { createUI } from './ui/ui';
@@ -33,6 +33,14 @@ import {
   placeRoad,
 } from './sim/placement';
 import { updateStats } from './sim/stats';
+import { computeUtilitySnapshot, layStarterPipes, placePipe, removePipe } from './sim/utilities';
+import { regionKindAt } from './sim/placement';
+import { upgradeTradeBuilding } from './sim/trade';
+import {
+  createTransitLine,
+  deleteTransitLine,
+  updateTransitLine,
+} from './sim/transit';
 import { computeZoneDemand, zoneStats } from './sim/zoning';
 
 /** starter 模式：讀檔／新局後跑幾日模擬，令城市「已運作」（市民遷入、就業、生產） */
@@ -64,6 +72,11 @@ function sanitizeLoadedState(state: GameState): GameState {
   state.ui.showSave = false;
   state.ui.showTransit = false;
   state.ui.showStats = false;
+  state.ui.showUtilityPanel = false;
+  state.ui.showTradePanel = false;
+  state.ui.showUnderground = false;
+  state.ui.lineEditorActive = false;
+  state.ui.lineDraft = null;
   state.ui.showZones ??= true;
   state.ui.showStartScreen = false;
   state.clock.paused = state.ui.paused;
@@ -102,6 +115,54 @@ function createActions(store: GameStore): GameActions {
       if (!tool) return;
       const tx = tileIndex % state.width;
       const ty = Math.floor(tileIndex / state.width);
+
+      if (tool === 'line-select') {
+        const draft = state.ui.lineDraft;
+        const buildingId = state.tiles[tileIndex].buildingId;
+        if (!draft) return;
+        if (buildingId < 0) {
+          warn('請點擊巴士／小巴站建築作為路線站點');
+          return;
+        }
+        const def = BUILDINGS[state.buildings.find((b) => b.id === buildingId)?.key ?? ''];
+        const stopMode = def?.stopMode;
+        if (stopMode !== draft.mode) {
+          warn(draft.mode === 'bus' ? '巴士線請選擇巴士站或巴士總站' : '小巴線請選擇小巴站或小巴車廠');
+          return;
+        }
+        const pos = draft.stopIds.indexOf(buildingId);
+        if (pos >= 0) draft.stopIds.splice(pos, 1);
+        else draft.stopIds.push(buildingId);
+        store.bumpUI();
+        return;
+      }
+
+      if (tool.startsWith('pipe:')) {
+        const kind = tool.slice(5);
+        if (kind === 'remove') {
+          let any = false;
+          let refund = 0;
+          for (const k of ['water', 'sewer', 'power'] as const) {
+            const r = removePipe(state, tx, ty, k);
+            if (r.ok) {
+              any = true;
+              refund += r.cost;
+            }
+          }
+          if (any) {
+            store.toast(`已拆除管道，退還 ${formatMoneyShort(refund)}`, 'info');
+            refresh();
+          }
+          return;
+        }
+        if (kind === 'water' || kind === 'sewer' || kind === 'power') {
+          const result = placePipe(state, tx, ty, kind);
+          if (result.ok) refresh();
+          else if (result.reason) warn(result.reason);
+          return;
+        }
+        return;
+      }
 
       if (tool === 'road') {
         const result = placeRoad(state, tx, ty);
@@ -409,6 +470,153 @@ function createActions(store: GameStore): GameActions {
       store.bumpUI();
     },
 
+    toggleUnderground(): void {
+      const state = s();
+      state.ui.showUnderground = !state.ui.showUnderground;
+      if (!state.ui.showUnderground) {
+        // 關閉地下層時，如正在用管道工具就清走
+        if (state.ui.tool?.startsWith('pipe:')) state.ui.tool = null;
+      }
+      store.bumpUI();
+    },
+
+    toggleUtilityPanel(): void {
+      const state = s();
+      state.ui.showUtilityPanel = !state.ui.showUtilityPanel;
+      state.ui.showFinance = false;
+      state.ui.showTransit = false;
+      state.ui.showStats = false;
+      state.ui.showHelp = false;
+      state.ui.showSave = false;
+      store.bumpUI();
+    },
+
+    upgradeTradeBuilding(buildingId: number): { ok: boolean; reason?: string; cost?: number } {
+      const state = s();
+      const result = upgradeTradeBuilding(state, buildingId);
+      if (result.ok) {
+        store.toast(`設施已升級，花費 ${formatMoneyShort(result.cost ?? 0)}`, 'good');
+        refresh();
+      } else if (result.reason) {
+        warn(result.reason);
+      }
+      return result;
+    },
+
+    beginLineEditor(mode: TransitLineMode): void {
+      const state = s();
+      const depotKey = mode === 'bus' ? 'busTerminus' : 'minibusDepot';
+      if (!state.buildings.some((b) => BUILDINGS[b.key]?.key === depotKey)) {
+        warn(mode === 'bus' ? '請先興建巴士總站作為車廠' : '請先興建小巴車廠');
+        return;
+      }
+      if (!state.buildings.some((b) => BUILDINGS[b.key]?.stopMode === mode)) {
+        warn(mode === 'bus' ? '先興建至少兩個巴士站' : '先興建至少兩個小巴站');
+        return;
+      }
+      state.ui.lineEditorActive = true;
+      state.ui.lineDraft = { mode, stopIds: [] };
+      state.ui.showTransit = true;
+      state.ui.showFinance = false;
+      state.ui.showStats = false;
+      state.ui.showUtilityPanel = false;
+      state.ui.showTradePanel = false;
+      state.ui.tool = 'line-select';
+      store.toast(mode === 'bus' ? '建線模式：依次點擊巴士站（再點可移除）' : '建線模式：依次點擊小巴站（再點可移除）', 'info');
+      store.bumpUI();
+    },
+
+    toggleLineStop(buildingId: number): void {
+      const state = s();
+      const draft = state.ui.lineDraft;
+      if (!draft) return;
+      const building = state.buildings.find((b) => b.id === buildingId);
+      if (!building) return;
+      if (BUILDINGS[building.key]?.stopMode !== draft.mode) {
+        warn(draft.mode === 'bus' ? '這不是巴士站' : '這不是小巴站');
+        return;
+      }
+      const pos = draft.stopIds.indexOf(buildingId);
+      if (pos >= 0) draft.stopIds.splice(pos, 1);
+      else draft.stopIds.push(buildingId);
+      store.bumpUI();
+    },
+
+    finishLineEditor(): void {
+      const state = s();
+      const draft = state.ui.lineDraft;
+      if (!draft) return;
+      const stopIds = draft.stopIds.slice();
+      if (stopIds.length < 2) {
+        warn('路線至少需要 2 個站點');
+        return;
+      }
+      const result = createTransitLine(state, {
+        mode: draft.mode,
+        stopIds,
+        loop: true,
+        vehicleCount: Math.max(1, Math.min(6, Math.ceil(stopIds.length / 3))),
+        fare: draft.mode === 'bus' ? 6 : 4,
+      });
+      if (!result.ok) {
+        warn(result.reason ?? '未能建立路線');
+        return;
+      }
+      state.ui.lineEditorActive = false;
+      state.ui.lineDraft = null;
+      state.ui.tool = null;
+      state.ui.selectedLineId = result.id ?? null;
+      store.toast('路線已開通，可在交通面板調整車數與票價', 'good');
+      refresh();
+    },
+
+    cancelLineEditor(): void {
+      const state = s();
+      state.ui.lineEditorActive = false;
+      state.ui.lineDraft = null;
+      if (state.ui.tool === 'line-select') state.ui.tool = null;
+      store.bumpUI();
+    },
+
+    createTransitLine(input: TransitLineInput): { ok: boolean; reason?: string; id?: number } {
+      const result = createTransitLine(s(), input);
+      if (result.ok) {
+        s().ui.selectedLineId = result.id ?? null;
+        refresh();
+      } else if (result.reason) warn(result.reason);
+      return result;
+    },
+
+    updateTransitLine(
+      id: number,
+      patch: Partial<Pick<TransitLine, 'vehicleCount' | 'fare' | 'name' | 'color' | 'loop' | 'suspended'>>,
+    ): { ok: boolean; reason?: string } {
+      const result = updateTransitLine(s(), id, patch);
+      if (result.ok) refresh();
+      else if (result.reason) warn(result.reason);
+      return result;
+    },
+
+    deleteTransitLine(id: number): boolean {
+      const ok = deleteTransitLine(s(), id);
+      if (ok) {
+        if (s().ui.selectedLineId === id) s().ui.selectedLineId = null;
+        refresh();
+      }
+      return ok;
+    },
+
+    toggleTradePanel(): void {
+      const state = s();
+      state.ui.showTradePanel = !state.ui.showTradePanel;
+      state.ui.showFinance = false;
+      state.ui.showTransit = false;
+      state.ui.showStats = false;
+      state.ui.showHelp = false;
+      state.ui.showSave = false;
+      store.bumpUI();
+    },
+
     closeOverlays(): void {
       const state = s();
       state.ui.showFinance = false;
@@ -416,6 +624,12 @@ function createActions(store: GameStore): GameActions {
       state.ui.showSave = false;
       state.ui.showTransit = false;
       state.ui.showStats = false;
+      state.ui.showUtilityPanel = false;
+      state.ui.showTradePanel = false;
+      if (state.ui.lineEditorActive) {
+        state.ui.lineEditorActive = false;
+        state.ui.lineDraft = null;
+      }
       store.bumpUI();
     },
   };
@@ -505,7 +719,19 @@ function boot(): void {
     ZONES,
     deriveClockFields,
     // QA／debug 用：分區查詢與自動建築（正常遊玩唔會用）
-    zoneDebug: { paintZone, eraseZone, placeAutoBuilding, placeBuilding, computeZoneDemand, zoneStats },
+    zoneDebug: {
+      paintZone,
+      eraseZone,
+      placeAutoBuilding,
+      placeBuilding,
+      computeZoneDemand,
+      zoneStats,
+      placePipe,
+      removePipe,
+      computeUtilitySnapshot,
+      layStarterPipes,
+      regionKindAt,
+    },
   };
   if (uiMode === 'mobile') {
     setTimeout(() => {

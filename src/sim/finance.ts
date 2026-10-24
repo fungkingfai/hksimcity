@@ -33,6 +33,7 @@
  */
 
 import { BASE_MONTHLY_SALARY, BUILDINGS, MONTHS_PER_YEAR, RESOURCES, totalUpkeep } from '../core/config';
+import { pipeUpkeepMonthly } from './utilities';
 import type {
   Building,
   ExpenseKind,
@@ -44,6 +45,7 @@ import type {
   SimContext,
 } from '../core/types';
 import { MARKET_GOODS, accepts, shelfTargetFor } from './logistics-inventory';
+import { resetTransitLineMonthly } from './transit';
 
 // ─────────────────────────── 數值常數（GDD §7.2／§7.3） ───────────────────────────
 
@@ -64,6 +66,21 @@ const RETIRE_AGE = 65;
 const SERVICE_SUPPLY_DAYS = 3;
 
 const round2 = (value: number): number => Math.round(value * 100) / 100;
+
+/** Round 5 新系統建築（人口 <300 時維護費半價，避免細城市破產） */
+const ROUND5_SYSTEM_KEYS = new Set([
+  'waterTower',
+  'desalPlant',
+  'sewagePlant',
+  'sewageOutfall',
+  'airportTerminal',
+  'airCargoTerminal',
+  'portGate',
+  'portYard',
+  'busStop',
+  'minibusStop',
+  'minibusDepot',
+]);
 const fmt = (value: number): string => `${Math.round(value).toLocaleString('zh-Hant')}`;
 
 /** 連續虧空月份計數（不進存檔；讀檔後重新累計，只影響警告） */
@@ -71,7 +88,8 @@ const fiscalStress = new WeakMap<GameState, number>();
 
 // ─────────────────────────── 帳目小工具 ───────────────────────────
 
-function addIncome(finance: Finance, kind: IncomeKind, amount: number): void {
+/** 記錄收入（trade.ts 等模組共用） */
+export function addIncome(finance: Finance, kind: IncomeKind, amount: number): void {
   if (!(amount > 0)) return;
   const value = round2(amount);
   finance.incomeThisMonth = round2(finance.incomeThisMonth + value);
@@ -263,7 +281,19 @@ function computeMonthlyExpenses(state: GameState): {
   unemployed: number;
   seniors: number;
 } {
-  const upkeep = round2(totalUpkeep(state.buildings));
+  // 建築維護：Round 5 新系統（管網／機場碼頭／巴士小巴相關）喺人口 <300 時 50% 折扣，
+  // 避免細城市一開局就被新系統維護費拖垮（合約 §7）。
+  const populationNow = state.citizens.length;
+  const newSystemDiscount = populationNow < 300 ? 0.5 : 1;
+  let baseUpkeep = 0;
+  let newSystemUpkeep = 0;
+  for (const building of state.buildings) {
+    const def = BUILDINGS[building.key];
+    const upkeepOfBuilding = def?.upkeep ?? 0;
+    if (ROUND5_SYSTEM_KEYS.has(building.key)) newSystemUpkeep += upkeepOfBuilding;
+    else baseUpkeep += upkeepOfBuilding;
+  }
+  const upkeep = round2(baseUpkeep + newSystemUpkeep * newSystemDiscount);
 
   // 公務員薪酬：人口 × $300 + 公共服務（civic／transport）實際員工 × $1,000
   let publicStaffWorkers = 0;
@@ -290,8 +320,8 @@ function computeMonthlyExpenses(state: GameState): {
   }
   const welfare = round2(seniors * WELFARE_ELDERLY + unemployed * WELFARE_UNEMPLOYED);
 
-  // 基建：GDD §7.3 ROAD_UPKEEP = 0，月底不另計（建造費即時記入 infrastructure）
-  const infrastructure = 0;
+  // 基建：GDD §7.3 ROAD_UPKEEP = 0；Round 5 加地下管網每月維護（人口 <300 半價）
+  const infrastructure = round2(pipeUpkeepMonthly(state) * newSystemDiscount);
 
   return {
     upkeep,
@@ -417,6 +447,8 @@ export function monthlyFinance(state: GameState, ctx: SimContext): void {
   }
   // 車費本月累計由 transit.ts 累加、月結後清零（transport-dev 約定）
   state.transit.faresThisMonth = 0;
+  // 巴士／小巴路線月結（Round 5）
+  resetTransitLineMonthly(state);
 
   // 供除錯：保留最後稅基供 UI tooltip 可擴充
   void taxes.salaryBase;

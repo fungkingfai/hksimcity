@@ -1,24 +1,32 @@
 #!/usr/bin/env python3
-"""Build real-geography game data for 《維港之城》 from CSDI/LandsD open data.
+"""Build real-geography game data for 《維港之城》 from CSDI/LandsD/WSD/PlanD open data.
 
 Inputs (download URLs documented in repo tools/README):
 - DTM 5m ASC (LandsD): Whole_HK_DTM_5m.zip
 - Building outlines GeoJSON (LandsD via CSDI): zip containing Building_Outline_..._Building_converted.geojson
 
 Outputs src/world/hk-map-data.generated.ts:
-- 480x480 grid: terrain code / elevation / building density
+- 600x600 grid (112m/tile, same HK1980 bounds): terrain code / elevation / building density
 - real-coordinate labels, landmarks, tunnels, spawn
 This script is run offline; generated data is committed so CI does not need the 400MB sources.
 """
 import zipfile, json, math, sys, time, os, base64, zlib, struct
+from array import array
 
-W = H = 480
-TILE_M = 140.0
+W = H = 600
+TILE_M = 112.0
 SPAN = W * TILE_M
 E0 = 798275.0
 NTOP = 857600.0
 XLL, YLL, CELL, NCOLS, NROWS = 799997.5, 799997.5, 5.0, 12751, 9601
 TOPY = YLL + NROWS * CELL
+
+# 規劃署 2020 土地利用 10m raster（repo tools/data；由 Lead 提供）
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+LU_PATH = os.environ.get('HK_LANDUSE_RAWZ', os.path.join(_REPO_ROOT, 'tools', 'data', 'landuse2020-10m.raw.z'))
+LU_E0, LU_N0, LU_RES, LU_COLS, LU_ROWS = 800000.0, 848000.0, 10.0, 6375, 4800
+# 水務署 Impounding Reservoirs 官方多邊形（repo tools/data）
+RES_PATH = os.environ.get('HK_RESERVOIRS_GEOJSON', os.path.join(_REPO_ROOT, 'tools', 'data', 'impounding-reservoirs.geojson'))
 
 # terrain codes match TerrainType ordering in game data builder
 WATER, SAND, GRASS, FERTILE, WETLAND, FOREST, HILL, MOUNTAIN, URBAN, RECLAIMED = range(10)
@@ -60,15 +68,16 @@ def design_coord(x, y):
 
 # ----------------------------- DTM aggregation -----------------------------
 def build_dtm():
+    """DTM 5m → 每格（112m）約 4–5×4–5 子取樣：sum / count / land fraction / min / max。"""
     t0 = time.time()
     z = zipfile.ZipFile(os.environ.get('HK_DTM_ZIP', '/tmp/dtm.zip'))
     sums = [0.0]*(W*H)
     cnt  = [0]*(W*H)
     land = [0]*(W*H)
     mx   = [0.0]*(W*H)
+    mn   = [9999.0]*(W*H)
     rows_done = 0
-    stride = 7  # 35m sampling; 4x4 samples/tile
-    # precompute x for sampled cols
+    stride = 5  # 25m sampling: 112m tile ≈ 4–5 samples per axis（符合 3×3/5×5 子取樣要求）
     cols = []
     for c in range(0, NCOLS, stride):
         E = XLL + (c+0.5)*CELL
@@ -96,10 +105,11 @@ def build_dtm():
                     if val > 0:
                         land[idx] += 1
                         if val > mx[idx]: mx[idx] = val
+                        if val < mn[idx]: mn[idx] = val
             if rows_done % 1200 == 0:
                 print(f'  dtm rows {rows_done}/{NROWS} ({time.time()-t0:.0f}s)', flush=True)
     print(f'  dtm done {time.time()-t0:.1f}s', flush=True)
-    return sums, cnt, land, mx
+    return sums, cnt, land, mx, mn
 
 # ----------------------------- buildings -----------------------------
 def build_density():
@@ -197,121 +207,321 @@ def build_density():
     print(f'  buildings done {nfeat} ({time.time()-t0:.1f}s)', flush=True)
     return density, height_vol, counts
 
+# ----------------------------- landuse raster (PlanD 2020 LUHK 10m) -----------------------------
+LU_URBAN = {1,2,11,21,22,23,31,41,42,51,52,53,54}
+LU_GREEN = {32}          # open space / recreation（低密度時當草地）
+LU_TRACK_CLASSES = [1,2,3,11,21,22,23,31,32,41,42,43,44,51,52,53,54,61,62,71,72,73,74,81,83,91,92]
+LU_CLASS_INDEX = {c: i for i, c in enumerate(LU_TRACK_CLASSES)}
+
+def load_landuse():
+    """讀 600×600 每格 4×4 土地利用樣本；回傳 (counts[classIdx][tileIdx], valid[tileIdx])。"""
+    t0 = time.time()
+    raw = zlib.decompress(open(LU_PATH, 'rb').read())
+    if len(raw) != LU_COLS*LU_ROWS:
+        raise SystemExit(f'landuse raster size mismatch: {len(raw)} != {LU_COLS*LU_ROWS}')
+    ncls = len(LU_TRACK_CLASSES)
+    counts = [array('H', [0])* (W*H) for _ in range(ncls)]
+    valid = [0]*(W*H)
+    grid = 4  # 每格 4×4 = 16 個 10m 像素樣本（112m≈11.2px）
+    for ty in range(H):
+        for tx in range(W):
+            i = ty*W + tx
+            n = 0
+            for sy in range(grid):
+                for sx in range(grid):
+                    E = E0 + (tx + (sx+0.5)/grid) * TILE_M
+                    N = NTOP - (ty + (sy+0.5)/grid) * TILE_M
+                    col = int((E - LU_E0)//LU_RES)
+                    row = int((LU_N0 - N)//LU_RES)
+                    if 0 <= col < LU_COLS and 0 <= row < LU_ROWS:
+                        val = raw[row*LU_COLS+col]
+                        ci = LU_CLASS_INDEX.get(val)
+                        if ci is not None:
+                            counts[ci][i] += 1
+                            n += 1
+            valid[i] = n if n > 0 else grid*grid
+    print(f'  landuse done {time.time()-t0:.1f}s', flush=True)
+    return counts, valid
+
 # ----------------------------- classification -----------------------------
-def in_box(lat, lon, box):
-    la0, la1, lo0, lo1 = box
-    return la0 <= lat <= la1 and lo0 <= lon <= lo1
+# 土地利用 value → terrain 融合（見 tools/README.md 對照表）
+LU_URBAN = {1,2,11,21,22,23,31,41,42,51,52,53,54}
+LU_CLASSES_ALL = [1,2,3,11,21,22,23,31,32,41,42,43,44,51,52,53,54,61,62,71,72,73,74,81,83,91,92]
 
-FARMLAND = [
-    (22.40, 22.53, 113.98, 114.10),   # Yuen Long / Kam Tin / Sheung Shui / Fanling
-    (22.43, 22.50, 114.06, 114.13),   # Tai Po / Fanling east
-]
-WETLAND_BOXES = [
-    (22.47, 22.53, 113.98, 114.06),   # Mai Po / Deep Bay
-    (22.43, 22.47, 114.02, 114.06),   # Nam Sang Wai
-    (22.24, 22.27, 113.84, 113.87),   # Tai O
-]
-RECLAIMED_BOXES = [
-    (22.29, 22.32, 114.14, 114.18),   # West Kowloon
-    (22.30, 22.33, 114.19, 114.23),   # Kai Tak
-    (22.28, 22.31, 114.25, 114.29),   # Tseung Kwan O
-    (22.26, 22.30, 113.92, 113.96),   # Tung Chung
-    (22.27, 22.29, 114.23, 114.25),   # Heng Fa Chuen
-]
-
-def classify(sums, cnt, land, mx, dens, hvol, counts):
+def classify(sums, cnt, land, mx, mn, dens, hvol, counts, lu_counts, lu_valid):
     terrain = bytearray(W*H)  # default WATER=0
     elev = bytearray(W*H)
     density = bytearray(W*H)
     heights = bytearray(W*H)
+    def fcls(cls, i):
+        ci = LU_CLASS_INDEX.get(cls)
+        if ci is None:
+            return 0.0
+        tot = lu_valid[i]
+        return lu_counts[ci][i] / tot if tot else 0.0
     for i in range(W*H):
         c = cnt[i]
+        cov = dens[i] / (TILE_M*TILE_M)
         if c == 0:
-            terrain[i] = WATER
-            continue
-        landf = land[i]/c
-        mean = sums[i]/c
-        hmax = mx[i]
-        y = i//W; x = i%W
-        E, N = tile_center(x,y)
-        # approximate lat/lon from E,N ? use inverse not implemented; use design grid mapping via known affine
-        # For polygons we instead classify using precomputed lat/lon masks below; skip here.
-        cov = dens[i]/ (TILE_M*TILE_M)
-        if cov > 1.2: cov = 1.2
-        density[i] = min(255, int(round(cov/0.5*255)))
-        if dens[i] > 1.0:
-            avg_h = hvol[i]/dens[i]
-            heights[i] = max(1, min(255, int(round(avg_h/500.0*255))))
-        else:
-            heights[i] = 0
-        if landf < 0.42:
             terrain[i] = WATER
             elev[i] = 0
             continue
-        m = max(0.0, mean)
-        # base natural terrain
-        if hmax >= 400:
+        landf = land[i] / c
+        mean = sums[i] / c
+        hmax = mx[i]
+        # density / height bytes（600 格重新聚合）
+        density[i] = min(255, int(round(min(1.2, cov) / 0.5 * 255)))
+        if dens[i] > 1.0:
+            avg_h = hvol[i] / dens[i]
+            heights[i] = max(1, min(255, int(round(avg_h / 500.0 * 255))))
+        # ── 水域：海岸 land fraction + 水塘/河溪土地利用 ──
+        l91 = fcls(91, i)
+        l92 = fcls(92, i)
+        if landf < 0.2 or l91 >= 0.35 or (l92 >= 0.15 and mean < 160):
+            terrain[i] = WATER
+            elev[i] = 0
+            continue
+        e = max(mean, hmax*0.55)
+        ev = max(1, int(round(min(255, (e/650.0)*255))))
+        # ── 海岸過渡（0.2 ≤ landf < 0.55）：沙灘 / 填海邊界 ──
+        if landf < 0.55:
+            if cov >= 0.02 or fcls(43, i) >= 0.15 or fcls(44, i) >= 0.15:
+                terrain[i] = RECLAIMED
+            else:
+                terrain[i] = SAND
+            elev[i] = ev
+            continue
+        # ── 陸地：DTM 自然基底（山勢優先，override landuse） ──
+        # >120m 或 hmax>170m → hill；>380m 或 mean>300m → mountain
+        if hmax >= 400 or mean >= 380:
             t = MOUNTAIN
-        elif hmax >= 180 or m >= 130:
+        elif mean >= 120 or hmax >= 180:
             t = HILL
-        elif m >= 55 or hmax >= 240:
+        elif mean >= 55 or hmax >= 240:
             t = FOREST
         else:
             t = GRASS
-        if hmax < 4 and landf < 0.7 and cov < 0.02:
-            t = SAND
-        # built-up urban: building coverage
-        if cov >= 0.028 and t not in (MOUNTAIN, HILL):
-            t = URBAN
-        # elevation byte (0..255) from mean/max; sea 0; mountains bright
-        e = max(m, hmax*0.55)
-        ev = int(round(min(255, (e/650.0)**1.0*255)))
-        elev[i] = max(1, ev)
+        # ── 土地利用 refine（唔可以將 DTM 嘅山/hill 降級做草地／森林） ──
+        built = sum(fcls(cl, i) for cl in LU_URBAN)
+        airport_port = fcls(43, i) >= 0.25 or fcls(44, i) >= 0.25
+        if airport_port:
+            t = RECLAIMED
+        elif built >= 0.3 and e < 320 and not (t in (MOUNTAIN, HILL) and e > 260):
+            # 市區：以真實 density 支持；鄉村聚落/低密度綠化地當草地
+            if density[i] >= 8 or built >= 0.5:
+                t = URBAN
+            else:
+                t = GRASS
+        elif (fcls(62, i) >= 0.25 or fcls(74, i) >= 0.25) and e < 60:
+            t = WETLAND
+        elif fcls(61, i) >= 0.3 and t in (GRASS, SAND) and e < 220:
+            t = FERTILE
+        elif t in (MOUNTAIN, HILL):
+            # 高山保留 DTM 地貌；badland/岩石山脊可再細分
+            if fcls(81, i) >= 0.5 and mean >= 250:
+                t = MOUNTAIN
+        else:
+            # 低地自然植被：woodland → forest；shrub/grass → 依 DTM 決定
+            if fcls(71, i) >= 0.3:
+                t = FOREST
+            elif fcls(72, i) >= 0.3:
+                t = FOREST if mean >= 140 else GRASS
+            elif fcls(73, i) >= 0.3:
+                t = GRASS
+            if fcls(81, i) >= 0.4:
+                t = MOUNTAIN if mean >= 250 else HILL
+            if fcls(83, i) >= 0.3:
+                t = SAND if e < 40 else HILL
+            if fcls(32, i) >= 0.4 and density[i] < 6:
+                t = GRASS
+        if t == URBAN and e > 320:
+            t = GRASS
         terrain[i] = t
-    # region overrides via lat/lon: build mapping from tile center -> lat/lon by inverse approximation
-    # Use TM inverse not available; approximate with linear fit from 4 known points
-    # fit lon = a*E + b*N + c ; lat = d*E + e*N + f from forward points at corners
-    pts = [(22.15,113.8),(22.57,113.8),(22.15,114.45),(22.57,114.45),(22.3,114.17),(22.4,114.2)]
-    A=[]; blon=[]; blat=[]
-    for la,lo in pts:
-        E,N=hk1980(la,lo); A.append([E,N,1.0]); blon.append(lo); blat.append(la)
-    # solve normal equations 3x3
-    import copy
-    def solve(A,b):
-        n=len(A); M=[A[i][:]+[b[i]] for i in range(n)]
-        for col in range(n):
-            p=max(range(col,n), key=lambda r: abs(M[r][col]))
-            M[col],M[p]=M[p],M[col]
-            if abs(M[col][col])<1e-9: continue
-            for r in range(n):
-                if r!=col:
-                    f=M[r][col]/M[col][col]
-                    for k in range(col,n+1): M[r][k]-=f*M[col][k]
-        return [M[i][n]/M[i][i] if abs(M[i][i])>1e-9 else 0 for i in range(n)]
-    # least squares normal equations
-    def lstsq(A,b):
-        n=len(A); m=3
-        AtA=[[sum(A[k][i]*A[k][j] for k in range(n)) for j in range(m)] for i in range(m)]
-        Atb=[sum(A[k][i]*b[k] for k in range(n)) for i in range(m)]
-        return solve(AtA,Atb)
-    clon=lstsq(A,blon); clat=lstsq(A,blat)
-    for i in range(W*H):
-        if terrain[i]==WATER: continue
-        x=i%W; y=i//W
-        E,N=tile_center(x,y)
-        lon=clon[0]*E+clon[1]*N+clon[2]
-        lat=clat[0]*E+clat[1]*N+clat[2]
-        t=terrain[i]
-        # 低窪地區才可做濕地／農地／填海（避免把山地畫成矩形色塊）
-        uneven = ((x*37 + y*73) % 100)
-        if elev[i] < 14 and uneven < 78 and any(in_box(lat,lon,b) for b in WETLAND_BOXES):
-            t=WETLAND
-        elif elev[i] < 46 and density[i] < 12 and any(in_box(lat,lon,b) for b in FARMLAND):
-            if t in (GRASS,SAND): t=FERTILE
-        if elev[i] < 40 and any(in_box(lat,lon,b) for b in RECLAIMED_BOXES):
-            if t not in (MOUNTAIN,HILL,WETLAND): t=RECLAIMED
-        terrain[i]=int(t)
+        elev[i] = max(1, ev)
     return terrain, elev, density, heights
+
+
+def smooth_natural(terrain, passes=1):
+    """3×3 多數濾波：只平滑自然地貌（避免海岸/林地邊界出現椒鹽 noise）；
+    water / urban / reclaimed 保持原狀，唔會侵蝕海岸線或水塘。"""
+    natural = {SAND, GRASS, FERTILE, WETLAND, FOREST, HILL, MOUNTAIN}
+    for _ in range(passes):
+        nxt = bytearray(terrain)
+        for y in range(1, H-1):
+            for x in range(1, W-1):
+                i = y*W + x
+                t = terrain[i]
+                if t not in natural:
+                    continue
+                cnts = {}
+                for dy in (-1, 0, 1):
+                    base = i + dy*W
+                    for dx in (-1, 0, 1):
+                        nt = terrain[base+dx]
+                        if nt in natural:
+                            cnts[nt] = cnts.get(nt, 0) + 1
+                best = max(cnts, key=cnts.get)
+                if best != t and cnts[best] >= 6:
+                    nxt[i] = best
+        terrain = nxt
+    return terrain
+
+
+# ----------------------------- reservoirs / rivers -----------------------------
+def load_reservoirs():
+    """官方水務署 Impounding Reservoirs 多邊形（WGS84 lon/lat）。"""
+    obj = json.load(open(RES_PATH))
+    out = []
+    for feat in obj.get('features', []):
+        geom = feat.get('geometry') or {}
+        props = feat.get('properties') or {}
+        name = props.get('CHINESE_NAME') or props.get('NAME') or '水塘'
+        polys = []
+        if geom.get('type') == 'Polygon':
+            polys.append(geom.get('coordinates') or [])
+        elif geom.get('type') == 'MultiPolygon':
+            for poly in geom.get('coordinates') or []:
+                if poly:
+                    polys.append(poly)
+        out.append((name, polys))
+    return out
+
+
+def point_in_rings(px, py, rings):
+    inside = False
+    for ring in rings:
+        n = len(ring)
+        if n < 3:
+            continue
+        for k in range(n):
+            x1, y1 = ring[k]
+            x2, y2 = ring[(k+1) % n]
+            if (y1 > py) != (y2 > py):
+                xi = x1 + (py - y1) * (x2 - x1) / (y2 - y1)
+                if px < xi:
+                    inside = not inside
+    return inside
+
+
+# 官方 WSD「Impounding Reservoirs」只有 17 個主要水塘；以下小型水塘用近似橢圓補回
+# （黃泥涌／流水響／鶴藪不在官方 17 個 impounding reservoirs 名單，但現實地圖係水域；
+#  以圓心＋半徑 rasterize 補底，避免細水塘喺 112m 格消失。）
+RESERVOIR_FALLBACK = [
+    ("黃泥涌水塘", 22.2559, 114.1889, 140.0, 110.0),
+    ("流水響水塘", 22.4972, 114.1566, 230.0, 170.0),
+    ("鶴藪水塘", 22.4939, 114.1712, 230.0, 180.0),
+]
+
+
+def rasterize_reservoirs(terrain, elev):
+    """官方水塘 polygon + 小型水塘 fallback → tile water。
+    回傳 (per-name tile 數, union water tiles, 由陸地新轉 water 的 tiles)。"""
+    reservoirs = load_reservoirs()
+    per = {}
+    union = set()
+    total_new = 0
+    for name, polys in reservoirs:
+        rings_tile = []
+        for poly in polys:
+            for ring in poly:
+                pts = []
+                for lonlat in ring:
+                    if not isinstance(lonlat, (list, tuple)) or len(lonlat) < 2:
+                        continue
+                    lon, lat = lonlat[0], lonlat[1]
+                    try:
+                        E, N = hk1980(lat, lon)
+                    except Exception:
+                        continue
+                    pts.append(((E - E0) / TILE_M, (NTOP - N) / TILE_M))
+                if len(pts) >= 3:
+                    rings_tile.append(pts)
+        if not rings_tile:
+            per[name] = 0
+            continue
+        allpts = [p for r in rings_tile for p in r]
+        minx = max(0, int(min(p[0] for p in allpts)) - 1)
+        maxx = min(W-1, int(max(p[0] for p in allpts)) + 1)
+        miny = max(0, int(min(p[1] for p in allpts)) - 1)
+        maxy = min(H-1, int(max(p[1] for p in allpts)) + 1)
+        cnt = 0
+        for ty in range(miny, maxy+1):
+            for tx in range(minx, maxx+1):
+                hit = False
+                for sy in (0.16, 0.5, 0.84):
+                    for sx in (0.16, 0.5, 0.84):
+                        if point_in_rings(tx+sx, ty+sy, rings_tile):
+                            hit = True
+                            break
+                    if hit:
+                        break
+                if hit:
+                    i = ty*W + tx
+                    if terrain[i] != WATER:
+                        total_new += 1
+                    if i not in union:
+                        union.add(i)
+                    terrain[i] = WATER
+                    elev[i] = 0
+                    cnt += 1
+        per[name] = cnt
+    # 小型水塘 fallback（橢圓）
+    for name, lat, lon, rx, ry in RESERVOIR_FALLBACK:
+        E, N = hk1980(lat, lon)
+        cx, cy = tile_of(E, N)
+        rxt = max(0.7, rx / TILE_M)
+        ryt = max(0.7, ry / TILE_M)
+        cnt = 0
+        for dy in range(-int(ryt)-1, int(ryt)+2):
+            for dx in range(-int(rxt)-1, int(rxt)+2):
+                if (dx/rxt)**2 + (dy/ryt)**2 > 1.0:
+                    continue
+                xx, yy = cx+dx, cy+dy
+                if not (0 <= xx < W and 0 <= yy < H):
+                    continue
+                i = yy*W + xx
+                if i not in union:
+                    union.add(i)
+                if terrain[i] != WATER:
+                    total_new += 1
+                terrain[i] = WATER
+                elev[i] = 0
+                cnt += 1
+        per[name] = per.get(name, 0) + cnt
+    return per, len(union), total_new
+
+
+def carve_rivers(terrain, elev):
+    """主要河流/明渠：112m tile 下一格闊已足夠（約 112m）。"""
+    RIVERS = [
+        ((22.382, 114.192), (22.418, 114.204), 0),   # 城門河（沙田）
+        ((22.393, 113.972), (22.378, 113.965), 0),   # 元朗／錦田河
+        ((22.445, 114.160), (22.468, 114.175), 0),   # 大埔河
+        ((22.372, 113.972), (22.390, 113.962), 0),   # 屯門河
+    ]
+    pts_all = []
+    for p0, p1, width in RIVERS:
+        pts = []
+        for la, lo in (p0, p1):
+            E, N = hk1980(la, lo)
+            pts.append(tile_of(E, N))
+        for k in range(len(pts)-1):
+            x0, y0 = pts[k]
+            x1, y1 = pts[k+1]
+            steps = max(abs(x1-x0), abs(y1-y0), 1)
+            for s in range(steps+1):
+                x = round(x0 + (x1-x0)*s/steps)
+                y = round(y0 + (y1-y0)*s/steps)
+                for dy in range(-width, width+1):
+                    for dx in range(-width, width+1):
+                        xx, yy = x+dx, y+dy
+                        if 0 <= xx < W and 0 <= yy < H:
+                            i = yy*W + xx
+                            terrain[i] = WATER
+                            elev[i] = 0
+                            pts_all.append(i)
+    return pts_all
+
 
 # ----------------------------- places / landmarks / tunnels -----------------------------
 PLACES = [
@@ -376,10 +586,27 @@ def bounds_design(lat0,lat1,lon0,lon1):
         E,N=hk1980(la,lo); x,y=tile_of(E,N); dx,dy=design_coord(x,y); xs.append(dx); ys.append(dy)
     return min(xs),min(ys),max(xs),max(ys)
 
-def build_labels(tunnels_road=None):
+def snap_land(x, y, terrain, maxr=6):
+    """把 label／spawn 由水面 snap 到最近陸地格（保持 96 設計座標系不變）。"""
+    if 0 <= x < W and 0 <= y < H and terrain[y*W+x] != WATER:
+        return x, y
+    for r in range(1, maxr+1):
+        for dy in range(-r, r+1):
+            for dx in range(-r, r+1):
+                if max(abs(dx), abs(dy)) != r:
+                    continue
+                xx, yy = x+dx, y+dy
+                if 0 <= xx < W and 0 <= yy < H and terrain[yy*W+xx] != WATER:
+                    return xx, yy
+    return x, y
+
+
+def build_labels(terrain=None):
     labels=[]
     for name,lat,lon,kind in PLACES:
         E,N=hk1980(lat,lon); x,y=tile_of(E,N)
+        if terrain is not None and kind not in ('water',):
+            x, y = snap_land(x, y, terrain)
         if 0<=x<W and 0<=y<H:
             dx,dy=design_coord(x,y)
             labels.append([name,round(dx,3),round(dy,3),kind])
@@ -416,58 +643,54 @@ def b64(b):
 
 def main():
     t0=time.time()
-    print('building DTM aggregate...', flush=True)
-    sums,cnt,land,mx = build_dtm()
-    print('building density...', flush=True)
-    dens, hvol, counts = build_density()
+    print('building DTM aggregate (600x600, 112m/tile, stride=5)...', flush=True)
+    sums,cnt,land,mx,mn = build_dtm()
+    print('building building density...', flush=True)
+    dens,hvol,counts = build_density()
+    print('loading landuse raster (PlanD 2020 LUHK 10m)...', flush=True)
+    lu_counts, lu_valid = load_landuse()
     print('classifying...', flush=True)
-    terrain, elev, density, heights = classify(sums,cnt,land,mx,dens,hvol,counts)
-    # 水塘／河流（DTM 水面高程 >0，唔會當海；用真實座標橢圓補回）
-    RESERVOIRS = [
-      (22.470,114.242,2200,1600), (22.372,114.352,2200,1500), (22.412,114.038,1100,800),
-      (22.402,114.148,900,700), (22.352,114.152,520,360), (22.230,113.900,850,650),
-      (22.255,114.200,650,450), (22.253,114.160,380,280), (22.403,114.075,450,360),
-    ]
-    RIVERS = [((22.382,114.192),(22.418,114.204),1), ((22.393,113.972),(22.378,113.965),1)]
-    def carve_world(points, width_tiles):
-        # rasterise polyline in tile space
-        pts=[]
-        for la,lo in points:
-            E,N=hk1980(la,lo); pts.append(tile_of(E,N))
-        for k in range(len(pts)-1):
-            x0,y0=pts[k]; x1,y1=pts[k+1]
-            steps=max(abs(x1-x0),abs(y1-y0),1)
-            for s in range(steps+1):
-                x=round(x0+(x1-x0)*s/steps); y=round(y0+(y1-y0)*s/steps)
-                for dy in range(-width_tiles,width_tiles+1):
-                    for dx in range(-width_tiles,width_tiles+1):
-                        xx,yy=x+dx,y+dy
-                        if 0<=xx<W and 0<=yy<H:
-                            i=yy*W+xx; terrain[i]=WATER; elev[i]=0
-    for la,lo,rx,ry in RESERVOIRS:
-        E,N=hk1980(la,lo); cx,cy=tile_of(E,N)
-        rxt=rx/TILE_M; ryt=ry/TILE_M
-        for dy in range(-int(ryt)-1,int(ryt)+2):
-            for dx in range(-int(rxt)-1,int(rxt)+2):
-                if (dx/rxt)**2+(dy/ryt)**2 <= 1.0:
-                    xx,yy=cx+dx,cy+dy
-                    if 0<=xx<W and 0<=yy<H:
-                        i=yy*W+xx
-                        if terrain[i] not in (WATER,MOUNTAIN):
-                            terrain[i]=WATER; elev[i]=0
-    for p0,p1,wd in RIVERS:
-        carve_world([p0,p1],wd)
-    # starter roads / tunnels rasterization done in game worldgen using terrain; labels here
-    labels,lm,tun,regions = build_labels(None)
-    spawn = None
+    terrain, elev, density, heights = classify(sums,cnt,land,mx,mn,dens,hvol,counts,lu_counts,lu_valid)
+    print('smoothing natural terrain...', flush=True)
+    terrain = smooth_natural(terrain, passes=2)
+    print('rasterising official reservoirs (WSD 17 polygons)...', flush=True)
+    res_per, res_union, res_new = rasterize_reservoirs(terrain, elev)
+    print('carving rivers...', flush=True)
+    river_tiles = carve_rivers(terrain, elev)
+    print('labels/landmarks/tunnels/regions...', flush=True)
+    labels,lm,tun,regions = build_labels(terrain)
+    # spawn：中環，若落水則 snap 到最近陸地
     E,N=hk1980(22.2819,114.1582)
-    spawn=(tile_of(E,N))
-    print('tile stats:', flush=True)
+    sx,sy=tile_of(E,N)
+    sx,sy=snap_land(sx,sy,terrain)
+    spawn=(sx,sy)
+    # ── stats ──
     from collections import Counter
     cc=Counter(terrain)
     names=['water','sand','grass','fertile','wetland','forest','hill','mountain','urban','reclaimed']
-    for k,v in cc.most_common(): print(' ',names[k],v)
-    print('spawn tile',spawn,'total',W*H)
+    total=W*H
+    buildable_terrains=(URBAN,RECLAIMED,GRASS,FOREST,HILL,FERTILE)
+    buildable=sum(cc[t] for t in buildable_terrains)
+    print('tile stats (600x600 =', total, 'tiles, 112m/tile):', flush=True)
+    for k in range(10):
+        v=cc.get(k,0)
+        print(f'  {names[k]:<9} {v:>7} ({v/total*100:5.2f}%)')
+    print(f'  buildable (urban/reclaimed/grass/forest/hill/fertile): {buildable} ({buildable/total*100:.1f}%)')
+    print(f'  reservoirs: official polygon union = {res_union} water tiles ({res_new} newly converted from land)', flush=True)
+    for name,cntt in sorted(res_per.items(), key=lambda kv:-kv[1]):
+        print(f'    - {name}: {cntt} tiles')
+    EXPECTED_RES = ['大欖涌水塘','船灣淡水湖','萬宜水庫','城門水塘','大潭篤水塘','大潭上水塘','大潭中水塘',
+                    '大潭副水塘','石壁水塘','香港仔上水塘','香港仔下水塘','薄扶林水塘','黃泥涌水塘',
+                    '九龍水塘','九龍副水塘','九龍接收水塘','石梨貝水塘','下城門水塘','流水響水塘','鶴藪水塘']
+    missing = [n for n in EXPECTED_RES if res_per.get(n, 0) <= 0]
+    print('    expected reservoirs missing:', missing if missing else 'none', flush=True)
+    print(f'  river/stream tiles: {len(set(river_tiles))}; labels {len(labels)}, landmarks {len(lm)}, regions {len(regions)}, tunnels {len(tun)}')
+    dens_n=sum(1 for b in density if b>0)
+    print(f'  density>0 tiles: {dens_n}; height>0 tiles: {sum(1 for b in heights if b>0)}')
+    lu_tot=[(cls, sum(lu_counts[i])) for i,cls in enumerate(LU_TRACK_CLASSES)]
+    lu_tot.sort(key=lambda kv:-kv[1])
+    print('  landuse sample stats (top 12):', ', '.join(f'{cls}:{n}' for cls,n in lu_tot[:12]))
+    # ── write generated.ts ──
     obj = {
       'format':'hk-map-data-v1','width':W,'heightTiles':H,'tileMeters':TILE_M,
       'e0':E0,'nTop':NTOP,'terrainRle':b64(rle_bytes(terrain)),
@@ -480,30 +703,96 @@ def main():
     os.makedirs(outdir,exist_ok=True)
     path=os.path.join(outdir,'hk-map-data.generated.ts')
     with open(path,'w') as f:
-        f.write('// AUTO-GENERATED by tools/build-hk-data.py — from CSDI/LandsD open data (DTM 5m + Building Outlines).\n')
+        f.write('// AUTO-GENERATED by tools/build-hk-data.py — from CSDI/LandsD/WSD/PlanD open data (DTM 5m + Building Outlines + Impounding Reservoirs + LUHK 2020 10m).\n')
         f.write('// Do not edit by hand. Regenerate with: python3 tools/build-hk-data.py\n')
         f.write('import type { MapData } from "./hk-map-data-types";\n\n')
         f.write('export const HK_MAP_DATA: MapData = ')
-        f.write(json.dumps(obj, ensure_ascii=False))
+        f.write(json.dumps(obj, ensure_ascii=False, separators=(',',':')))
         f.write(';\n')
-    print('wrote',path,os.path.getsize(path),'bytes; total',round(time.time()-t0,1),'s')
-    # preview bmp
-    preview(terrain, elev, labels, spawn, '/tmp/hk-map-preview.ppm')
-    sys.exit(0)
+    size=os.path.getsize(path)
+    print(f'wrote {path} {size} bytes ({size/1024/1024:.2f} MB); spawn tile {spawn}; total {round(time.time()-t0,1)}s', flush=True)
+    preview_png(terrain, elev, labels, spawn, '/tmp/hk-map-600-preview.png')
+    print('preview /tmp/hk-map-600-preview.png', flush=True)
 
-def preview(terrain, elev, labels, spawn, path):
-    colors={WATER:(40,90,140),SAND:(220,205,160),GRASS:(120,160,90),FERTILE:(160,180,90),WETLAND:(90,120,100),FOREST:(80,120,70),HILL:(130,130,100),MOUNTAIN:(150,140,120),URBAN:(170,160,150),RECLAIMED:(190,180,160)}
-    with open(path,'wb') as f:
-        f.write(f'P6\n{W} {H}\n255\n'.encode())
-        buf=bytearray()
-        for i,t in enumerate(terrain):
-            r,g,b=colors.get(t,(0,0,0))
-            if t==WATER: e=0
-            else:
-                e=elev[i]/255
-                r=int(r*(0.65+0.45*e)); g=int(g*(0.65+0.45*e)); b=int(b*(0.65+0.45*e))
-            buf += bytes([min(255,r),min(255,g),min(255,b)])
-        f.write(buf)
-    print('preview',path)
+
+# ----------------------------- preview PNG (pure python, no PIL) -----------------------------
+PREVIEW_COLORS = {
+    WATER:(34,74,110), SAND:(222,206,158), GRASS:(122,156,86), FERTILE:(168,184,92),
+    WETLAND:(88,118,96), FOREST:(72,108,62), HILL:(132,130,98), MOUNTAIN:(152,142,120),
+    URBAN:(176,168,158), RECLAIMED:(196,186,166),
+}
+
+def _png_chunk(typ, data):
+    return struct.pack('>I', len(data)) + typ + data + struct.pack('>I', zlib.crc32(typ + data) & 0xffffffff)
+
+def write_png(path, width, height, rgb):
+    raw = bytearray()
+    stride = width*3
+    for y in range(height):
+        raw.append(0)
+        raw += rgb[y*stride:(y+1)*stride]
+    png = b'\x89PNG\r\n\x1a\n'
+    png += _png_chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0))
+    png += _png_chunk(b'IDAT', zlib.compress(bytes(raw), 6))
+    png += _png_chunk(b'IEND', b'')
+    with open(path, 'wb') as f:
+        f.write(png)
+
+def preview_png(terrain, elev, labels, spawn, path, scale=2):
+    """600×600 → 1200×1200 PNG（地形色 + 高程陰影 + 水塘深藍 + label 白點 + spawn 紅點）。"""
+    small = bytearray(W*H*3)
+    for i, t in enumerate(terrain):
+        r, g, b = PREVIEW_COLORS.get(t, (0, 0, 0))
+        if t != WATER:
+            e = elev[i]/255.0
+            k = 0.62 + 0.45*e
+            r = int(r*k); g = int(g*k); b = int(b*k)
+        else:
+            # 水塘/河溪比海略深藍
+            if elev[i] == 0 and t == WATER:
+                pass
+        small[i*3], small[i*3+1], small[i*3+2] = min(255, r), min(255, g), min(255, b)
+    # 內陸水域（水塘／河溪）用青藍色標示，方便核對 17+ 個水塘都有 rasterize 到
+    for i in range(W*H):
+        if terrain[i] != WATER:
+            continue
+        x = i % W; y = i // W
+        if 1 <= x < W-1 and 1 <= y < H-1:
+            land_nei = 0
+            for dy in (-1,0,1):
+                for dx in (-1,0,1):
+                    if terrain[(y+dy)*W + x+dx] != WATER:
+                        land_nei += 1
+            if land_nei >= 4:
+                small[i*3] = 24
+                small[i*3+1] = 136
+                small[i*3+2] = 170
+    # label 白點 / spawn 紅點
+    def plot(px, py, color, r=1):
+        for dy in range(-r, r+1):
+            for dx in range(-r, r+1):
+                xx, yy = px+dx, py+dy
+                if 0 <= xx < W and 0 <= yy < H:
+                    i = (yy*W+xx)*3
+                    small[i], small[i+1], small[i+2] = color
+    for name, dx, dy, kind in labels:
+        tx = int(round((dx + 0.5)*(W/96.0) - 0.5))
+        ty = int(round((dy + 0.5)*(H/96.0) - 0.5))
+        plot(tx, ty, (255,255,255), 1)
+    plot(spawn[0], spawn[1], (255,60,60), 2)
+    # nearest upscale
+    bw, bh = W*scale, H*scale
+    big = bytearray(bw*bh*3)
+    for y in range(bh):
+        sy = y//scale
+        row = sy*W*3
+        for x in range(bw):
+            sx = x//scale
+            si = row + sx*3
+            di = (y*bw + x)*3
+            big[di] = small[si]; big[di+1] = small[si+1]; big[di+2] = small[si+2]
+    write_png(path, bw, bh, big)
+
+
 if __name__=='__main__':
     main()

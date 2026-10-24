@@ -910,7 +910,7 @@ export function addLampPost(
   x: number,
   z: number,
   h = 1.6,
-  opts: { y?: number; ry?: number; color?: number; arm?: number } = {},
+  opts: { y?: number; ry?: number; color?: number; arm?: number; neon?: boolean } = {},
 ): THREE.Group {
   const g = new THREE.Group();
   g.position.set(x, opts.y ?? 0, z);
@@ -922,7 +922,8 @@ export function addLampPost(
   addBeamBetween(g, mat, new THREE.Vector3(0, h, 0), new THREE.Vector3(arm, h + 0.06, 0), 0.035, 4);
   const headMat = lib.lambert(PAL.wallWhite);
   addBox(g, headMat, 0.2, 0.07, 0.12, arm + 0.06, h + 0.04, 0);
-  addBox(g, lib.neonTube(PAL.wallWhite), 0.16, 0.03, 0.09, arm + 0.06, h - 0.005, 0);
+  // neon=false 時燈頭用受光材質（合併進 vertexLit，不額外加 draw call）
+  addBox(g, opts.neon === false ? headMat : lib.neonTube(PAL.wallWhite), 0.16, 0.03, 0.09, arm + 0.06, h - 0.005, 0);
   return g;
 }
 
@@ -2089,6 +2090,7 @@ export function addGantryCrane(
   ry = 0,
   y = 0,
   scale = 1,
+  opts: { anim?: boolean; beacon?: boolean; sign?: boolean } = {},
 ): THREE.Group {
   const g = new THREE.Group();
   g.position.set(x, y, z);
@@ -2126,10 +2128,10 @@ export function addGantryCrane(
   // 斜拉杆
   addBeamBetween(g, steel, new THREE.Vector3(-span * 0.4, legH + 0.2 * s, 0), new THREE.Vector3(1.4 * s, legH + 0.2 * s, 0), 0.05 * s, 4);
   addBeamBetween(g, steel, new THREE.Vector3(0, legH * 0.55, 0), new THREE.Vector3(2.2 * s, legH + 0.24 * s, 0), 0.05 * s, 4);
-  // 吊機小車（anim）
+  // 吊機小車（anim=true 時每幀沿懸臂移動；false 時合併為靜態幾何）
   const trolley = new THREE.Group();
   trolley.position.set(1.2 * s, legH + 0.02 * s, 0);
-  trolley.userData.anim = 'crane';
+  if (opts.anim !== false) trolley.userData.anim = 'crane';
   g.add(trolley);
   addBox(trolley, lib.lambert(PAL.busYellow), 0.34 * s, 0.2 * s, 0.5 * s, 0, 0, 0);
   addBox(trolley, lib.lambert(PAL.ironDark), 0.06 * s, 0.5 * s, 0.06 * s, 0, -0.3 * s, 0);
@@ -2137,20 +2139,22 @@ export function addGantryCrane(
   // 駕駛室
   addBox(g, lib.lambert(PAL.wallWhite), 0.3 * s, 0.3 * s, 0.35 * s, -0.4 * s, legH - 0.1 * s, 0.3 * s);
   addBox(g, lib.lambert(PAL.glassDark), 0.26 * s, 0.16 * s, 0.02 * s, -0.4 * s, legH - 0.06 * s, 0.48 * s);
-  // 吊機紅燈
-  addSphere(g, lib.neonTube(PAL.neonRed), 0.04 * s, 0, legH + 0.35 * s, 0, 5, 4);
-  // 大樑上的「葵涌」字牌
-  const signMat = lib.label('葵涌貨櫃碼頭', {
-    w: 640,
-    h: 128,
-    bg: '#1b2b33',
-    fg: '#ffd166',
-    border: '#ffd166',
-    fontScale: 0.5,
-  });
-  const sign = new THREE.Mesh(new THREE.PlaneGeometry(2.6 * s, 0.5 * s), signMat);
-  sign.position.set(0.2 * s, legH + 0.42 * s, 0.08 * s);
-  g.add(sign);
+  // 吊機紅燈（beacon=false 時用普通紅球，省一個材質桶）
+  addSphere(g, opts.beacon === false ? lib.lambert(PAL.fireRed) : lib.neonTube(PAL.neonRed), 0.04 * s, 0, legH + 0.35 * s, 0, 5, 4);
+  // 大樑上的「葵涌」字牌（sign=false 時不加，避免多一個貼圖材質桶）
+  if (opts.sign !== false) {
+    const signMat = lib.label('葵涌貨櫃碼頭', {
+      w: 640,
+      h: 128,
+      bg: '#1b2b33',
+      fg: '#ffd166',
+      border: '#ffd166',
+      fontScale: 0.5,
+    });
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(2.6 * s, 0.5 * s), signMat);
+    sign.position.set(0.2 * s, legH + 0.42 * s, 0.08 * s);
+    g.add(sign);
+  }
   return g;
 }
 
@@ -2619,5 +2623,682 @@ export function addBikeRack(
     addBox(g, metal, 0.03, 0.34, 0.03, px, 0.17, 0);
     addBox(g, metal, 0.03, 0.03, 0.6, px, 0.34, 0);
   }
+  return g;
+}
+
+// ═══════════════════════════ 第三部分（Round 5）：公用設施／機場／碼頭新零件 ═══════════════════════════
+
+/**
+ * 高架水塔（圓柱水缸＋支架＋檢修梯＋紅色障礙燈）。
+ * squat=true 時改為地面圓形水缸（配水泵房），外觀仍辨識為水塔。
+ * 全部零件合併入 vertexLit／vertexNeon 桶（2 draw calls）。
+ */
+export function addWaterTower(
+  parent: THREE.Object3D,
+  lib: MaterialLibrary,
+  x: number,
+  z: number,
+  y = 0,
+  opts: { squat?: boolean; color?: number } = {},
+): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, y, z);
+  parent.add(g);
+  const concrete = lib.lambert(PAL.concreteLight);
+  const tankMat = lib.lambert(opts.color ?? PAL.aluminium);
+  const steel = lib.lambert(PAL.steelGrey);
+
+  if (!opts.squat) {
+    // ── 高架水塔 ──
+    addBox(g, lib.lambert(PAL.concrete), 1.5, 0.16, 1.5, 0, 0.08, 0);
+    // 四支混凝土腳
+    for (const [dx, dz] of [
+      [-0.5, -0.5],
+      [0.5, -0.5],
+      [-0.5, 0.5],
+      [0.5, 0.5],
+    ]) {
+      addBox(g, concrete, 0.15, 1.35, 0.15, dx, 0.83, dz);
+    }
+    // X 形斜撐（四面）
+    for (const side of [-1, 1]) {
+      addBeamBetween(g, concrete, new THREE.Vector3(-0.5, 0.2, side * 0.5), new THREE.Vector3(0.5, 1.15, side * 0.5), 0.07, 4);
+      addBeamBetween(g, concrete, new THREE.Vector3(0.5, 0.2, side * 0.5), new THREE.Vector3(-0.5, 1.15, side * 0.5), 0.07, 4);
+      addBeamBetween(g, concrete, new THREE.Vector3(side * 0.5, 0.2, -0.5), new THREE.Vector3(side * 0.5, 1.15, 0.5), 0.07, 4);
+    }
+    // 環樑
+    for (const side of [-1, 1]) {
+      addBox(g, concrete, 1.26, 0.09, 0.12, 0, 1.42, side * 0.5);
+      addBox(g, concrete, 0.12, 0.09, 1.26, side * 0.5, 1.42, 0);
+    }
+    // 水缸（圓柱＋錐頂＋底錐）
+    addCylinder(g, tankMat, 0.66, 0.66, 0.78, 0, 1.92, 0, 14);
+    addCylinder(g, lib.lambert(PAL.steelGrey), 0.68, 0.68, 0.07, 0, 1.56, 0, 14);
+    addCone(g, lib.lambert(PAL.aluminiumDark), 0.7, 0.24, 0, 2.43, 0, 14);
+    addCylinder(g, lib.lambert(PAL.ironDark), 0.16, 0.16, 0.09, 0.18, 2.55, 0, 8);
+    // 檢修環形欄杆
+    for (const side of [-1, 1]) {
+      addRailing(g, lib, -0.62, side * 0.62, 0.62, side * 0.62, 0.42, { y: 1.56, color: PAL.steelGrey, posts: 4 });
+      addRailing(g, lib, side * 0.62, -0.62, side * 0.62, 0.62, 0.42, { y: 1.56, color: PAL.steelGrey, posts: 4 });
+    }
+    // 爬梯
+    addBox(g, lib.lambert(PAL.ironDark), 0.04, 1.5, 0.04, -0.72, 0.85, -0.2);
+    addBox(g, lib.lambert(PAL.ironDark), 0.04, 1.5, 0.04, -0.72, 0.85, 0.12);
+    for (let i = 0; i < 6; i++) {
+      addBox(g, steel, 0.03, 0.025, 0.36, -0.72, 0.28 + i * 0.23, -0.04);
+    }
+    // 進水管／閥門
+    addCylinder(g, steel, 0.07, 0.07, 1.4, 0.72, 0.7, 0.18, 6);
+    addCylinder(g, lib.lambert(PAL.ironDark), 0.12, 0.12, 0.1, 0.72, 0.52, 0.18, 8);
+    addCylinder(g, lib.lambert(PAL.fireRed), 0.1, 0.1, 0.05, 0.72, 0.9, 0.18, 8);
+    addBeamBetween(g, steel, new THREE.Vector3(0.72, 1.42, 0.18), new THREE.Vector3(0.55, 1.56, 0.18), 0.07, 5);
+    // 地面泵房／配電箱
+    addBox(g, lib.lambert(PAL.tileWhite), 0.72, 0.62, 0.52, -0.55, 0.47, 0.62);
+    addBox(g, lib.lambert(PAL.aluminiumDark), 0.76, 0.08, 0.56, -0.55, 0.81, 0.62);
+    addBox(g, lib.lambert(PAL.ironDark), 0.3, 0.42, 0.22, 0.62, 0.37, -0.62);
+  } else {
+    // ── 地面圓形水缸（配水泵房）──
+    addCylinder(g, lib.lambert(PAL.concrete), 0.95, 1.0, 0.28, 0, 0.14, 0, 18);
+    addCylinder(g, tankMat, 0.86, 0.9, 0.95, 0, 0.75, 0, 18);
+    addCylinder(g, lib.lambert(PAL.steelGrey), 0.9, 0.9, 0.06, 0, 1.25, 0, 18);
+    const dome = addSphere(g, lib.lambert(PAL.aluminiumDark), 0.88, 0, 1.26, 0, 18, 8);
+    dome.scale.y = 0.42;
+    // 檢修口＋通氣管
+    addCylinder(g, lib.lambert(PAL.ironDark), 0.14, 0.14, 0.12, 0.25, 1.62, 0, 8);
+    addCylinder(g, steel, 0.04, 0.04, 0.5, -0.35, 1.55, 0.2, 5);
+    // 外圍欄杆
+    addRailing(g, lib, -0.95, 0.62, 0.95, 0.62, 0.42, { y: 0.16, color: PAL.steelGrey, posts: 5 });
+    addRailing(g, lib, -0.95, -0.62, 0.95, -0.62, 0.42, { y: 0.16, color: PAL.steelGrey, posts: 5 });
+    // 泵房
+    addBox(g, lib.lambert(PAL.tileWhite), 0.8, 0.7, 0.6, -0.55, 0.51, -0.7);
+    addBox(g, lib.lambert(PAL.aluminiumDark), 0.84, 0.08, 0.64, -0.55, 0.9, -0.7);
+    addBox(g, lib.lambert(PAL.glassDark), 0.3, 0.22, 0.02, -0.55, 0.62, -0.4);
+    // 入水管
+    addCylinder(g, steel, 0.09, 0.09, 0.5, 0.55, 0.35, 0.72, 6, 0, Math.PI / 2);
+  }
+  // 紅色障礙燈（夜間發光；vertexNeon 共用 1 個 draw call）
+  addSphere(g, lib.neonTube(PAL.neonRed), 0.05, 0, opts.squat ? 1.72 : 2.62, 0, 6, 4);
+  return g;
+}
+
+/** 圓形沉澱池／澄清池（污水廠、水務）：池壁＋水面＋刮泥橋＋欄杆。 */
+export function addClarifierTank(
+  parent: THREE.Object3D,
+  lib: MaterialLibrary,
+  x: number,
+  z: number,
+  y = 0,
+  r = 0.9,
+  h = 0.42,
+): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, y, z);
+  parent.add(g);
+  const concrete = lib.lambert(PAL.concreteLight);
+  addCylinder(g, lib.lambert(PAL.concreteDark), r + 0.02, r + 0.02, 0.1, 0, 0.05, 0, 18);
+  addCylinder(g, concrete, r, r, h, 0, h / 2 + 0.08, 0, 18);
+  addCylinder(g, lib.lambert(PAL.concrete), r + 0.06, r + 0.06, 0.07, 0, h + 0.11, 0, 18);
+  // 水面用普通受光材質（合併進 vertexLit；避免多開材質桶）
+  addCylinder(g, lib.lambert(PAL.poolWater), r * 0.86, r * 0.86, 0.03, 0, h + 0.02, 0, 18);
+  // 中心柱＋刮泥橋
+  addCylinder(g, lib.lambert(PAL.steelGrey), 0.1, 0.12, h + 0.28, 0, (h + 0.28) / 2 + 0.08, 0, 8);
+  addBox(g, lib.lambert(PAL.steelGrey), r * 1.8, 0.06, 0.14, 0, h + 0.28, 0);
+  addBox(g, lib.lambert(PAL.wallWhite), r * 1.82, 0.03, 0.2, 0, h + 0.34, 0);
+  addRailing(g, lib, -r * 0.9, 0.1, r * 0.9, 0.1, 0.35, { y: h + 0.28, color: PAL.steelGrey, posts: 4 });
+  // 進水管
+  addCylinder(g, lib.lambert(PAL.steelGrey), 0.08, 0.08, 0.9, r * 0.72, h * 0.6, 0, 6, 0, Math.PI / 2);
+  return g;
+}
+
+/** 矩形曝氣池（污水廠）：池壁＋水面＋曝氣機＋走道欄杆。 */
+export function addAerationTank(
+  parent: THREE.Object3D,
+  lib: MaterialLibrary,
+  x: number,
+  z: number,
+  w = 1.8,
+  d = 1.2,
+  y = 0,
+): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, y, z);
+  parent.add(g);
+  const concrete = lib.lambert(PAL.concreteLight);
+  // 池壁（四邊）
+  addBox(g, lib.lambert(PAL.concreteDark), w + 0.08, 0.1, d + 0.08, 0, 0.05, 0);
+  addBox(g, concrete, w, 0.44, 0.1, 0, 0.3, d / 2);
+  addBox(g, concrete, w, 0.44, 0.1, 0, 0.3, -d / 2);
+  addBox(g, concrete, 0.1, 0.44, d, w / 2, 0.3, 0);
+  addBox(g, concrete, 0.1, 0.44, d, -w / 2, 0.3, 0);
+  // 水面
+  addBox(g, lib.lambert(PAL.poolWater), w - 0.24, 0.03, d - 0.24, 0, 0.44, 0);
+  // 曝氣機（一排小圓盤）
+  const n = Math.max(2, Math.round(w / 0.5));
+  for (let i = 0; i < n; i++) {
+    const px = -w / 2 + (w / n) * (i + 0.5);
+    addCylinder(g, lib.lambert(PAL.steelGrey), 0.11, 0.13, 0.12, px, 0.52, 0, 8);
+    addCylinder(g, lib.lambert(PAL.ironDark), 0.07, 0.07, 0.06, px, 0.6, 0, 6);
+  }
+  // 走道＋欄杆
+  addBox(g, lib.lambert(PAL.steelGrey), w + 0.2, 0.05, 0.3, 0, 0.31, d / 2 + 0.22);
+  addRailing(g, lib, -w / 2 - 0.05, d / 2 + 0.36, w / 2 + 0.05, d / 2 + 0.36, 0.42, { y: 0.33, color: PAL.steelGrey, posts: 5 });
+  return g;
+}
+
+/**
+ * 排污口（海邊管道）：岸邊混凝土基座＋大口徑排污管伸入海中（+x）＋擴散器＋浮標。
+ * 只加 lit 幾何，警示牌由 builder 另加（控制 draw call）。
+ */
+export function addOutfallPipe(
+  parent: THREE.Object3D,
+  lib: MaterialLibrary,
+  x: number,
+  z: number,
+  len = 1.6,
+  y = 0,
+): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, y, z);
+  parent.add(g);
+  const pipeMat = lib.lambert(PAL.concreteDark);
+  // 岸邊基座
+  addBox(g, lib.lambert(PAL.concreteLight), 0.9, 0.22, 1.4, 0, 0.11, 0);
+  // 主管（沿 +x 入海）
+  addCylinder(g, pipeMat, 0.2, 0.2, len, len / 2, 0.42, 0, 10, 0, Math.PI / 2);
+  addCylinder(g, lib.lambert(PAL.steelGrey), 0.23, 0.23, 0.12, 0.3, 0.42, 0, 10, 0, Math.PI / 2);
+  addCylinder(g, lib.lambert(PAL.steelGrey), 0.23, 0.23, 0.12, len - 0.25, 0.42, 0, 10, 0, Math.PI / 2);
+  // 混凝土支撐墩
+  for (let i = 1; i <= 2; i++) {
+    addBox(g, lib.lambert(PAL.concrete), 0.16, 0.42, 0.42, (len / 3) * i, 0.21, 0);
+  }
+  // 擴散器（末端向上噴口）
+  for (let i = 0; i < 3; i++) {
+    const px = len - 0.5 + i * 0.22;
+    addCylinder(g, pipeMat, 0.06, 0.07, 0.5, px, 0.72, 0, 6);
+    addCylinder(g, lib.lambert(PAL.ironDark), 0.09, 0.09, 0.05, px, 0.97, 0, 6);
+  }
+  // 浮標／警示黃黑
+  addCylinder(g, lib.lambert(PAL.hazardYellow), 0.09, 0.09, 0.3, len + 0.35, 0.15, 0.5, 8);
+  addCylinder(g, lib.lambert(PAL.hazardBlack), 0.1, 0.1, 0.06, len + 0.35, 0.32, 0.5, 8);
+  // 岸上紅色障礙燈（lambert，避免額外材質桶）
+  addSphere(g, lib.lambert(PAL.fireRed), 0.06, 0.35, 0.75, 0.5, 5, 4);
+  return g;
+}
+
+// ─────────────────────────── 巴士站／小巴 ───────────────────────────
+
+/**
+ * 香港路邊巴士站：候車亭（藍頂＋玻璃背板）＋長椅＋巴士站旗（1 個 label 材質）。
+ * 巴士站旗文字用 routes（如「1A 5 9 11K」），sub 顯示「巴士站 BUS STOP」。
+ */
+export function addBusShelter(
+  parent: THREE.Object3D,
+  lib: MaterialLibrary,
+  x: number,
+  z: number,
+  ry = 0,
+  y = 0,
+  opts: { routes?: string; bench?: boolean } = {},
+): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, y, z);
+  g.rotation.y = ry;
+  parent.add(g);
+  // 行人路地台＋黃色排隊線
+  addBox(g, lib.lambert(PAL.concreteLight), 1.7, 0.06, 1.3, 0, 0.03, 0);
+  addBox(g, lib.lambert(PAL.hazardYellow), 1.4, 0.012, 0.06, 0, 0.07, 0.42);
+  // 候車亭：兩柱＋藍頂＋玻璃背板＋長椅
+  const post = lib.lambert(PAL.steelGrey);
+  addCylinder(g, post, 0.035, 0.04, 1.25, -0.66, 0.66, -0.38, 6);
+  addCylinder(g, post, 0.035, 0.04, 1.25, 0.66, 0.66, -0.38, 6);
+  addBox(g, lib.lambert(PAL.busYellow), 1.6, 0.07, 0.62, 0, 1.34, -0.34);
+  addBox(g, lib.lambert(PAL.wallWhite), 1.66, 0.05, 0.66, 0, 1.4, -0.34);
+  addBox(g, lib.lambert(PAL.glassDark), 1.3, 0.8, 0.04, 0, 0.55, -0.62);
+  if (opts.bench !== false) addBench(g, lib, 0.1, -0.28, 0, 0.06, PAL.woodLight);
+  // 站旗（1 個標籤材質）
+  addBusStopFlag(g, lib, 1.05, 0.35, opts.routes ?? '1A 5 9 11K', { y: 0.06, ry: 0 });
+  // 垃圾桶
+  addLitterBin(g, lib, -0.72, 0.32, 0.06);
+  return g;
+}
+
+/** 綠色專線小巴站牌（綠頂白字＋路線牌）。 */
+export function addMinibusStopSign(
+  parent: THREE.Object3D,
+  lib: MaterialLibrary,
+  x: number,
+  z: number,
+  ry = 0,
+  y = 0,
+  routes = '44 44A 77',
+): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, y, z);
+  g.rotation.y = ry;
+  parent.add(g);
+  // 地台＋排隊欄
+  addBox(g, lib.lambert(PAL.concreteLight), 1.4, 0.06, 1.0, 0, 0.03, 0);
+  addRailing(g, lib, -0.5, 0.3, 0.5, 0.3, 0.45, { y: 0.06, color: PAL.tramGreen, posts: 3 });
+  // 站牌柱（綠頂）
+  addCylinder(g, lib.lambert(PAL.steelGrey), 0.03, 0.035, 1.7, 0.35, 0.85, -0.15, 6);
+  addBox(g, lib.lambert(PAL.tramGreen), 0.5, 0.28, 0.08, 0.35, 1.72, -0.15);
+  const plateMat = lib.label(routes, {
+    w: 384,
+    h: 128,
+    bg: '#2f7f4f',
+    fg: '#ffffff',
+    border: '#ffffff',
+    sub: '綠色專線小巴 GREEN MINIBUS',
+    fontScale: 0.44,
+  });
+  const plate = new THREE.Mesh(new THREE.PlaneGeometry(0.46, 0.24), plateMat);
+  plate.position.set(0.35, 1.72, -0.105);
+  g.add(plate);
+  // 路線圖板（幾何，不另加材質）
+  addBox(g, lib.lambert(PAL.wallWhite), 0.34, 0.44, 0.03, -0.3, 1.15, -0.12);
+  for (let i = 0; i < 5; i++) {
+    addBox(g, lib.lambert(PAL.steelGrey), 0.26, 0.025, 0.01, -0.3, 1.28 - i * 0.06, -0.1);
+  }
+  // 長椅
+  addBench(g, lib, -0.35, 0.22, Math.PI, 0.06, PAL.woodLight);
+  return g;
+}
+
+/** 靜態小巴（綠色專線／紅色公共小巴），只加 lit 幾何。 */
+export function addMinibus(
+  parent: THREE.Object3D,
+  lib: MaterialLibrary,
+  x: number,
+  z: number,
+  ry = 0,
+  y = 0,
+  red = false,
+): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, y, z);
+  g.rotation.y = ry;
+  parent.add(g);
+  const bodyColor = red ? 0xb0453c : PAL.tramGreen;
+  const body = lib.lambert(bodyColor);
+  const white = lib.lambert(PAL.wallWhite);
+  const glass = lib.lambert(PAL.glassDark);
+  const roofY = 1.02;
+  // 車身（長條廂型）
+  addBox(g, body, 1.7, 0.62, 0.66, 0, roofY - 0.34, 0);
+  // 高頂（白色）
+  addBox(g, white, 1.5, 0.3, 0.6, 0, roofY, 0);
+  addBox(g, lib.lambert(red ? PAL.clothRed : 0x3f8f5f), 1.52, 0.1, 0.62, 0, roofY + 0.16, 0);
+  // 車頭
+  addBox(g, body, 0.3, 0.46, 0.6, 0.95, roofY - 0.44, 0);
+  addBox(g, glass, 0.04, 0.3, 0.5, 1.1, roofY - 0.28, 0);
+  // 側窗
+  addBox(g, glass, 1.4, 0.24, 0.02, -0.05, roofY - 0.2, 0.34);
+  addBox(g, glass, 1.4, 0.24, 0.02, -0.05, roofY - 0.2, -0.34);
+  // 車輪
+  for (const [wx, wz] of [
+    [0.55, 0.34],
+    [-0.55, 0.34],
+    [0.55, -0.34],
+    [-0.55, -0.34],
+  ]) {
+    addCylinder(g, lib.lambert(PAL.ironDark), 0.16, 0.16, 0.1, wx, 0.16, wz, 8, 0, Math.PI / 2);
+  }
+  // 保險桿/車牌
+  addBox(g, lib.lambert(PAL.aluminium), 0.1, 0.1, 0.6, 1.12, 0.28, 0);
+  addBox(g, lib.lambert(PAL.wallWhite), 0.02, 0.12, 0.24, 1.13, 0.42, 0);
+  return g;
+}
+
+// ─────────────────────────── 機場 ───────────────────────────
+
+/**
+ * 簡化客機／貨機（低多邊形；放在停機坪／貨運站）。
+ * 全部 lit 幾何，不另加材質桶。
+ */
+export function addAircraft(
+  parent: THREE.Object3D,
+  lib: MaterialLibrary,
+  x: number,
+  z: number,
+  ry = 0,
+  y = 0,
+  scale = 1,
+  opts: { cargo?: boolean; livery?: number } = {},
+): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, y, z);
+  g.rotation.y = ry;
+  const s = scale;
+  g.scale.setScalar(s);
+  parent.add(g);
+  const white = lib.lambert(PAL.wallWhite);
+  const grey = lib.lambert(PAL.aluminium);
+  const glass = lib.lambert(PAL.glassDark);
+  const livery = lib.lambert(opts.livery ?? (opts.cargo ? PAL.cargoGreen : 0xb02a2a));
+  const fusR = opts.cargo ? 0.23 : 0.19;
+  const fusLen = opts.cargo ? 2.3 : 2.6;
+  const cy = 0.62;
+  // 機身
+  addCylinder(g, white, fusR, fusR, fusLen, 0, cy, 0, 10, 0, Math.PI / 2);
+  // 機頭／機尾錐
+  const nose = addCone(g, white, fusR, 0.5, fusLen / 2 + 0.16, cy, 0, 10);
+  nose.rotation.z = -Math.PI / 2;
+  const tailCone = addCone(g, white, fusR * 0.92, 0.7, -fusLen / 2 - 0.24, cy + 0.1, 0, 10);
+  tailCone.rotation.z = Math.PI / 2;
+  // 塗裝腰線
+  addBox(g, livery, fusLen * 0.82, 0.07, fusR * 1.88, 0, cy - 0.02, 0);
+  // 窗帶（貨機無窗）
+  if (!opts.cargo) {
+    addBox(g, glass, fusLen * 0.66, 0.06, fusR * 2.02, 0.05, cy + 0.07, 0);
+  } else {
+    // 貨艙門
+    addBox(g, grey, 0.5, 0.24, 0.03, 0.3, cy + 0.02, fusR + 0.005);
+  }
+  // 主翼（後掠）
+  const wing = addBox(g, white, 0.62, 0.07, 3.0, 0.05, cy - 0.06, 0);
+  wing.rotation.y = 0.1;
+  addBox(g, livery, 0.64, 0.08, 0.24, 0.05, cy - 0.06, 1.3);
+  addBox(g, livery, 0.64, 0.08, 0.24, 0.05, cy - 0.06, -1.3);
+  // 翼尖小翼
+  addBox(g, white, 0.2, 0.26, 0.05, -0.08, cy + 0.06, 1.42);
+  addBox(g, white, 0.2, 0.26, 0.05, -0.08, cy + 0.06, -1.42);
+  // 水平尾翼
+  addBox(g, white, 0.4, 0.05, 1.1, -fusLen / 2 + 0.1, cy + 0.02, 0);
+  // 垂直尾翼
+  addBox(g, livery, 0.42, 0.72, 0.06, -fusLen / 2 + 0.06, cy + 0.4, 0);
+  addBox(g, white, 0.4, 0.2, 0.065, -fusLen / 2 + 0.06, cy + 0.16, 0);
+  // 引擎
+  for (const ez of [0.78, -0.78]) {
+    addCylinder(g, grey, 0.16, 0.17, 0.58, 0.18, cy - 0.18, ez, 8, 0, Math.PI / 2);
+    addCylinder(g, glass, 0.13, 0.13, 0.03, 0.48, cy - 0.18, ez, 8, 0, Math.PI / 2);
+    addBox(g, white, 0.3, 0.08, 0.12, 0.05, cy - 0.1, ez);
+  }
+  // 起落架
+  addCylinder(g, lib.lambert(PAL.ironDark), 0.035, 0.035, 0.42, 0.5, 0.3, 0, 5);
+  addCylinder(g, lib.lambert(PAL.ironDark), 0.035, 0.035, 0.42, -0.45, 0.3, 0, 5);
+  for (const [wx, wz] of [
+    [0.5, 0.22],
+    [0.5, -0.22],
+    [-0.45, 0.3],
+    [-0.45, -0.3],
+  ]) {
+    addCylinder(g, lib.lambert(0x1c1c1c), 0.09, 0.09, 0.07, wx, 0.12, wz, 8, 0, Math.PI / 2);
+  }
+  return g;
+}
+
+/** 登機橋（連接客運大樓與飛機；向 -z 伸出）。 */
+export function addJetBridge(
+  parent: THREE.Object3D,
+  lib: MaterialLibrary,
+  x: number,
+  y: number,
+  z: number,
+  len = 1.4,
+  ry = 0,
+): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, y, z);
+  g.rotation.y = ry;
+  parent.add(g);
+  const body = lib.lambert(PAL.aluminium);
+  // 橋身（-z 方向）
+  addBox(g, body, 0.46, 0.4, len, 0, 0, -len / 2);
+  addBox(g, lib.lambert(PAL.wallWhite), 0.5, 0.06, len, 0, 0.22, -len / 2);
+  // 窗帶
+  addBox(g, lib.lambert(PAL.glassDark), 0.02, 0.16, len * 0.8, 0.24, 0.02, -len / 2);
+  addBox(g, lib.lambert(PAL.glassDark), 0.02, 0.16, len * 0.8, -0.24, 0.02, -len / 2);
+  // 伸縮風琴位
+  for (let i = 0; i < 3; i++) {
+    addBox(g, lib.lambert(PAL.ironDark), 0.5, 0.44, 0.06, 0, 0, -len + 0.12 + i * 0.1 - 0.2);
+  }
+  // 支撐柱＋輪架
+  addCylinder(g, lib.lambert(PAL.steelGrey), 0.06, 0.07, 0.9, 0, -0.65, -len * 0.62, 6);
+  addBox(g, lib.lambert(PAL.ironDark), 0.3, 0.24, 0.24, 0, -1.02, -len * 0.62);
+  return g;
+}
+
+/** 機場控制塔（塔身＋玻璃指揮室＋雷達＋障礙燈；全部 lit 幾何）。 */
+export function addControlTower(
+  parent: THREE.Object3D,
+  lib: MaterialLibrary,
+  x: number,
+  z: number,
+  height = 2.8,
+  y = 0,
+): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, y, z);
+  parent.add(g);
+  const shaft = lib.lambert(PAL.tileWhite);
+  // 塔身（下闊上窄）
+  addCylinder(g, shaft, 0.22, 0.3, height, 0, height / 2, 0, 10);
+  addCylinder(g, lib.lambert(PAL.concreteDark), 0.36, 0.38, 0.14, 0, 0.07, 0, 10);
+  // 指揮室（玻璃圓柱＋鋁框）
+  const cabY = height + 0.28;
+  addCylinder(g, lib.lambert(PAL.glassBlue), 0.42, 0.36, 0.5, 0, cabY, 0, 12);
+  addCylinder(g, lib.lambert(PAL.aluminium), 0.46, 0.46, 0.09, 0, cabY - 0.28, 0, 12);
+  addCylinder(g, lib.lambert(PAL.aluminium), 0.44, 0.44, 0.07, 0, cabY + 0.29, 0, 12);
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    addBox(g, lib.lambert(PAL.aluminium), 0.04, 0.5, 0.04, Math.cos(a) * 0.4, cabY, Math.sin(a) * 0.4);
+  }
+  // 屋頂＋天線＋雷達
+  addCylinder(g, lib.lambert(PAL.concreteLight), 0.36, 0.36, 0.08, 0, cabY + 0.37, 0, 10);
+  addCylinder(g, lib.lambert(PAL.steelGrey), 0.02, 0.03, 0.55, 0, cabY + 0.7, 0, 5);
+  addSphere(g, lib.lambert(PAL.fireRed), 0.05, 0, cabY + 1.0, 0, 5, 4);
+  // 雷達碟
+  const dish = addCylinder(g, lib.lambert(PAL.wallWhite), 0.16, 0.16, 0.05, 0.22, cabY + 0.5, 0.1, 10);
+  dish.rotation.x = -0.6;
+  addCylinder(g, lib.lambert(PAL.ironDark), 0.015, 0.015, 0.2, 0.22, cabY + 0.42, 0.1, 4);
+  return g;
+}
+
+/** 雷達天線（機場貨運站／導航）。 */
+export function addRadarDish(
+  parent: THREE.Object3D,
+  lib: MaterialLibrary,
+  x: number,
+  z: number,
+  y = 0,
+  scale = 1,
+): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, y, z);
+  g.scale.setScalar(scale);
+  parent.add(g);
+  addCylinder(g, lib.lambert(PAL.steelGrey), 0.05, 0.06, 1.2, 0, 0.6, 0, 6);
+  const dish = addCylinder(g, lib.lambert(PAL.wallWhite), 0.28, 0.28, 0.05, 0, 1.3, 0, 12);
+  dish.rotation.x = -0.75;
+  addCylinder(g, lib.lambert(PAL.ironDark), 0.02, 0.02, 0.3, 0, 1.22, 0.12, 4);
+  return g;
+}
+
+/**
+ * 弧形／拱形屋頂（以多段斜面近似，低多邊形）。
+ * 沿 x 軸延伸、跨 z 方向拱起；rise=拱高。
+ */
+export function addBarrelRoof(
+  parent: THREE.Object3D,
+  lib: MaterialLibrary,
+  x: number,
+  y: number,
+  z: number,
+  w: number,
+  d: number,
+  rise: number,
+  color: number = PAL.wallWhite,
+  ry = 0,
+): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, y, z);
+  g.rotation.y = ry;
+  parent.add(g);
+  const mat = lib.lambert(color);
+  const segs = 7;
+  for (let i = 0; i < segs; i++) {
+    const t = -1 + (2 * (i + 0.5)) / segs;
+    const zc = (t * d) / 2;
+    const yc = rise * (1 - t * t);
+    const slope = (-2 * rise * t) / (d / 2);
+    const segD = (d / segs) * 1.12;
+    const panel = addBox(g, mat, w, 0.07, segD, 0, yc, zc);
+    panel.rotation.x = Math.atan(slope) * 0.82;
+  }
+  // 兩端封檐
+  addBox(g, lib.lambert(PAL.aluminium), 0.1, 0.18, d, w / 2, rise * 0.55, 0);
+  addBox(g, lib.lambert(PAL.aluminium), 0.1, 0.18, d, -w / 2, rise * 0.55, 0);
+  return g;
+}
+
+// ─────────────────────────── 碼頭閘口／貨櫃堆場 ───────────────────────────
+
+/** 貨櫃車（靜態；閘口／堆場用）。全部 lit 幾何。 */
+export function addContainerTruck(
+  parent: THREE.Object3D,
+  lib: MaterialLibrary,
+  x: number,
+  z: number,
+  ry = 0,
+  y = 0,
+  containerColor: number = PAL.cargoRed,
+): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, y, z);
+  g.rotation.y = ry;
+  parent.add(g);
+  // 拖頭
+  addBox(g, lib.lambert(PAL.wallWhite), 0.55, 0.5, 0.62, 0.95, 0.55, 0);
+  addBox(g, lib.lambert(PAL.glassDark), 0.04, 0.22, 0.5, 1.24, 0.66, 0);
+  addBox(g, lib.lambert(PAL.ironDark), 0.6, 0.16, 0.66, 0.95, 0.24, 0);
+  addBox(g, lib.lambert(PAL.ironDark), 1.9, 0.14, 0.66, -0.2, 0.24, 0);
+  // 貨櫃
+  addContainer(g, lib, -0.3, 0.34, 0, 1.5, 0.6, 0.62, containerColor);
+  // 車輪
+  for (const [wx, wz] of [
+    [1.05, 0.34],
+    [1.05, -0.34],
+    [0.5, 0.34],
+    [0.5, -0.34],
+    [-0.85, 0.34],
+    [-0.85, -0.34],
+  ]) {
+    addCylinder(g, lib.lambert(0x1c1c1c), 0.14, 0.14, 0.09, wx, 0.14, wz, 8, 0, Math.PI / 2);
+  }
+  return g;
+}
+
+/** 閘口龍門架（橫跨行車線；鋼架＋標示板）。 */
+export function addGatePortal(
+  parent: THREE.Object3D,
+  lib: MaterialLibrary,
+  x: number,
+  z: number,
+  w = 3.2,
+  h = 1.7,
+  y = 0,
+): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, y, z);
+  parent.add(g);
+  const steel = lib.lambert(PAL.steelGrey);
+  // 兩柱
+  addBox(g, steel, 0.14, h, 0.14, -w / 2, h / 2, 0);
+  addBox(g, steel, 0.14, h, 0.14, w / 2, h / 2, 0);
+  addBox(g, lib.lambert(PAL.concrete), 0.4, 0.18, 0.4, -w / 2, 0.09, 0);
+  addBox(g, lib.lambert(PAL.concrete), 0.4, 0.18, 0.4, w / 2, 0.09, 0);
+  // 橫樑＋斜撐
+  addBox(g, steel, w + 0.2, 0.16, 0.16, 0, h, 0);
+  addBeamBetween(g, steel, new THREE.Vector3(-w / 2, h, 0), new THREE.Vector3(-w / 2 + 0.5, h + 0.35, 0), 0.08, 4);
+  addBeamBetween(g, steel, new THREE.Vector3(w / 2, h, 0), new THREE.Vector3(w / 2 - 0.5, h + 0.35, 0), 0.08, 4);
+  // 標示板
+  addBox(g, lib.lambert(PAL.cargoBlue), w * 0.5, 0.36, 0.06, 0, h + 0.18, 0);
+  // 行車線燈號（vertexNeon 桶）
+  for (let i = 0; i < 3; i++) {
+    const lx = -w / 2 + (w / 3) * (i + 0.5);
+    addBox(g, lib.lambert(PAL.ironDark), 0.14, 0.14, 0.1, lx, h - 0.18, 0.1);
+    addSphere(g, lib.neonTube(i === 1 ? PAL.neonRed : PAL.neonGreen), 0.045, lx, h - 0.18, 0.17, 5, 4);
+  }
+  return g;
+}
+
+/** 自動閘桿（紅白相間）。 */
+export function addBoomBarrier(
+  parent: THREE.Object3D,
+  lib: MaterialLibrary,
+  x: number,
+  y: number,
+  z: number,
+  ry = 0,
+  len = 1.0,
+  open = false,
+): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, y, z);
+  g.rotation.y = ry;
+  parent.add(g);
+  // 基座
+  addBox(g, lib.lambert(PAL.steelGrey), 0.2, 0.5, 0.2, 0, 0.25, 0);
+  addBox(g, lib.lambert(PAL.busYellow), 0.22, 0.08, 0.22, 0, 0.52, 0);
+  // 閘桿（紅白段）
+  const arm = new THREE.Group();
+  arm.position.set(0, 0.52, 0);
+  arm.rotation.y = open ? -1.2 : 0;
+  g.add(arm);
+  const segs = 6;
+  for (let i = 0; i < segs; i++) {
+    addBox(arm, lib.lambert(i % 2 === 0 ? PAL.fireRed : PAL.wallWhite), len / segs, 0.07, 0.07, (len / segs) * (i + 0.5), 0, 0);
+  }
+  addBox(arm, lib.lambert(PAL.fireRed), 0.06, 0.16, 0.16, len, 0, 0);
+  return g;
+}
+
+/** 高桿照明燈（貨櫃堆場／機場停機坪）；glow=true 時燈頭走 vertexNeon 桶。 */
+export function addFloodlightMast(
+  parent: THREE.Object3D,
+  lib: MaterialLibrary,
+  x: number,
+  z: number,
+  h = 2.6,
+  y = 0,
+  opts: { glow?: boolean; heads?: number; ry?: number } = {},
+): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, y, z);
+  g.rotation.y = opts.ry ?? 0;
+  parent.add(g);
+  const pole = lib.lambert(PAL.steelGrey);
+  addCylinder(g, pole, 0.05, 0.08, h, 0, h / 2, 0, 6);
+  addBox(g, lib.lambert(PAL.concrete), 0.4, 0.16, 0.4, 0, 0.08, 0);
+  const heads = opts.heads ?? 3;
+  for (let i = 0; i < heads; i++) {
+    const px = -0.18 + i * 0.18;
+    addBox(g, lib.lambert(PAL.ironDark), 0.16, 0.12, 0.12, px, h + 0.14, 0.06);
+    const panel = opts.glow
+      ? lib.neonTube(PAL.wallWhite)
+      : lib.lambert(PAL.wallWhite);
+    addBox(g, panel, 0.14, 0.06, 0.04, px, h + 0.09, 0.13);
+  }
+  return g;
+}
+
+/** 貨櫃車閘口值勤亭（玻璃亭＋屋頂）。 */
+export function addGateBooth(
+  parent: THREE.Object3D,
+  lib: MaterialLibrary,
+  x: number,
+  z: number,
+  ry = 0,
+  y = 0,
+): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, y, z);
+  g.rotation.y = ry;
+  parent.add(g);
+  addBox(g, lib.lambert(PAL.concreteLight), 0.72, 0.12, 0.72, 0, 0.06, 0);
+  addBox(g, lib.lambert(PAL.tileWhite), 0.6, 0.7, 0.6, 0, 0.47, 0);
+  addBox(g, lib.lambert(PAL.glassDark), 0.5, 0.36, 0.62, 0, 0.62, 0);
+  addBox(g, lib.lambert(PAL.cargoBlue), 0.72, 0.09, 0.72, 0, 0.88, 0);
+  addBox(g, lib.lambert(PAL.ironDark), 0.24, 0.3, 0.02, 0, 0.32, 0.31);
   return g;
 }

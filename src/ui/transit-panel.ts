@@ -12,14 +12,22 @@ import {
   DAYS_PER_MONTH,
   MAP_LABELS,
   TRANSIT_INFO,
+  TRANSIT_LINE_CONFIG,
   TRANSIT_SPEED,
   WEATHER_INFO,
   formatMoney,
   formatMoneyShort,
 } from '../core/config';
-import type { GameActions, GameState, TransitMode, TransitState } from '../core/types';
+import type {
+  GameActions,
+  GameState,
+  TransitLine,
+  TransitLineMode,
+  TransitMode,
+  TransitState,
+} from '../core/types';
 import type { GameStore } from '../core/store';
-import { esc, num, pct, ratioTone, setClass } from './dom';
+import { delegate, esc, num, pct, ratioTone, setClass } from './dom';
 import { formatMinutes } from './format';
 import { ico, transitIcon } from './icons';
 import { createOverlayHost, modalShell, restoreInfoPanel } from './overlay';
@@ -92,7 +100,7 @@ function collectModeStats(state: GameState, transit: TransitState): ModeStats[] 
   });
 }
 
-function modeCard(stat: ModeStats, state: GameState): string {
+function modeCard(stat: ModeStats, state: GameState, lineCount = 0): string {
   const info = TRANSIT_INFO[stat.mode];
   const load = stat.capacity > 0 ? Math.min(1.5, stat.ridership / stat.capacity) : 0;
   const loadPct = Math.round(load * 100);
@@ -123,6 +131,7 @@ function modeCard(stat: ModeStats, state: GameState): string {
         <span>運力 ${num(stat.capacity)}/日</span>
         <span>預計月收 ${formatMoneyShort(stat.monthlyFareEstimate)}</span>
         <span>每日 ${num(stat.ridership)} 人次</span>
+        ${stat.mode === 'bus' ? `<span>玩家路線 ${lineCount} 條</span>` : ''}
       </footer>
     </article>
   `;
@@ -158,6 +167,264 @@ export function createTransitPanel(container: HTMLElement, store: GameStore, act
   const host = createOverlayHost(container, actions, closeTransit);
   let lastSig = '';
   let lastWatermark = -1;
+  /** 建線草稿選項（本地，main 只存 mode＋stopIds） */
+  let draftOptions = { vehicleCount: 2, fare: 6, loop: false };
+
+  const CLEAR_DRAFT = (state: GameState): void => {
+    state.ui.lineEditorActive = false;
+    state.ui.lineDraft = null;
+    store.bumpUI();
+  };
+
+  const lineProfit = (line: TransitLine): { revenue: number; cost: number; profit: number } => {
+    const revenue = Math.round(line.ridershipToday * line.fare);
+    const cost = line.vehicleCount * TRANSIT_LINE_CONFIG.dailyCostPerVehicle[line.mode];
+    return { revenue, cost, profit: revenue - cost };
+  };
+
+  const lineModeLabel = (mode: TransitLineMode): string => (mode === 'bus' ? '巴士' : '小巴');
+
+  const eligibleStops = (state: GameState, mode: TransitLineMode) =>
+    state.buildings.filter((b) =>
+      mode === 'bus' ? b.key === 'busStop' || b.key === 'busTerminus' : b.key === 'minibusStop' || b.key === 'minibusDepot',
+    );
+
+  const startEditor = (state: GameState, mode: TransitLineMode): void => {
+    draftOptions = { vehicleCount: 2, fare: mode === 'bus' ? 6 : 4, loop: false };
+    if (typeof actions.beginLineEditor === 'function') {
+      // main 會驗證車廠／站點、set tool='line-select'、開 transit panel
+      actions.beginLineEditor(mode);
+      store.bumpUI();
+      return;
+    }
+    // fallback：main 未接 action 時，UI 自己建立草稿
+    store.state.ui.lineEditorActive = true;
+    store.state.ui.lineDraft = { mode, stopIds: [] };
+    store.state.ui.showTransit = true;
+    store.state.ui.selectedLineId = null;
+    store.bumpUI();
+  };
+
+  const toggleDraftStop = (state: GameState, id: number): void => {
+    if (typeof actions.toggleLineStop === 'function') {
+      actions.toggleLineStop(id);
+      return;
+    }
+    const draft = state.ui.lineDraft;
+    if (!draft) return;
+    const idx = draft.stopIds.indexOf(id);
+    if (idx >= 0) {
+      draft.stopIds.splice(idx, 1);
+    } else {
+      if (draft.stopIds.length >= TRANSIT_LINE_CONFIG.maxStops) {
+        store.toast(`最多 ${TRANSIT_LINE_CONFIG.maxStops} 個站`, 'warn');
+        return;
+      }
+      draft.stopIds.push(id);
+    }
+    store.bumpUI();
+  };
+
+  const finishEditor = (state: GameState): void => {
+    const draft = state.ui.lineDraft;
+    if (!draft) return;
+    const stops = draft.stopIds;
+    if (stops.length < 2) {
+      store.toast('路線最少需要 2 個站', 'warn');
+      return;
+    }
+    const hasDepot = state.buildings.some(
+      (b) => stops.includes(b.id) && (draft.mode === 'bus' ? b.key === 'busTerminus' : b.key === 'minibusDepot'),
+    );
+    if (!hasDepot) {
+      store.toast(draft.mode === 'bus' ? '巴士線需要至少 1 座巴士總站' : '小巴線需要至少 1 座小巴車廠', 'warn');
+      return;
+    }
+    const cfg = TRANSIT_LINE_CONFIG;
+    const vehicleCount = Math.min(cfg.vehicleMax, Math.max(cfg.vehicleMin, draftOptions.vehicleCount));
+    const fare = Math.min(cfg.fareMax, Math.max(cfg.fareMin, draftOptions.fare));
+    const color = cfg.colors[(state.transitLines?.length ?? 0) % cfg.colors.length];
+    const name = `${lineModeLabel(draft.mode)} ${(state.transitLines?.length ?? 0) + 1} 號線`;
+    const input = {
+      mode: draft.mode,
+      stopIds: [...stops],
+      loop: draftOptions.loop,
+      vehicleCount,
+      fare,
+      name,
+      color,
+    };
+
+    if (typeof actions.createTransitLine === 'function') {
+      const result = actions.createTransitLine(input);
+      if (!result.ok) {
+        store.toast(result.reason ?? '建立路線失敗', 'warn');
+        return;
+      }
+      CLEAR_DRAFT(state);
+      store.toast(`已建立「${name}」`, 'info');
+      return;
+    }
+    // fallback：main 未接 createTransitLine 時，UI 直接寫入路線（示範可用）
+    const cost = cfg.vehicleCost[draft.mode] * vehicleCount + cfg.openFee;
+    if (state.finance.treasury < cost) {
+      store.toast(`庫房不足：開線需要 ${formatMoneyShort(cost)}`, 'warn');
+      return;
+    }
+    state.finance.treasury -= cost;
+    state.transitLines = state.transitLines ?? [];
+    const id = state.nextTransitLineId ?? state.transitLines.length + 1;
+    state.nextTransitLineId = id + 1;
+    const line: TransitLine = {
+      id,
+      mode: draft.mode,
+      name,
+      color,
+      stopIds: [...stops],
+      loop: false,
+      vehicleCount,
+      fare,
+      createdDay: state.clock.totalDays,
+      ridershipToday: 0,
+      faresThisMonth: 0,
+      lastMonthRidership: 0,
+    };
+    state.transitLines.push(line);
+    state.ui.selectedLineId = id;
+    CLEAR_DRAFT(state);
+    store.toast(`（示範）已建立「${name}」，開線費 ${formatMoneyShort(cost)}；main 接駁後會改用正式結算`, 'info');
+  };
+
+  const updateLine = (state: GameState, id: number, patch: Partial<TransitLine>): void => {
+    if (typeof actions.updateTransitLine === 'function') {
+      const result = actions.updateTransitLine(id, patch);
+      if (!result.ok) store.toast(result.reason ?? '更新路線失敗', 'warn');
+      return;
+    }
+    const line = (state.transitLines ?? []).find((entry) => entry.id === id);
+    if (!line) return;
+    Object.assign(line, patch);
+    store.bumpUI();
+  };
+
+  const renderRoutes = (state: GameState): string => {
+    const lines = state.transitLines ?? [];
+    const busCount = lines.filter((line) => line.mode === 'bus').length;
+    const miniCount = lines.length - busCount;
+    const selectedId = state.ui.selectedLineId ?? null;
+    const selected = lines.find((line) => line.id === selectedId);
+    const draft = state.ui.lineEditorActive ? state.ui.lineDraft ?? null : null;
+
+    const lineRows = lines
+      .map((line) => {
+        const stats = lineProfit(line);
+        const profitTone = stats.profit >= 0 ? 'positive' : 'negative';
+        const suspended = line.suspended ? '<span class="line-badge suspended">停駛</span>' : '';
+        return `
+          <div class="line-row${line.id === selectedId ? ' selected' : ''}" data-id="${line.id}">
+            <span class="line-color" style="--line:${line.color}"></span>
+            <span class="line-main">
+              <b>${esc(line.name)}${suspended}</b>
+              <small>${lineModeLabel(line.mode)} · ${line.stopIds.length} 站 · ${line.vehicleCount} 車 · $${line.fare} 票價</small>
+            </span>
+            <span class="line-stat"><small>今日載客</small><b>${num(line.ridershipToday)}</b></span>
+            <span class="line-stat"><small>今日淨收入</small><b class="${profitTone}">${stats.profit >= 0 ? '+' : ''}${formatMoneyShort(stats.profit)}</b></span>
+            <button type="button" class="line-edit" data-act="route-select" data-id="${line.id}">${line.id === selectedId ? '收起' : '編輯'}</button>
+          </div>`;
+      })
+      .join('');
+
+    const detail = selected
+      ? `
+        <div class="line-detail" data-id="${selected.id}">
+          <div class="line-detail-head">
+            <b>${ico('route')}${esc(selected.name)}</b>
+            <span class="mini">上月載客 ${num(selected.lastMonthRidership)} · 本月車費 ${formatMoney(selected.faresThisMonth)}</span>
+          </div>
+          <div class="line-fields">
+            <label>名稱<input type="text" data-line-field="name" data-id="${selected.id}" value="${esc(selected.name)}" maxlength="24"></label>
+            <label>車數 <b data-k="line-vehicles">${selected.vehicleCount}</b><input type="range" min="${TRANSIT_LINE_CONFIG.vehicleMin}" max="${TRANSIT_LINE_CONFIG.vehicleMax}" value="${selected.vehicleCount}" data-line-field="vehicleCount" data-id="${selected.id}"></label>
+            <label>票價 <b data-k="line-fare">$${selected.fare}</b><input type="range" min="${TRANSIT_LINE_CONFIG.fareMin}" max="${TRANSIT_LINE_CONFIG.fareMax}" value="${selected.fare}" data-line-field="fare" data-id="${selected.id}"></label>
+            <label class="line-check"><input type="checkbox" data-line-field="loop" data-id="${selected.id}" ${selected.loop ? 'checked' : ''}> 循環線</label>
+            <label>路線顏色<input type="color" data-line-field="color" data-id="${selected.id}" value="${selected.color}"></label>
+          </div>
+          <div class="line-actions">
+            <button type="button" data-act="route-suspend" data-id="${selected.id}">${selected.suspended ? '重開路線' : '暫停路線'}</button>
+            <button type="button" class="danger" data-act="route-delete" data-id="${selected.id}">刪除路線</button>
+          </div>
+        </div>`
+      : '';
+
+    const draftStops = draft
+      ? draft.stopIds
+          .map((id, idx) => {
+            const building = state.buildings.find((b) => b.id === id);
+            return `<span class="draft-stop"><b>${idx + 1}</b>${esc(building ? BUILDINGS[building.key]?.name ?? `#${id}` : `#${id}`)}</span>`;
+          })
+          .join('')
+      : '';
+
+    const stopChoices = draft
+      ? eligibleStops(state, draft.mode)
+          .map((building) => {
+            const idx = draft.stopIds.indexOf(building.id);
+            const selectedStop = idx >= 0;
+            const isDepot = draft.mode === 'bus' ? building.key === 'busTerminus' : building.key === 'minibusDepot';
+            return `<button type="button" class="draft-choice${selectedStop ? ' selected' : ''}" data-act="route-stop" data-id="${building.id}" ${building.connected && building.active ? '' : 'title="此站未連路／停用"'}>
+              <b>${selectedStop ? idx + 1 : '+'}</b>${esc(BUILDINGS[building.key]?.name ?? building.key)}${isDepot ? ' · 總站' : ''}
+            </button>`;
+          })
+          .join('')
+      : '';
+
+    const hasDepot = draft
+      ? draft.stopIds.some((id) => {
+          const b = state.buildings.find((entry) => entry.id === id);
+          return draft.mode === 'bus' ? b?.key === 'busTerminus' : b?.key === 'minibusDepot';
+        })
+      : false;
+    const canFinish = Boolean(draft && draft.stopIds.length >= 2 && hasDepot);
+
+    const editor = draft
+      ? `
+        <div class="line-editor">
+          <div class="line-detail-head">
+            <b>${ico('route')}新增${lineModeLabel(draft.mode)}線（示範模式）</b>
+            <span class="mini">${draft.stopIds.length} / ${TRANSIT_LINE_CONFIG.maxStops} 站</span>
+          </div>
+          <p class="hint">① 從下方站點清單按順序加入（重複點擊可移除）；② 巴士線需有巴士總站、小巴線需有小巴車廠；③ 完成後建立路線。</p>
+          <div class="draft-stops">${draftStops || '<span class="muted">尚未加入站點（可點地圖站點或下方清單）</span>'}</div>
+          <div class="line-fields draft-fields">
+            <label>車數 <b>${draftOptions.vehicleCount}</b><input type="range" min="${TRANSIT_LINE_CONFIG.vehicleMin}" max="${TRANSIT_LINE_CONFIG.vehicleMax}" value="${draftOptions.vehicleCount}" data-draft-field="vehicleCount"></label>
+            <label>票價 <b>$${draftOptions.fare}</b><input type="range" min="${TRANSIT_LINE_CONFIG.fareMin}" max="${TRANSIT_LINE_CONFIG.fareMax}" value="${draftOptions.fare}" data-draft-field="fare"></label>
+            <label class="line-check"><input type="checkbox" data-draft-field="loop" ${draftOptions.loop ? 'checked' : ''}> 循環線</label>
+          </div>
+          <div class="draft-choices">${stopChoices || '<div class="station-empty">未有合資格站點；先興建巴士站／總站或小巴站／車廠。</div>'}</div>
+          <div class="line-actions">
+            <button type="button" data-act="route-undo">↩ Undo</button>
+            <button type="button" data-act="route-clear">清除站點</button>
+            <button type="button" class="danger" data-act="route-cancel">取消</button>
+            <button type="button" class="primary" data-act="route-finish" ${canFinish ? '' : 'disabled title="最少 2 站及 1 個總站／車廠"'}>完成（${draft.stopIds.length} 站）</button>
+          </div>
+        </div>`
+      : '';
+
+    return `
+      <div class="fin-block tr-lines">
+        <div class="block-head">
+          <h3>${ico('route')}路線管理</h3>
+          <span class="mini">總 ${lines.length} 條 · 巴士 ${busCount} · 小巴 ${miniCount}</span>
+        </div>
+        <div class="tr-line-tools">
+          <button type="button" class="line-new" data-act="route-new" data-mode="bus">${ico('bus')}＋ 新增巴士線</button>
+          <button type="button" class="line-new mini" data-act="route-new" data-mode="minibus">${ico('bus')}＋ 新增小巴線</button>
+        </div>
+        <div class="line-list">${lineRows || '<div class="station-empty">尚未建立玩家路線。先興建巴士站／巴士總站（或小巴站／小巴車廠），再按「新增巴士線」。路線會加入每日載客與車費收入。</div>'}</div>
+        ${detail}
+        ${editor}
+      </div>`;
+  };
+
 
   const signature = (state: GameState): string => {
     const t = state.transit;
@@ -176,6 +443,12 @@ export function createTransitPanel(container: HTMLElement, store: GameStore, act
         .map((b) => `${b.id}:${b.connected ? 1 : 0}:${b.active ? 1 : 0}`)
         .join(','),
       Math.round(state.clock.totalDays / 7),
+      (state.transitLines ?? []).map((line) => `${line.id}:${line.vehicleCount}:${line.fare}:${line.ridershipToday}:${line.suspended ? 1 : 0}:${line.stopIds.length}`).join(','),
+      state.ui.lineEditorActive
+        ? `editor:${state.ui.lineDraft?.stopIds.join('-') ?? ''}:${draftOptions.vehicleCount}:${draftOptions.fare}:${draftOptions.loop ? 1 : 0}`
+        : 'no-editor',
+      state.ui.selectedLineId ?? -1,
+      Math.round(state.finance.treasury),
     ].join('|');
   };
 
@@ -250,6 +523,7 @@ export function createTransitPanel(container: HTMLElement, store: GameStore, act
         </div>
       </div>
       ${alert}
+      ${renderRoutes(state)}
 
       <div class="fin-block" style="margin-top:10px">
         <div class="block-head"><h3>${ico('chart')}模式分擔</h3><span class="mini">今日載客</span></div>
@@ -257,7 +531,7 @@ export function createTransitPanel(container: HTMLElement, store: GameStore, act
       </div>
 
       <div class="transit-grid">
-        ${modes.map((stat) => modeCard(stat, state)).join('')}
+        ${modes.map((stat) => modeCard(stat, state, (state.transitLines ?? []).filter((l) => l.mode === 'bus').length)).join('')}
       </div>
       <div class="fin-block">
         <div class="block-head"><h3>${ico('mtr')}站點列表</h3><span class="mini">點擊站點可在地圖選中</span></div>
@@ -304,6 +578,115 @@ export function createTransitPanel(container: HTMLElement, store: GameStore, act
     );
   };
 
+  const offClick = delegate(host.layer, 'click', '[data-act]', (node) => {
+    const state = store.state;
+    switch (node.dataset.act) {
+      case 'select-station': {
+        const id = Number(node.dataset.id);
+        if (Number.isFinite(id)) actions.selectBuilding(id);
+        break;
+      }
+      case 'route-new': {
+        const mode = node.dataset.mode as TransitLineMode | undefined;
+        if (mode === 'bus' || mode === 'minibus') startEditor(state, mode);
+        break;
+      }
+      case 'route-select': {
+        const id = Number(node.dataset.id);
+        state.ui.selectedLineId = state.ui.selectedLineId === id ? null : id;
+        store.bumpUI();
+        break;
+      }
+      case 'route-stop': {
+        const id = Number(node.dataset.id);
+        if (Number.isFinite(id)) toggleDraftStop(state, id);
+        break;
+      }
+      case 'route-undo': {
+        const draft = state.ui.lineDraft;
+        if (draft && draft.stopIds.length) {
+          const lastStop = draft.stopIds[draft.stopIds.length - 1];
+          if (typeof actions.toggleLineStop === 'function') actions.toggleLineStop(lastStop);
+          else {
+            draft.stopIds.pop();
+            store.bumpUI();
+          }
+        }
+        break;
+      }
+      case 'route-clear': {
+        if (state.ui.lineDraft) {
+          state.ui.lineDraft.stopIds = [];
+          store.bumpUI();
+        }
+        break;
+      }
+      case 'route-cancel': {
+        if (typeof actions.cancelLineEditor === 'function') actions.cancelLineEditor();
+        else CLEAR_DRAFT(state);
+        break;
+      }
+      case 'route-finish':
+        finishEditor(state);
+        break;
+      case 'route-suspend': {
+        const id = Number(node.dataset.id);
+        const line = (state.transitLines ?? []).find((entry) => entry.id === id);
+        if (line) updateLine(state, id, { suspended: !line.suspended });
+        break;
+      }
+      case 'route-delete': {
+        const id = Number(node.dataset.id);
+        if (typeof actions.deleteTransitLine === 'function') {
+          if (actions.deleteTransitLine(id)) {
+            state.ui.selectedLineId = null;
+            store.toast('已刪除路線', 'info');
+          }
+        } else {
+          state.transitLines = (state.transitLines ?? []).filter((line) => line.id !== id);
+          state.ui.selectedLineId = null;
+          store.toast('（示範）已刪除路線', 'info');
+          store.bumpUI();
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  });
+
+  const onChange = (event: Event): void => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) return;
+    const draftField = target.dataset.draftField;
+    if (draftField) {
+      if (draftField === 'vehicleCount') draftOptions.vehicleCount = Math.round(Number(target.value));
+      else if (draftField === 'fare') draftOptions.fare = Math.round(Number(target.value));
+      else if (draftField === 'loop') draftOptions.loop = (target as HTMLInputElement).checked;
+      store.bumpUI();
+      return;
+    }
+    const field = target.dataset.lineField;
+    const id = Number(target.dataset.id);
+    if (!field || !Number.isFinite(id)) return;
+    const state = store.state;
+    const line = (state.transitLines ?? []).find((entry) => entry.id === id);
+    if (!line) return;
+    if (field === 'name') {
+      const name = target.value.trim().slice(0, 24);
+      if (name) updateLine(state, id, { name });
+    } else if (field === 'vehicleCount') {
+      updateLine(state, id, { vehicleCount: Math.round(Number(target.value)) });
+    } else if (field === 'fare') {
+      updateLine(state, id, { fare: Math.round(Number(target.value)) });
+    } else if (field === 'loop') {
+      updateLine(state, id, { loop: (target as HTMLInputElement).checked });
+    } else if (field === 'color') {
+      updateLine(state, id, { color: target.value });
+    }
+  };
+  host.layer.addEventListener('change', onChange);
+
   const update = (state: GameState): void => {
     if (!state.ui.showTransit) {
       host.hide();
@@ -327,6 +710,8 @@ export function createTransitPanel(container: HTMLElement, store: GameStore, act
   return {
     update,
     destroy(): void {
+      offClick();
+      host.layer.removeEventListener('change', onChange);
       host.destroy();
     },
   };

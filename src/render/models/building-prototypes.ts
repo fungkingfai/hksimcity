@@ -29,6 +29,23 @@ import {
   addArcade,
   addBambooScaffold,
   addBasketballHoop,
+  addAerationTank,
+  addAircraft,
+  addBarrelRoof,
+  addBoomBarrier,
+  addBusShelter,
+  addClarifierTank,
+  addContainerTruck,
+  addControlTower,
+  addFloodlightMast,
+  addGateBooth,
+  addGatePortal,
+  addJetBridge,
+  addMinibus,
+  addMinibusStopSign,
+  addOutfallPipe,
+  addRadarDish,
+  addWaterTower,
   addBench,
   addBusCanopy,
   addBusStopFlag,
@@ -2589,6 +2606,598 @@ function buildPromenade(ctx: Ctx): void {
   }
 }
 
+
+// ═══════════════════════════ Round 5 新增（11 種） ═══════════════════════════
+
+/** 水塔：圓柱水缸＋支架（variant 1 為地面圓缸），1x1。 */
+function buildWaterTower(ctx: Ctx): void {
+  const { lib, root, W, D } = ctx;
+  const v = ctx.variant;
+  pad(ctx, PAL.concreteLight, 0.06, 0.02);
+  addWaterTower(root, lib, 0, 0, 0.04, { squat: v === 1, color: v === 0 ? PAL.aluminium : PAL.steelGrey });
+  // 食水主管接入（藍色喉管＋閥門）
+  addPipeRun(root, lib, new THREE.Vector3(-W / 2 + 0.12, 0.2, 0.42), new THREE.Vector3(-0.05, 0.2, 0.42), 0.11, PAL.kcrBlue);
+  addCylinder(root, lib.lambert(PAL.fireRed), 0.09, 0.09, 0.06, -W / 2 + 0.38, 0.28, 0.42, 8);
+  // 圍欄、警示、樹木、垃圾桶
+  addFence(root, lib, -W / 2 + 0.12, D / 2 - 0.1, W / 2 - 0.12, D / 2 - 0.1, 0.62, { color: PAL.steelGrey });
+  addHazardStripe(root, lib, 0, D / 2 - 0.18, W - 0.45, 0.1, 0, 0.14);
+  addTree(root, lib, W / 2 - 0.32, -D / 2 + 0.32, 0.34, 'banyan', v + 3, 0.02);
+  addLitterBin(root, lib, -W / 2 + 0.28, -D / 2 + 0.32);
+}
+
+/** 海水化淡廠：廠房＋RO 膜組＋海水取水口／管道（3x3，臨海，+x 向海）。 */
+function buildDesalPlant(ctx: Ctx): void {
+  const { lib, root, W, D } = ctx;
+  const v = ctx.variant;
+  asphaltPad(ctx);
+  // 海邊混凝土岸線＋黃黑警示
+  addBox(root, lib.lambert(PAL.concreteLight), 0.8, 0.26, D - 0.4, W / 2 - 0.42, 0.13, 0);
+  addHazardStripe(root, lib, W / 2 - 0.9, 0, 0.16, D - 0.7, 0, 0.2);
+  // 主廠房（逆滲透大樓，鋁窗工業立面）
+  addTower(root, lib, {
+    x: -1.15,
+    z: -0.6,
+    w: 2.5,
+    d: 4.0,
+    h: 2.5,
+    y0: 0.04,
+    style: 'aluminium',
+    wallColor: PAL.concreteLight,
+    roofColor: PAL.concreteDark,
+    repeatMul: 0.8,
+  });
+  addRooftopClutter(root, lib, 2.1, 3.2, 2.58, v + 3, { tanks: 1, antennas: 1, ac: 2, vents: true });
+  // 副廠房（預處理／控制室）
+  addTower(root, lib, {
+    x: -1.0,
+    z: 2.2,
+    w: 2.3,
+    d: 1.2,
+    h: 1.7,
+    y0: 0.04,
+    style: null,
+    wallColor: PAL.factoryCream,
+    roofColor: PAL.concreteDark,
+  });
+  addBox(root, lib.lambert(PAL.aluminiumDark), 2.36, 0.08, 1.26, -1.0, 1.78, 2.2);
+  // 海水取水口＋入水管（伸向 +x 海面）
+  const pipeZ = v === 0 ? [-1.3, 0.9] : [-1.5, 0.2];
+  for (const pz of pipeZ) {
+    addCylinder(root, lib.lambert(PAL.steelGrey), 0.2, 0.2, 2.9, 1.45, 0.38, pz, 10, 0, Math.PI / 2);
+    addBox(root, lib.lambert(PAL.concrete), 0.22, 0.4, 0.44, 0.4, 0.2, pz);
+    addBox(root, lib.lambert(PAL.concrete), 0.22, 0.4, 0.44, 2.1, 0.2, pz);
+    // 取水格柵
+    addBox(root, lib.lambert(PAL.cargoBlue), 0.32, 0.72, 0.72, 2.78, 0.4, pz);
+    for (let i = 0; i < 3; i++) {
+      addBox(root, lib.lambert(PAL.steelGrey), 0.02, 0.64, 0.05, 2.95, 0.4, pz - 0.22 + i * 0.22);
+    }
+  }
+  // 前處理沉澱池 ×2
+  const tankZ = v === 0 ? [-1.8, 1.6] : [-1.9, 1.9];
+  for (const pz of tankZ) {
+    addBox(root, lib.lambert(PAL.concreteLight), 1.5, 0.5, 1.2, 1.25, 0.27, pz);
+    addBox(root, lib.lambert(PAL.poolWater), 1.36, 0.03, 1.06, 1.25, 0.54, pz);
+    addCylinder(root, lib.lambert(PAL.concrete), 1.5, 1.5, 0.06, 1.25, 0.56, pz, 0);
+    addRailing(root, lib, 0.55, pz + 0.62, 1.95, pz + 0.62, 0.35, { y: 0.55, color: PAL.aluminium, posts: 4 });
+  }
+  // RO 膜組架（一排排圓筒）
+  for (let r = 0; r < 3; r++) {
+    const ry = 0.45 + r * 0.34;
+    addBox(root, lib.lambert(PAL.steelGrey), 1.9, 0.09, 0.78, 0.35, ry, 0.55);
+    for (let i = 0; i < 5; i++) {
+      addCylinder(root, lib.lambert(PAL.aluminium), 0.105, 0.105, 1.75, 0.35, ry + 0.13, 0.3 + i * 0.13, 6, 0, Math.PI / 2);
+    }
+  }
+  // 化學品儲罐
+  for (const [tx, tz] of [
+    [-2.35, 1.85],
+    [-2.35, 0.92],
+  ]) {
+    addCylinder(root, lib.lambert(PAL.tileWhite), 0.32, 0.34, 1.1, tx, 0.59, tz, 10);
+    addCylinder(root, lib.lambert(PAL.steelGrey), 0.34, 0.34, 0.06, tx, 1.16, tz, 10);
+  }
+  // 泵房＋變壓器＋管道
+  addBox(root, lib.lambert(PAL.tileWhite), 1.2, 1.0, 1.1, -2.4, 0.54, -1.1);
+  addBox(root, lib.lambert(PAL.aluminiumDark), 1.26, 0.08, 1.16, -2.4, 1.08, -1.1);
+  addBox(root, lib.lambert(PAL.glassDark), 0.42, 0.3, 0.02, -2.4, 0.7, -0.54);
+  addTransformer(root, lib, -2.0, 0.1, 0.04, 1.0);
+  addPipeRun(root, lib, new THREE.Vector3(-1.9, 1.9, -2.4), new THREE.Vector3(-0.5, 1.9, -2.9), 0.09, PAL.steelGrey);
+  addPipeRun(root, lib, new THREE.Vector3(-0.2, 1.4, -2.6), new THREE.Vector3(-0.2, 1.4, 1.4), 0.08, PAL.steelGrey);
+  // 圍欄、照明、樹
+  addFence(root, lib, -W / 2 + 0.14, -D / 2 + 0.16, W / 2 - 0.3, -D / 2 + 0.16, 0.95, { color: PAL.steelGrey });
+  addFence(root, lib, W / 2 - 0.2, -D / 2 + 0.2, W / 2 - 0.2, D / 2 - 0.2, 0.95, { color: PAL.steelGrey });
+  addFloodlightMast(root, lib, -W / 2 + 0.55, -D / 2 + 0.6, 2.4, 0.04, { glow: false });
+  addFloodlightMast(root, lib, W / 2 - 1.1, D / 2 - 0.8, 2.2, 0.04, { glow: false, heads: 2 });
+  addTree(root, lib, -W / 2 + 0.45, D / 2 - 0.45, 0.4, 'palm', v + 2, 0.04);
+  addTree(root, lib, -W / 2 + 0.95, D / 2 - 0.35, 0.32, 'banyan', v + 4, 0.04);
+  addLitterBin(root, lib, W / 2 - 1.3, D / 2 - 0.3);
+}
+
+/** 污水處理廠：沉澱池＋曝氣池＋污泥房（3x2，臨海，+x 向海）。 */
+function buildSewagePlant(ctx: Ctx): void {
+  const { lib, root, W, D } = ctx;
+  const v = ctx.variant;
+  grassPad(ctx);
+  addBox(root, lib.lambert(PAL.concreteLight), W - 0.3, 0.06, D - 0.4, 0, 0.06, 0);
+  // 污泥處理房
+  addTower(root, lib, {
+    x: -2.0,
+    z: -1.15,
+    w: 1.9,
+    d: 1.2,
+    h: 1.5,
+    y0: 0.06,
+    style: null,
+    wallColor: PAL.concreteLight,
+    roofColor: PAL.concreteDark,
+  });
+  // 鼓風機房
+  addTower(root, lib, {
+    x: -2.05,
+    z: 0.55,
+    w: 1.35,
+    d: 1.05,
+    h: 1.15,
+    y0: 0.06,
+    style: null,
+    wallColor: PAL.tileWhite,
+    roofColor: PAL.concrete,
+  });
+  // 控制室
+  addTower(root, lib, {
+    x: 0.15,
+    z: -1.35,
+    w: 1.15,
+    d: 0.9,
+    h: 1.0,
+    y0: 0.06,
+    style: null,
+    wallColor: PAL.tileWhite,
+    roofColor: PAL.concrete,
+  });
+  addBox(root, lib.lambert(PAL.glassDark), 0.9, 0.26, 0.02, 0.15, 0.72, -0.89);
+  // 兩座圓形沉澱池
+  addClarifierTank(root, lib, 1.55, v === 0 ? -1.0 : -0.9, 0.06, 0.78, 0.42);
+  addClarifierTank(root, lib, 1.55, 1.02, 0.06, 0.78, 0.42);
+  if (v === 1) addClarifierTank(root, lib, 0.35, 0.35, 0.06, 0.62, 0.36);
+  // 曝氣池
+  addAerationTank(root, lib, -0.55, 1.1, 2.1, 1.05, 0.06);
+  // 污泥乾燥床
+  for (let i = 0; i < 2; i++) {
+    addBox(root, lib.lambert(PAL.concreteLight), 0.95, 0.24, 0.6, -0.75 + i * 1.1, 0.18, -0.25);
+    addBox(root, lib.lambert(PAL.gravel), 0.8, 0.04, 0.48, -0.75 + i * 1.1, 0.32, -0.25);
+  }
+  // 連接管道
+  addPipeRun(root, lib, new THREE.Vector3(-1.3, 0.55, 0.55), new THREE.Vector3(-0.4, 0.55, 1.1), 0.09, PAL.steelGrey);
+  addPipeRun(root, lib, new THREE.Vector3(0.7, 0.5, 0.55), new THREE.Vector3(1.1, 0.5, -0.2), 0.08, PAL.steelGrey);
+  addCylinder(root, lib.lambert(PAL.kcrBlue), 0.06, 0.06, 1.2, 0.7, 0.5, 0.5, 6, 0, Math.PI / 2);
+  // 海邊出水口／岸線
+  addBox(root, lib.lambert(PAL.concreteLight), 0.7, 0.24, D - 0.5, W / 2 - 0.4, 0.12, 0);
+  addCylinder(root, lib.lambert(PAL.concreteDark), 0.13, 0.13, 0.9, W / 2 - 0.15, 0.26, 1.0, 8, 0, Math.PI / 2);
+  addHazardStripe(root, lib, W / 2 - 0.82, 0, 0.14, D - 0.7, 0, 0.18);
+  // 圍欄、樹、照明
+  addFence(root, lib, -W / 2 + 0.12, -D / 2 + 0.14, W / 2 - 0.4, -D / 2 + 0.14, 0.9, { color: PAL.steelGrey });
+  addFence(root, lib, -W / 2 + 0.12, D / 2 - 0.12, W / 2 - 0.6, D / 2 - 0.12, 0.9, { color: PAL.steelGrey });
+  addTree(root, lib, -W / 2 + 0.45, D / 2 - 0.5, 0.42, 'banyan', v + 3, 0.06);
+  addTree(root, lib, W / 2 - 1.2, D / 2 - 0.5, 0.34, 'flower', v + 5, 0.06);
+  addFloodlightMast(root, lib, -W / 2 + 0.5, -D / 2 + 0.55, 2.2, 0.06, { glow: false, heads: 2 });
+  // 廠名牌（land side = -x，面向 -x；只有 1 個 label 材質）
+  addLabelSign(root, lib, {
+    text: '污水處理廠',
+    sub: 'SEWAGE TREATMENT WORKS',
+    x: -W / 2 + 0.06,
+    y: 1.15,
+    z: 0.1,
+    w: 1.9,
+    h: 0.5,
+    ry: -Math.PI / 2,
+    bg: '#1f5f3f',
+    fg: '#ffffff',
+    border: '#ffffff',
+  });
+  addLitterBin(root, lib, -W / 2 + 0.35, D / 2 - 0.35);
+}
+
+/** 排污口：海邊大口徑排污管＋擴散器＋警示牌（1x1，臨海，+x 向海）。 */
+function buildSewageOutfall(ctx: Ctx): void {
+  const { lib, root, W, D } = ctx;
+  const v = ctx.variant;
+  // 岸邊混凝土平台
+  addBox(root, lib.lambert(PAL.concreteLight), W - 0.1, 0.16, D - 0.2, 0, 0.08, 0);
+  addBox(root, lib.lambert(PAL.concreteDark), 0.7, 0.2, D - 0.2, -W / 2 + 0.35, 0.02, 0);
+  addOutfallPipe(root, lib, -0.2, 0.06, 0, v === 0 ? 2.0 : 1.7);
+  // 岸上控制箱／閥室
+  addBox(root, lib.lambert(PAL.concreteLight), 0.6, 0.55, 0.5, -W / 2 + 0.42, 0.44, -0.35);
+  addBox(root, lib.lambert(PAL.ironDark), 0.24, 0.3, 0.06, -W / 2 + 0.42, 0.4, -0.08);
+  addBox(root, lib.lambert(PAL.aluminiumDark), 0.64, 0.07, 0.54, -W / 2 + 0.42, 0.75, -0.35);
+  // 喉管支架＋警示黃黑柱
+  addCylinder(root, lib.lambert(PAL.hazardYellow), 0.07, 0.07, 0.7, -0.6, 0.35, 0.6, 8);
+  addCylinder(root, lib.lambert(PAL.hazardBlack), 0.08, 0.08, 0.1, -0.6, 0.55, 0.6, 8);
+  addHazardStripe(root, lib, -0.2, D / 2 - 0.1, 1.2, 0.12, 0, 0.15);
+  // 污水分支管接入
+  addPipeRun(root, lib, new THREE.Vector3(-W / 2 + 0.2, 0.3, -0.5), new THREE.Vector3(-0.2, 0.3, -0.35), 0.11, PAL.steelGrey);
+  // 警示牌（land side = -x，面向 -x；1 個 label）
+  addLabelSign(root, lib, {
+    text: '排污口',
+    sub: 'SEWAGE OUTFALL · 污水排放',
+    x: -W / 2 + 0.05,
+    y: 0.85,
+    z: 0.42,
+    w: 1.1,
+    h: 0.32,
+    ry: -Math.PI / 2,
+    bg: '#d9b23f',
+    fg: '#2a2a2a',
+    border: '#2a2a2a',
+  });
+  addTree(root, lib, -W / 2 + 0.35, D / 2 - 0.35, 0.3, 'banyan', v + 2, 0.1);
+}
+
+/** 路邊巴士站：候車亭＋站牌＋路線牌（1x1）。 */
+function buildBusStop(ctx: Ctx): void {
+  const { lib, root, W, D } = ctx;
+  const v = ctx.variant;
+  pad(ctx, PAL.concreteLight, 0.04, 0.02);
+  if (v === 0) {
+    addBusShelter(root, lib, 0, 0.15, 0, 0.03, { routes: '1A 5 9 11K', bench: true });
+  } else {
+    // 無上蓋版本：站牌＋長椅＋排隊欄
+    addBusShelter(root, lib, 0, 0.15, 0, 0.03, { routes: '6 6A 6C 106', bench: false });
+    addBox(root, lib.lambert(PAL.busYellow), 1.2, 0.06, 0.5, -0.35, 0.06, -0.32);
+    addCylinder(root, lib.lambert(PAL.steelGrey), 0.03, 0.035, 1.25, -0.6, 0.66, -0.32, 6);
+    addCylinder(root, lib.lambert(PAL.steelGrey), 0.03, 0.035, 1.25, 0.5, 0.66, -0.32, 6);
+  }
+  // 巴士站黃格（路面標線）
+  addBox(root, lib.lambert(PAL.roadYellow), W - 0.35, 0.012, 0.08, 0, 0.05, D / 2 - 0.16);
+  addBox(root, lib.lambert(PAL.roadYellow), W - 0.35, 0.012, 0.08, 0, 0.05, D / 2 - 0.42);
+  // 綠化＋垃圾桶
+  addBox(root, lib.lambert(PAL.leafDark), 0.36, 0.18, 0.36, -W / 2 + 0.28, 0.11, -D / 2 + 0.28);
+  addTree(root, lib, -W / 2 + 0.28, -D / 2 + 0.28, 0.26, 'shrub', v + 4, 0.06);
+  addLitterBin(root, lib, W / 2 - 0.25, D / 2 - 0.3);
+}
+
+/** 綠色專線小巴站：綠頂站牌＋路線牌（1x1）。 */
+function buildMinibusStop(ctx: Ctx): void {
+  const { lib, root, W, D } = ctx;
+  const v = ctx.variant;
+  pad(ctx, PAL.concreteLight, 0.04, 0.02);
+  addMinibusStopSign(root, lib, v === 0 ? 0 : -0.15, 0.15, v === 0 ? 0 : Math.PI, 0.03, v === 0 ? '44 44A 77' : '54 55 56');
+  // 綠色小巴站路面標記
+  addBox(root, lib.lambert(PAL.tramGreen), W - 0.4, 0.012, 0.1, 0, 0.05, D / 2 - 0.16);
+  addBox(root, lib.lambert(PAL.wallWhite), 0.5, 0.014, 0.16, -W / 2 + 0.4, 0.06, D / 2 - 0.16);
+  // 小巴站簷篷（v1）
+  if (v === 1) {
+    addBox(root, lib.lambert(PAL.tramGreen), 1.3, 0.06, 0.7, 0.2, 1.28, 0.42);
+    addCylinder(root, lib.lambert(PAL.steelGrey), 0.03, 0.035, 1.25, -0.4, 0.65, 0.66, 6);
+    addCylinder(root, lib.lambert(PAL.steelGrey), 0.03, 0.035, 1.25, 0.8, 0.65, 0.66, 6);
+  }
+  addLitterBin(root, lib, W / 2 - 0.25, D / 2 - 0.3);
+  addTree(root, lib, -W / 2 + 0.28, -D / 2 + 0.3, 0.28, 'flower', v + 3, 0.06);
+}
+
+/** 小巴車廠：車棚＋兩部小巴＋維修房（2x2）。 */
+function buildMinibusDepot(ctx: Ctx): void {
+  const { lib, root, W, D } = ctx;
+  const v = ctx.variant;
+  asphaltPad(ctx);
+  // 泊車位黃線
+  for (let i = 0; i < 3; i++) {
+    addBox(root, lib.lambert(PAL.roadYellow), 0.07, 0.012, 1.5, -1.35 + i * 1.1, 0.055, -0.2);
+  }
+  // 車棚（懸臂上蓋＋柱）
+  addBox(root, lib.lambert(PAL.aluminium), 2.9, 0.09, 2.1, 0.1, 1.72, -0.45);
+  addBox(root, lib.lambert(PAL.tramGreen), 2.94, 0.12, 0.1, 0.1, 1.66, 0.58);
+  for (const [px, pz] of [
+    [-1.2, -1.35],
+    [1.4, -1.35],
+    [-1.2, 0.4],
+    [1.4, 0.4],
+  ]) {
+    addCylinder(root, lib.lambert(PAL.steelGrey), 0.05, 0.06, 1.7, px, 0.85, pz, 6);
+  }
+  // 兩部小巴（綠／紅）
+  addMinibus(root, lib, -0.65, -0.55, 0, 0.04, false);
+  addMinibus(root, lib, 0.75, -0.55, 0, 0.04, v === 1);
+  // 維修房＋捲閘
+  addTower(root, lib, {
+    x: -0.85,
+    z: 1.25,
+    w: 1.9,
+    d: 0.95,
+    h: 1.35,
+    y0: 0.04,
+    style: null,
+    wallColor: PAL.factoryCream,
+    roofColor: PAL.concreteDark,
+  });
+  addRollerDoor(root, lib, -1.1, 0.04, 1.71, 0.8, 1.0, 0, PAL.steelGrey);
+  addBox(root, lib.lambert(PAL.glassDark), 0.5, 0.3, 0.02, -0.1, 0.8, 1.73);
+  // 油泵＋輪胎＋雜物
+  addBox(root, lib.lambert(PAL.fireRed), 0.24, 0.5, 0.24, 1.35, 0.29, 0.95);
+  addBox(root, lib.lambert(PAL.ironDark), 0.12, 0.16, 0.1, 1.35, 0.6, 1.0);
+  addCylinder(root, lib.lambert(PAL.ironDark), 0.07, 0.07, 0.1, 1.35, 0.66, 1.12, 6, 0, Math.PI / 2);
+  for (let i = 0; i < 3; i++) {
+    addCylinder(root, lib.lambert(PAL.hazardBlack), 0.2, 0.2, 0.1, 1.45, 0.12 + i * 0.11, -1.45, 10);
+  }
+  addBox(root, lib.lambert(PAL.woodLight), 0.4, 0.3, 0.36, 1.2, 0.2, 1.4);
+  // 圍欄、燈、名牌
+  addFence(root, lib, -W / 2 + 0.12, -D / 2 + 0.14, W / 2 - 0.12, -D / 2 + 0.14, 0.75, { color: PAL.steelGrey });
+  addFence(root, lib, -W / 2 + 0.12, -D / 2 + 0.2, -W / 2 + 0.12, D / 2 - 0.2, 0.75, { color: PAL.steelGrey });
+  addLampPost(root, lib, -W / 2 + 0.4, -D / 2 + 0.45, 1.9, { y: 0.04, neon: false });
+  addTree(root, lib, W / 2 - 0.35, D / 2 - 0.35, 0.32, 'banyan', v + 2, 0.04);
+  addLabelSign(root, lib, {
+    text: '小巴車廠',
+    sub: 'MINIBUS DEPOT',
+    x: 0.1,
+    y: 1.15,
+    z: D / 2 - 0.42,
+    w: 1.5,
+    h: 0.4,
+    bg: '#2f7f4f',
+    fg: '#ffffff',
+    border: '#ffffff',
+  });
+}
+
+/** 機場客運大樓：流線拱頂＋玻璃幕牆＋控制塔＋登機橋＋客機（4x3）。 */
+function buildAirportTerminal(ctx: Ctx): void {
+  const { lib, root, W, D } = ctx;
+  const v = ctx.variant;
+  pad(ctx, PAL.concreteLight, 0.06, 0.02);
+  // 停機坪（後方 -z）
+  addBox(root, lib.lambert(PAL.roadAsphalt), W - 0.2, 0.03, D * 0.48, 0, 0.05, -D / 2 + D * 0.24);
+  // 客運大樓主樓（玻璃幕牆）
+  addTower(root, lib, {
+    x: 0.2,
+    z: 1.5,
+    w: 6.6,
+    d: 1.9,
+    h: 2.35,
+    y0: 0.05,
+    style: 'glassBlue',
+    wallColor: PAL.glassBlue,
+    roofColor: PAL.wallWhite,
+    repeatMul: 1.15,
+  });
+  // 流線拱頂（兩段不同高度）
+  addBarrelRoof(root, lib, 0.2, 2.44, 1.5, 6.8, 2.15, 0.52, PAL.wallWhite);
+  addBarrelRoof(root, lib, -2.55, 2.5, 1.5, 1.6, 1.9, 0.34, PAL.aluminium, 0);
+  // 陸側入口玻璃＋雨棚
+  addBox(root, lib.lambert(PAL.glassDark), 4.6, 1.5, 0.08, 0.2, 0.85, 2.47);
+  for (let i = 0; i < 6; i++) {
+    addBox(root, lib.lambert(PAL.aluminium), 0.06, 2.3, 0.1, -2.0 + i * 0.9, 1.2, 2.5);
+  }
+  addCanopy(root, lib, { x: 0.2, y: 1.55, z: 2.72, w: 5.4, d: 0.8, color: PAL.wallWhite });
+  // 陸側落客位／的士站路面
+  addBox(root, lib.lambert(PAL.roadAsphalt), W - 0.4, 0.02, 0.7, 0, 0.05, D / 2 - 0.4);
+  for (let i = 0; i < 4; i++) {
+    addBox(root, lib.lambert(PAL.roadLine), 0.06, 0.012, 0.5, -2.4 + i * 1.4, 0.07, D / 2 - 0.45);
+  }
+  // 西翼候機廊
+  addTower(root, lib, {
+    x: -3.35,
+    z: 1.0,
+    w: 1.2,
+    d: 1.5,
+    h: 1.6,
+    y0: 0.05,
+    style: null,
+    wallColor: PAL.tileWhite,
+    roofColor: PAL.concreteLight,
+  });
+  // 控制塔＋雷達
+  addControlTower(root, lib, -3.3, -1.35, 2.7, 0.05);
+  addRadarDish(root, lib, -2.5, -2.3, 0.05, 0.9);
+  // 登機橋 ×2（由主樓後方伸向停機坪）
+  addJetBridge(root, lib, -1.5, 0.95, 0.62, 1.5);
+  addJetBridge(root, lib, 1.9, 0.95, 0.62, 1.5);
+  // 客機 ×2（機頭向客運大樓）
+  addAircraft(root, lib, -1.5, -1.55, -Math.PI / 2, 0.04, 0.78, { livery: v === 0 ? 0xb02a2a : 0x2f5f9f });
+  addAircraft(root, lib, 1.9, -1.55, -Math.PI / 2, 0.04, 0.78, { livery: v === 0 ? 0x2f5f9f : 0xc9a24c });
+  // 停機坪標線、照明
+  addBox(root, lib.lambert(PAL.roadYellow), W - 1.4, 0.012, 0.07, 0, 0.07, -2.55);
+  addFloodlightMast(root, lib, -3.3, -2.55, 2.5, 0.05, { glow: false });
+  addFloodlightMast(root, lib, 3.4, -2.55, 2.5, 0.05, { glow: false });
+  addFence(root, lib, -W / 2 + 0.12, -D / 2 + 0.12, W / 2 - 0.12, -D / 2 + 0.12, 0.9, { color: PAL.steelGrey });
+  // 客運大樓名牌（正面 +z；1 個 label 材質）
+  addLabelSign(root, lib, {
+    text: v === 0 ? '香港國際機場' : '赤鱲角機場',
+    sub: 'HONG KONG INTERNATIONAL AIRPORT',
+    x: 0.2,
+    y: 1.95,
+    z: 2.56,
+    w: 3.4,
+    h: 0.55,
+    bg: '#1b2b33',
+    fg: '#eaf4ff',
+    border: '#24e0ff',
+  });
+  addTree(root, lib, 2.9, D / 2 - 0.35, 0.32, 'palm', v + 2, 0.05);
+  addLitterBin(root, lib, -2.6, D / 2 - 0.3);
+}
+
+/** 空運貨運站：貨運庫＋空運貨櫃＋貨機（3x2）。 */
+function buildAirCargoTerminal(ctx: Ctx): void {
+  const { lib, root, W, D } = ctx;
+  const v = ctx.variant;
+  asphaltPad(ctx);
+  // 貨運庫（拱頂）
+  addTower(root, lib, {
+    x: -0.55,
+    z: 0.6,
+    w: 4.1,
+    d: 1.9,
+    h: 2.2,
+    y0: 0.04,
+    style: null,
+    wallColor: PAL.wallGrey,
+    roofColor: PAL.concreteDark,
+  });
+  addBarrelRoof(root, lib, -0.55, 2.28, 0.6, 4.25, 2.1, 0.42, PAL.aluminium);
+  // 空運貨物捲閘（面向停機坪 -z）
+  for (let i = 0; i < 3; i++) {
+    addRollerDoor(root, lib, -1.75 + i * 1.25, 0.04, -0.39, 0.95, 1.4, Math.PI, i === 1 ? PAL.cargoBlue : PAL.steelGrey);
+    addBox(root, lib.lambert(PAL.hazardYellow), 0.95, 0.05, 0.06, -1.75 + i * 1.25, 0.04, -0.33);
+  }
+  // 卸貨平台
+  addBox(root, lib.lambert(PAL.concreteLight), 3.9, 0.2, 0.7, -0.55, 0.12, -0.75);
+  // 停機坪
+  addBox(root, lib.lambert(PAL.roadAsphalt), W - 0.2, 0.03, D * 0.42, 0, 0.05, -D / 2 + D * 0.21);
+  // 貨機（機頭向貨運站）
+  addAircraft(root, lib, 2.2, -1.35, -Math.PI / 2, 0.04, 0.7, { cargo: true, livery: v === 0 ? PAL.cargoGreen : PAL.cargoBlue });
+  // 空運貨櫃／卡板
+  addContainerStack(root, lib, -2.25, -1.25, 1, 1, 2, v + 2);
+  for (let i = 0; i < 4; i++) {
+    addBox(root, lib.lambert(PAL.woodLight), 0.4, 0.22, 0.34, -1.3 + i * 0.5, 0.16, -1.5);
+    addBox(root, lib.lambert(PAL.cargoOrange), 0.42, 0.05, 0.36, -1.3 + i * 0.5, 0.29, -1.5);
+  }
+  // 貨物裝卸車（輸送帶車）
+  addBox(root, lib.lambert(PAL.busYellow), 0.5, 0.3, 0.4, 0.2, 0.25, -1.0);
+  addBox(root, lib.lambert(PAL.steelGrey), 0.12, 0.5, 1.0, 0.55, 0.5, -1.0).rotation.x = -0.4;
+  addBox(root, lib.lambert(PAL.ironDark), 0.5, 0.1, 0.44, 0.2, 0.06, -1.0);
+  // 辦公翼＋雷達＋照明＋圍欄
+  addTower(root, lib, {
+    x: 2.35,
+    z: 0.95,
+    w: 1.15,
+    d: 1.2,
+    h: 1.5,
+    y0: 0.04,
+    style: null,
+    wallColor: PAL.tileWhite,
+    roofColor: PAL.concreteLight,
+  });
+  addBox(root, lib.lambert(PAL.glassDark), 0.9, 0.3, 0.02, 2.35, 1.0, 1.56);
+  addRadarDish(root, lib, 2.6, -1.9, 0.04, 0.55);
+  addFloodlightMast(root, lib, -W / 2 + 0.5, -D / 2 + 0.55, 2.4, 0.04, { glow: false, heads: 2 });
+  addFence(root, lib, -W / 2 + 0.12, -D / 2 + 0.12, W / 2 - 0.12, -D / 2 + 0.12, 0.85, { color: PAL.steelGrey });
+  addHazardStripe(root, lib, -W / 2 + 0.14, -D / 2 + 0.3, 0.14, D - 1.0, 0, 0.16);
+  // 名牌（正面 +z）
+  addLabelSign(root, lib, {
+    text: '空運貨運站',
+    sub: 'AIR CARGO TERMINAL',
+    x: -0.55,
+    y: 1.85,
+    z: 1.57,
+    w: 2.2,
+    h: 0.5,
+    bg: '#3f4a3a',
+    fg: '#ffd166',
+    border: '#ffd166',
+  });
+  addTree(root, lib, -2.6, D / 2 - 0.35, 0.3, 'banyan', v + 3, 0.04);
+  addLitterBin(root, lib, 2.4, D / 2 - 0.3);
+}
+
+/** 碼頭閘口：龍門架＋閘亭＋自動閘桿＋貨櫃車（2x2）。 */
+function buildPortGate(ctx: Ctx): void {
+  const { lib, root, W, D } = ctx;
+  const v = ctx.variant;
+  asphaltPad(ctx, true);
+  // 三條行車線（沿 z 方向穿過閘口）
+  for (const lx of [-1.2, 0, 1.2]) {
+    addBox(root, lib.lambert(PAL.roadLine), 0.06, 0.012, 2.6, lx, 0.08, -0.2);
+    addBox(root, lib.lambert(PAL.roadYellow), 0.06, 0.012, 0.5, lx, 0.08, 1.5);
+  }
+  // 龍門架
+  addGatePortal(root, lib, 0, 0.55, 3.3, 1.75, 0.05);
+  // 閘亭 ×2
+  addGateBooth(root, lib, -1.7, 1.15, 0, 0.05);
+  addGateBooth(root, lib, 1.7, 1.15, 0, 0.05);
+  // 自動閘桿（車道入口）
+  for (const lx of [-1.2, 0, 1.2]) {
+    addBoomBarrier(root, lib, lx - 0.55, 0.05, 0.15, 0, 1.05, false);
+  }
+  // 等待過閘的貨櫃車 ×2
+  addContainerTruck(root, lib, -1.2, -1.0, Math.PI / 2, 0.05, v === 0 ? PAL.cargoRed : PAL.cargoBlue);
+  if (v === 1) addContainerTruck(root, lib, 1.2, -1.5, Math.PI / 2, 0.05, PAL.cargoYellow);
+  // 輪胎護欄、CCTV、照明、圍欄
+  for (let i = 0; i < 3; i++) {
+    addCylinder(root, lib.lambert(PAL.hazardBlack), 0.18, 0.18, 0.12, -1.85 + i * 1.85, 0.11, -1.85, 10);
+  }
+  addCylinder(root, lib.lambert(PAL.steelGrey), 0.035, 0.045, 2.1, -W / 2 + 0.3, 1.05, -D / 2 + 0.4, 6);
+  addBox(root, lib.lambert(PAL.ironDark), 0.14, 0.14, 0.24, -W / 2 + 0.3, 2.16, -D / 2 + 0.52);
+  addCylinder(root, lib.lambert(PAL.steelGrey), 0.035, 0.045, 2.1, W / 2 - 0.3, 1.05, -D / 2 + 0.4, 6);
+  addBox(root, lib.lambert(PAL.ironDark), 0.24, 0.14, 0.14, W / 2 - 0.42, 2.16, -D / 2 + 0.4);
+  addFloodlightMast(root, lib, 1.9, -1.85, 2.4, 0.05, { glow: true, heads: 2 });
+  addFence(root, lib, -W / 2 + 0.12, -D / 2 + 0.12, W / 2 - 0.12, -D / 2 + 0.12, 0.8, { color: PAL.steelGrey });
+  addFence(root, lib, -W / 2 + 0.12, -D / 2 + 0.12, -W / 2 + 0.12, D / 2 - 0.25, 0.8, { color: PAL.steelGrey });
+  // 閘口名牌（貼在龍門架橫樑；1 個 label）
+  addLabelSign(root, lib, {
+    text: '碼頭閘口',
+    sub: 'PORT GATE',
+    x: 0,
+    y: 1.98,
+    z: 0.66,
+    w: 2.0,
+    h: 0.4,
+    bg: '#2a3238',
+    fg: '#ffd166',
+    border: '#ffd166',
+  });
+  addTree(root, lib, -W / 2 + 0.4, D / 2 - 0.35, 0.3, 'banyan', v + 3, 0.05);
+}
+
+/** 貨櫃堆場：貨櫃堆＋龍門吊（靜態）＋高桿燈（3x2）。 */
+function buildPortYard(ctx: Ctx): void {
+  const { lib, root, W, D } = ctx;
+  const v = ctx.variant;
+  asphaltPad(ctx, true);
+  // 貨櫃堆
+  const stacks: [number, number, number, number, number][] =
+    v === 0
+      ? [
+          [-1.75, -0.95, 2, 2, 3],
+          [1.15, -1.0, 2, 2, 2],
+          [-1.75, 0.95, 2, 1, 2],
+          [1.35, 1.05, 1, 2, 2],
+        ]
+      : [
+          [-1.9, -1.0, 1, 2, 3],
+          [-0.7, -1.0, 1, 2, 2],
+          [1.3, -0.9, 2, 2, 3],
+          [-1.4, 0.95, 2, 1, 2],
+        ];
+  for (const [sx, sz, cols, rows, layers] of stacks) {
+    addContainerStack(root, lib, sx, 0.05, sz, cols, rows, layers, v + cols * 7 + rows * 3);
+  }
+  // 龍門吊（靜態；beacon 併入 vertexNeon 桶、不加字牌）
+  addGantryCrane(root, lib, v === 0 ? 0.1 : 0.8, 0.1, Math.PI / 2, 0.05, 0.82, {
+    anim: false,
+    sign: false,
+    beacon: true,
+  });
+  // 場內通道黃線
+  addBox(root, lib.lambert(PAL.roadYellow), W - 0.5, 0.012, 0.07, 0, 0.06, 0.05);
+  addBox(root, lib.lambert(PAL.roadLine), 0.07, 0.012, D - 0.4, 0, 0.06, 0);
+  // 堆場辦公室（貨櫃改裝）＋龍門吊操作員休息室
+  addBox(root, lib.lambert(PAL.wallWhite), 1.3, 0.65, 0.6, W / 2 - 0.9, 0.38, D / 2 - 0.5);
+  addBox(root, lib.lambert(PAL.cargoBlue), 1.32, 0.07, 0.62, W / 2 - 0.9, 0.73, D / 2 - 0.5);
+  addBox(root, lib.lambert(PAL.glassDark), 0.44, 0.24, 0.02, W / 2 - 0.9, 0.5, D / 2 - 0.19);
+  // 高桿燈（夜間 vertexNeon）
+  addFloodlightMast(root, lib, -W / 2 + 0.5, -D / 2 + 0.5, 2.8, 0.05, { glow: true, heads: 3 });
+  addFloodlightMast(root, lib, W / 2 - 0.5, -D / 2 + 0.5, 2.8, 0.05, { glow: true, heads: 3 });
+  // 圍欄、輪胎、垃圾桶
+  addFence(root, lib, -W / 2 + 0.12, -D / 2 + 0.12, W / 2 - 0.12, -D / 2 + 0.12, 1.0, { color: PAL.steelGrey });
+  addFence(root, lib, -W / 2 + 0.12, -D / 2 + 0.2, -W / 2 + 0.12, D / 2 - 0.2, 1.0, { color: PAL.steelGrey });
+  addHazardStripe(root, lib, 0, D / 2 - 0.12, W - 0.5, 0.12, 0, 0.16);
+  addLitterBin(root, lib, -W / 2 + 0.4, D / 2 - 0.35);
+  // 場名牌（正面 +z；1 個 label）
+  addLabelSign(root, lib, {
+    text: '貨櫃堆場',
+    sub: 'CONTAINER YARD',
+    x: -W / 2 + 1.35,
+    y: 1.35,
+    z: D / 2 - 0.42,
+    w: 1.8,
+    h: 0.46,
+    bg: '#1b2b33',
+    fg: '#24e0ff',
+    border: '#24e0ff',
+  });
+  addTree(root, lib, W / 2 - 0.4, -D / 2 + 0.4, 0.32, 'banyan', v + 5, 0.05);
+}
+
 // ─────────────────────────── 通用後備原型 ───────────────────────────
 
 /** 未知 key 的後備原型（日後擴充建築時仍可顯示）。 */
@@ -2670,6 +3279,18 @@ const BUILDERS: Record<string, Builder> = {
   // 休憩（2）
   park: buildPark,
   promenade: buildPromenade,
+  // Round 5 新增（11）
+  waterTower: buildWaterTower,
+  desalPlant: buildDesalPlant,
+  sewagePlant: buildSewagePlant,
+  sewageOutfall: buildSewageOutfall,
+  portGate: buildPortGate,
+  portYard: buildPortYard,
+  airportTerminal: buildAirportTerminal,
+  airCargoTerminal: buildAirCargoTerminal,
+  busStop: buildBusStop,
+  minibusStop: buildMinibusStop,
+  minibusDepot: buildMinibusDepot,
 };
 
 /** 每種建築可用的外觀變體數量（用 building.id 取模，令同類建築不至於一模一樣）。 */
@@ -2706,6 +3327,18 @@ const VARIANTS: Record<string, number> = {
   ferryPier: 2,
   park: 2,
   promenade: 2,
+  // Round 5 新增（每種 2 variants）
+  waterTower: 2,
+  desalPlant: 2,
+  sewagePlant: 2,
+  sewageOutfall: 2,
+  portGate: 2,
+  portYard: 2,
+  airportTerminal: 2,
+  airCargoTerminal: 2,
+  busStop: 2,
+  minibusStop: 2,
+  minibusDepot: 2,
 };
 
 /** 已實作原型的建築 key（供測試／除錯核對 BUILDINGS 覆蓋率）。 */

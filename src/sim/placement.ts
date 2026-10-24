@@ -48,6 +48,7 @@ import {
   ZONES,
 } from '../core/config';
 import type { Building, GameState, PlaceResult, ResourceKey, TerrainType, ZoneType } from '../core/types';
+import { HK_DESIGN_SIZE, HK_REGIONS } from '../world/worldgen';
 import { addCargo } from './logistics-inventory';
 import {
   invalidatePathCache,
@@ -72,6 +73,14 @@ export function worldRevisionOf(): number {
 
 function bumpWorldRevision(): void {
   worldRevision++;
+}
+
+/**
+ * 通知世界已變更（供 utilities/trade 等模組在改動 tiles 或建築後手動觸發快取失效）。
+ * 會遞增 worldRevision，令 stats／utilities／pathfinding 等快取重算。
+ */
+export function markWorldChanged(): void {
+  bumpWorldRevision();
 }
 
 /**
@@ -194,6 +203,52 @@ function terrainCostMultiplier(state: GameState, x: number, y: number, w: number
   return count > 0 ? total / count : 1;
 }
 
+// ─────────────────────────── 真實地理 region（Round 5：機場／貨櫃碼頭） ───────────────────────────
+
+/**
+ * 設計座標 → 格座標（HK_REGIONS 以 96 設計座標記錄；地圖尺寸可為 480／600）。
+ */
+function designToTileX(state: GameState, designX: number): number {
+  const scale = state.width / HK_DESIGN_SIZE;
+  return (designX + 0.5) * scale - 0.5;
+}
+
+function designToTileY(state: GameState, designY: number): number {
+  const scale = state.height / HK_DESIGN_SIZE;
+  return (designY + 0.5) * scale - 0.5;
+}
+
+/** 某格中心對應的設計座標（0..96） */
+export function designCoordsOf(state: GameState, x: number, y: number): { x: number; y: number } {
+  const sx = state.width / HK_DESIGN_SIZE;
+  const sy = state.height / HK_DESIGN_SIZE;
+  return { x: (x + 0.5) / sx - 0.5, y: (y + 0.5) / sy - 0.5 };
+}
+
+/**
+ * 取得某格所屬的 HK_REGIONS kind（airport／runway／containerPort／skyline／newTown）；
+ * 唔屬任何 region 回傳 null。
+ */
+export function regionKindAt(state: GameState, x: number, y: number): string | null {
+  const d = designCoordsOf(state, x, y);
+  for (const region of HK_REGIONS) {
+    if (d.x >= region.x0 && d.x <= region.x1 && d.y >= region.y0 && d.y <= region.y1) return region.kind;
+  }
+  return null;
+}
+
+/** 建築中心格是否在指定 region kind 內 */
+export function buildingInRegion(state: GameState, building: Building, kind: string): boolean {
+  const cx = Math.floor(building.x + building.w / 2);
+  const cy = Math.floor(building.y + building.h / 2);
+  return regionKindAt(state, cx, cy) === kind;
+}
+
+/** 由設計座標轉格座標（供 trade／UI 用） */
+export function designPointToTile(state: GameState, designX: number, designY: number): { x: number; y: number } {
+  return { x: Math.round(designToTileX(state, designX)), y: Math.round(designToTileY(state, designY)) };
+}
+
 // ─────────────────────────── 地區規則（GDD §2.2／§2.6） ───────────────────────────
 
 /** 香港分區（依設計座標矩形，優先次序同 GDD §2.2） */
@@ -281,11 +336,20 @@ function specialPlacementRule(
   const center = footprintCenter(x, y, w, h);
   const region = regionAt(Math.floor(center.x), Math.floor(center.y));
 
+  // Round 5：機場／貨櫃碼頭設施必須位於真實地理 region 內（HK_REGIONS 設計座標）
+  if (def.requiredRegion) {
+    const cx = Math.floor(center.x);
+    const cy = Math.floor(center.y);
+    const kind = regionKindAt(state, cx, cy);
+    if (kind !== def.requiredRegion) {
+      return def.requiredRegion === 'airport'
+        ? `${def.name}只可建於赤鱲角機場區`
+        : `${def.name}只可建於葵涌貨櫃碼頭區`;
+    }
+  }
+
   if (key === 'tramStop' && region !== 'hongKongIsland') {
     return '電車站只可在香港島興建（港島電車線）';
-  }
-  if (key === 'containerPort' && region !== 'westPort') {
-    return '貨櫃碼頭只可建於葵涌／西岸港口一帶';
   }
 
   // 林地限制（逐格檢查 footprint）

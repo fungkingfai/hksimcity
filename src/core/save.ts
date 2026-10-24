@@ -3,7 +3,7 @@
  *
  * v5（480×480 真實地理大地圖）：存檔改為「種子 + 真實地形重新生成 + 稀疏格變更（道路／行人路／分區）」，
  * 不再序列化 230,400 格地形。建築／市民／財政等照舊儲存。
- * 舊版 96×96 完整存檔因尺寸不同會被拒絕（提示重新開局），匯入亦只接受 304×304。
+ * 舊版 96×96／304×304／480×480 完整存檔因尺寸不同會被拒絕（提示重新開局）。
  * 測試／SSR 環境沒有 localStorage 時，所有函式安全地回傳失敗。
  */
 
@@ -20,6 +20,7 @@ export const MAX_SLOTS = 4;
 /** v4 稀疏分區編碼：zone 0=null 1=住宅 2=商業 3=工業 4=農業；flag bit0=road bit1=sidewalk */
 const ZONE_CODE: Record<ZoneType, number> = { residential: 1, commercial: 2, industrial: 3, farmland: 4 };
 const CODE_ZONE: (ZoneType | null)[] = [null, 'residential', 'commercial', 'industrial', 'farmland'];
+const PIPE_BITS = { water: 0b00100000, sewer: 0b01000000, power: 0b10000000 } as const;
 
 interface CompactSaveFile {
   format: 'hk-city-compact';
@@ -45,7 +46,14 @@ interface CompactSaveFile {
 
 function packTile(tile: Tile): number {
   const zoneCode = tile.zone ? ZONE_CODE[tile.zone] ?? 0 : 0;
-  return (tile.road ? 1 : 0) | (tile.sidewalk ? 2 : 0) | (zoneCode << 2);
+  return (
+    (tile.road ? 1 : 0) |
+    (tile.sidewalk ? 2 : 0) |
+    (zoneCode << 2) |
+    (tile.waterPipe ? PIPE_BITS.water : 0) |
+    (tile.sewerPipe ? PIPE_BITS.sewer : 0) |
+    (tile.powerCable ? PIPE_BITS.power : 0)
+  );
 }
 
 /** 把完整 state 轉為精簡存檔 JSON 字串 */
@@ -53,7 +61,9 @@ export function serializeCompact(state: GameState, slot = 0): string {
   const edits: number[] = [];
   for (let i = 0; i < state.tiles.length; i++) {
     const tile = state.tiles[i];
-    if (tile.road || tile.sidewalk || tile.zone) edits.push(i, packTile(tile));
+    if (tile.road || tile.sidewalk || tile.zone || tile.waterPipe || tile.sewerPipe || tile.powerCable) {
+      edits.push(i, packTile(tile));
+    }
   }
   const { tiles: _tiles, ...rest } = state;
   const file: CompactSaveFile = {
@@ -101,6 +111,9 @@ export function hydrateCompact(raw: unknown): GameState | null {
     tile.road = (packed & 1) === 1;
     tile.sidewalk = (packed & 2) === 2;
     tile.zone = CODE_ZONE[(packed >> 2) & 7] ?? null;
+    tile.waterPipe = (packed & PIPE_BITS.water) !== 0;
+    tile.sewerPipe = (packed & PIPE_BITS.sewer) !== 0;
+    tile.powerCable = (packed & PIPE_BITS.power) !== 0;
   }
   const state = {
     ...(file.state as GameState),
@@ -205,10 +218,24 @@ export function normalizeState(raw: unknown): GameState | null {
   u.showStartScreen = false;
   u.buildCategory ??= 'civic';
   u.hover ??= -1;
+  u.showUnderground ??= false;
+  u.showUtilityPanel ??= false;
+  u.showTradePanel ??= false;
+  u.selectedLineId ??= null;
+  u.lineEditorActive ??= false;
 
-  // 交通
+  // 交通／路線（Round 5）
   data.transit ??= createTransitState();
   data.transit.byMode ??= { mtr: 0, bus: 0, tram: 0, ferry: 0 };
+  data.transitLines ??= [];
+  data.nextTransitLineId ??= data.transitLines.reduce((m, l) => Math.max(m, l.id + 1), 1);
+  data.trade ??= {
+    airport: { passengerCapacity: 0, passengers: 0, cargoCapacity: 0, cargo: 0, revenueToday: 0, jobs: 0, noiseComplaints: 0 },
+    port: { teuCapacity: 0, throughput: 0, revenueToday: 0, jobs: 0 },
+    lastUpdatedDay: 0,
+  };
+  // 地下管網快照由 sim 重算，不信任存檔數值
+  delete data.utilities;
 
   // 分區玩法（v3）
   data.gameMode ??= 'empty';
@@ -263,6 +290,11 @@ export function normalizeState(raw: unknown): GameState | null {
   stats.schoolCoverage ??= 0;
   stats.hospitalCoverage ??= 0;
   stats.landValue ??= 0;
+  stats.sewageCoverage ??= 0;
+  stats.waterQuality ??= 1;
+  stats.airportPassengers ??= 0;
+  stats.portThroughput ??= 0;
+  stats.tradeRevenue ??= 0;
 
   // 市民／貨車相容欄位
   for (const citizen of data.citizens) {

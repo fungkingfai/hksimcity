@@ -48,7 +48,7 @@ const MAP_LABEL = `${MAP_W}×${MAP_H}`;
 const ZONING_TUTORIAL_STEPS: { title: string; text: string }[] = [
   {
     title: '歡迎來到維港之城',
-    text: `你是香港城市規劃師。這一代玩法改為分區城市建造：你負責鋪馬路、劃分區，開發商會按需求與環境自動起樓。目標是建成宜居、繁榮、可持續的國際都會。地圖 ${MAP_LABEL}（約 ${num(MAP_CELLS)} 格，約舊版 25 倍面積）：可用右下小地圖或按 O 睇全圖、P 返市中心。`,
+    text: `你是香港城市規劃師。這一代玩法改為分區城市建造：你負責鋪馬路、劃分區，開發商會按需求與環境自動起樓。目標是建成宜居、繁榮、可持續的國際都會。地圖 ${MAP_LABEL}（約 ${num(MAP_CELLS)} 格，約舊版 ${Math.max(1, Math.round(MAP_CELLS / (96 * 96)))} 倍面積）：可用右下小地圖或按 O 睇全圖、P 返市中心。`,
   },
   {
     title: '第一步：鋪馬路',
@@ -183,13 +183,15 @@ export function createHelpPanel(container: HTMLElement, store: GameStore, action
         ${keyRow('右鍵', '取消工具／拖曳旋轉')}
         ${keyRow('L', '分區色塊開關')}
         ${keyRow('O / P', '全圖／返回市中心')}
+        ${keyRow('U', '地下管網圖層')}
+        ${keyRow('Y', '機場碼頭貿易')}
         ${keyRow('空白鍵', '暫停／繼續')}
         ${keyRow('1 / 2 / 3', '調整遊戲速度')}
       </div>
 
       <div class="tutorial-tip">
         ${ico('layers')}
-        <span>貼士：先劃住宅區吸引人口，再按需求條補商業／工業／農業區；公共設施（警／消／校／醫、發電廠、水務、交通）會提升地價與發展分數，讓開發商興建更高級建築。<b>人口過千時要預留足夠農業區（約每 50 人 1 座農田）或食品廠，否則會出現糧食短缺警告。</b></span>
+        <span>貼士：先劃住宅區吸引人口，再按需求條補商業／工業／農業區；公共設施（警／消／校／醫、發電廠、水務、交通）會提升地價與發展分數，讓開發商興建更高級建築。<b>人口過千時要預留足夠農業區（約每 50 人 1 座農田）或食品廠，否則會出現糧食短缺警告。</b> Round 5 起，建築需要接駁地下食水／污水／電力管道：按 <b>U</b> 鋪管，或到「公用」面板查看覆蓋率。交通面板可建巴士／小巴路線；<b>Y</b> 開機場碼頭貿易面板。</span>
       </div>
     `;
     host.show(
@@ -245,12 +247,23 @@ export function createHelpPanel(container: HTMLElement, store: GameStore, action
         <section class="help-block">
           <h3>${ico('map')}地圖與導航</h3>
           <ul>
-            <li>大地圖 <b>${state.width}×${state.height}</b>（約 ${num(state.width * state.height)} 格）——面積約為舊版地圖的 25 倍，zoom out 範圍已加大。</li>
+            <li>大地圖 <b>${state.width}×${state.height}</b>（約 ${num(state.width * state.height)} 格）——面積約為舊版地圖的 ${Math.max(1, Math.round((state.width * state.height) / (96 * 96)))} 倍，zoom out 範圍已加大。</li>
             <li>地形參考<b>香港地理空間數據共享平台（CSDI）</b>及<b>地政總署 DTM 5m／建築物輪廓開放數據</b>，重現真實海岸線、維港、山脈與市區建築密度。</li>
             <li><b>小地圖（Minimap）</b>：桌面右下／手機右下角；顯示水域、道路、四色分區、建築、城市中心與鏡頭視野框。</li>
             <li>在小地圖<b>點擊或拖曳</b>可即時跳到該位置；標題列可摺疊。</li>
             <li><b>全圖（O）</b>拉遠至全地圖 overview；<b>市中心（P）</b>返回開局市中心。</li>
             <li>小地圖工具列另有「全圖／市中心／分區色塊（L）」按鈕。</li>
+          </ul>
+        </section>
+
+        <section class="help-block">
+          <h3>${ico('pipe')}地下管網與公用設施（Round 5）</h3>
+          <ul>
+            <li><b>U</b> 切換地下管網圖層：地面半透明，顯示食水／污水／電力管道與接駁狀態。</li>
+            <li>管線工具：<b>食水管 $900/格</b>、<b>污水管 $1,200/格</b>、<b>電力電纜 $800/格</b>，拆除退還 25%；管道可穿過道路下方。</li>
+            <li>建築需要以同類管道接駁到供應源（發電廠／水務設施／水塔／海水化淡廠／污水處理廠／排污口）才有水電；建築卡會有接駁狀態。</li>
+            <li><b>公用設施面板</b>（頂欄「公用」或地下工具列）三個分頁顯示：容量／需求／已供應、覆蓋率、短缺或污水溢出、供應源數、管道長度、每月維護費、食水水質。</li>
+            <li>新公用建築：水塔（$420k）、海水化淡廠、污水處理廠、排污口；<b>已有城鎮</b>開局已預建完整管網，<b>由零開始</b>需自行由第一座水務設施／發電廠拉管。</li>
           </ul>
         </section>
 
@@ -289,6 +302,18 @@ export function createHelpPanel(container: HTMLElement, store: GameStore, action
             <li><b>港鐵站</b>、<b>巴士總站</b>、<b>電車站</b>、<b>渡輪碼頭</b>各有服務半徑與每日運力。</li>
             <li>市民按住所與工作地點自動選擇最快通勤方式（港鐵 ×4.2、渡輪 ×3.0、巴士 ×2.2、電車 ×1.6、步行 ×1.0）。</li>
             <li>颱風時渡輪停航；運力不足會拉長通勤、降低幸福與地價。</li>
+            <li><b>路線管理（交通面板）</b>：可建立<b>巴士／小巴路線</b>（巴士需巴士總站、小巴需小巴車廠；最少 2 站），設定車數（1–12）、票價（$3–20）、循環線與顏色；路線列表即時顯示今日載客、淨收入（虧損紅色），可暫停／刪除。</li>
+            <li><b>建線流程</b>：「＋新增巴士線／小巴線」→ 從站點清單按順序加入（最少 2 站＋1 個總站／車廠）→ Undo／清除／完成；建立時扣開線費＋車價。</li>
+          </ul>
+        </section>
+
+        <section class="help-block">
+          <h3>${ico('plane')}機場與貨櫃碼頭貿易（Round 5）</h3>
+          <ul>
+            <li>建造 → 交通：<b>機場客運大樓</b>、<b>空運貨運站</b>（只限機場區）；物流：<b>貨櫃碼頭</b>（需臨水）、<b>碼頭閘口</b>、<b>貨櫃堆場</b>（只限碼頭區；全部需連接道路）。</li>
+            <li><b>Y</b> 或城事面板「貿易」開啟貿易面板：機場客流／容量、貨運噸數、碼頭 TEU／容量、每日收入、就業、噪音；逐座設施顯示 Lv.1–3，可用庫房升級（機場 $6M／$12M，碼頭 $4M／$8M）。</li>
+            <li>機場帶來旅客、旅遊收入與航空業職位，但附近住宅會有噪音影響；貨櫃碼頭吞吐受閘口／堆場／道路瓶頸影響。</li>
+            <li>8 號風球及暴雨會影響航班與碼頭裝卸，收入下降；升級及道路接駁可提升容量。</li>
           </ul>
         </section>
 
@@ -348,6 +373,8 @@ export function createHelpPanel(container: HTMLElement, store: GameStore, action
               <tr><td><kbd>M</kbd></td><td>取消分區工具</td></tr>
               <tr><td><kbd>X</kbd></td><td>拆卸工具</td></tr>
               <tr><td><kbd>L</kbd></td><td>顯示／隱藏分區色塊</td></tr>
+              <tr><td><kbd>U</kbd></td><td>地下管網圖層開關</td></tr>
+              <tr><td><kbd>Y</kbd></td><td>機場／碼頭貿易面板</td></tr>
               <tr><td><kbd>O</kbd></td><td>全圖 overview</td></tr>
               <tr><td><kbd>P</kbd></td><td>返回市中心</td></tr>
               <tr><td><kbd>B</kbd></td><td>展開／收起建造面板</td></tr>

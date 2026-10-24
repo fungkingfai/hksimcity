@@ -7,7 +7,7 @@
 > **閱讀規則**
 > - 本文件是跨 Agent 的設計契約；任何數值若與 `src/core/config.ts` 不同，以 config 為最終依據，並會標註。
 > - 標記：**✅ 與現有引擎一致**｜**⚠️ 需 Lead 改 config／types（本文件已列明）**｜**🔧 實作決策（sim／UI 內部常數）**｜**🕒 v1.1 延後**
-> - 本版是**香港版（v5 真實地理）**：地圖 **480×480（230,400 格，每格 140m）**，由 **CSDI／地政總署真實地理數據**生成（DTM 5m＋342,233 個建築輪廓）；建築 **32 種**、**4 種物流資源＋電力／食水公用設施**、**6 種天氣**、**4 種交通模式**、**minimap 導航**。存檔 v5 精簡格式，與 96×96／304×304 舊檔**不兼容**（見 §12）。
+> - 本版是**香港版（Round 5／v6 真實地理 600）**：地圖 **600×600（360,000 格；每格 112m）**，由 **CSDI／地政總署真實地理數據**重新生成（DTM 5m＋342,233 個建築輪廓＋水塘／土地利用）；建築 **32 種**、**4 種物流資源＋電力／食水公用設施**、**6 種天氣**、**4 種交通模式**、**minimap 導航**。存檔 v6 精簡格式，與 96／304／480 舊檔**不兼容**（見 §12）。
 > - 語言：面向玩家的文字一律**繁體中文、香港用語**（「屋苑」不是「小區」、「巴士」不是「公交」、「的士」不是「出租車」、「街市」不是「菜市場」）；貨幣顯示 **`$`（港幣）**。
 
 ---
@@ -20,13 +20,13 @@
 
 ### 0.2 平台與規模
 
-> **最終定案（2026-10-24 第四輪）**：地圖 **480×480（230,400 格；每格 140m；可建地 22.4%）**，由 CSDI／地政總署真實地理數據生成；`MAP_SCALE=480/96=5`、`WORLD_SPAN=960`；`GAME_VERSION=5`；起始庫房 **$8,000,000**（empty）／**$6,500,000**（starter）；建築 **32 個 key**（7 分類）；道路 $15,000／格（自帶行人路）；薪俸稅 15%／利得稅 16.5%／差餉 5%；賣地 $2,500,000／15 日；煙花 $800,000／20 日；食品 0.5／人／日、日用品 0.2／人／日；6 種天氣；4 種交通模式＋10 種 `VehicleKind`；**minimap（480 真實地形）＋O 全圖／P 市中心**；**存檔 v5 精簡格式（80–140KB）**。
+> **最終定案（2026-10-24 第五輪）**：地圖 **600×600（360,000 格；每格 112m；可建地約 22%）**，由 CSDI／地政總署真實地理數據生成；`MAP_SCALE=600/96=6.25`、`WORLD_SPAN=1200`；`GAME_VERSION=6`；起始庫房 **$8,000,000**（empty）／**$6,500,000**（starter）；建築 **32 個 key**（7 分類）；道路 $15,000／格（自帶行人路）；薪俸稅 15%／利得稅 16.5%／差餉 5%；賣地 $2,500,000／15 日；煙花 $800,000／20 日；食品 0.5／人／日、日用品 0.2／人／日；6 種天氣；4 種交通模式＋10 種 `VehicleKind`；**minimap（600 真實地形）＋O 全圖／P 市中心**；**存檔 v6 精簡格式（80–140KB）**。
 
 | 項目 | 內容 |
 |---|---|
 | 形式 | 瀏覽器網頁遊戲（Vite + three.js + TypeScript），單機，桌面＋手機 |
 | 玩法 | **分區玩法**：玩家鋪路＋劃住宅／商業／工業／農業區，開發商按 RCI+F 需求與服務覆蓋自動興建；公共設施／交通／休憩／貨櫃碼頭由玩家手動放置（詳見 `ZONING_GAMEPLAY.md`） |
-| 地圖 | **480×480 格（230,400 格；每格 140m，涵蓋 67.2km×67.2km）**，由 **CSDI／地政總署真實地理數據**生成（DTM 5m＋342,233 個建築輪廓；見 `REAL_GEO_DATA.md`）；`WORLD_SPAN=960`；可建地 **22.4%**（山多平地少）；spawn 中環（格座標 **259,299**，設計 51.4,59.4） |
+| 地圖 | **600×600 格（360,000 格；每格 112m，涵蓋 67.2km×67.2km）**，由 **CSDI／地政總署真實地理數據**重新生成（DTM 5m＋342,233 個建築輪廓＋水塘／土地利用；見 `REAL_GEO_DATA.md`）；`WORLD_SPAN=1200`；可建地約 **22%**（600 精細數據後以 QA 實測為準；山多平地少）；spawn 中環（格座標 **259,299**，設計 51.4,59.4） |
 | 區域 | 新界北、獅子山走廊、九龍、維多利亞港、香港島、南區及離島、西岸港口（見 §2.2） |
 | 時間 | 1 遊戲日＝1440 分鐘＝**30 真實秒**（1×）；1 月＝7 日；1 年＝12 月（約 42 分鐘）🕐 |
 | 起始資源 | 兩種開局：**已有城鎮**（中環連通優先道路網＋34 棟 auto＋10 項公共設施〔學校×2、醫院〕、倉庫食品 520、庫房 $6,500,000、10 日 warm-up、目標 120／實測約 146 人）／**由零開始**（**完全空地**：0 道路／0 建築／0 分區／無人造地標，庫房 $8,000,000、5 名市民〔設計要求〕） |
@@ -34,7 +34,7 @@
 | 建築 | **32 個 key**：**19 種分區自動開發**（住宅 6／商業 7／工業 5／農業 1）＋**13 種玩家手動置**（公共 4／交通 4／休憩 2／物流 1／工業 2）；分類見 `CATEGORY_INFO` |
 | 目標客群 | 喜歡城市建造、香港情懷、輕鬆但有事可做的玩家（桌面為主、手機可玩） |
 | 一局長度 | 15～45 分鐘有明顯成長（人口 300＋、過海發展）；可存檔續玩 |
-| 導航 | **minimap**（右下 480×480 真實地形、點擊／拖曳跳轉、全圖／市中心／分區 toggle、手機可摺疊）＋快捷 **O 全圖、P 市中心、L 分區開關**；相機 zoom out 至 ~1,300 世界單位 |
+| 導航 | **minimap**（右下 600×600 真實地形、點擊／拖曳跳轉、全圖／市中心／分區 toggle、手機可摺疊）＋快捷 **O 全圖、P 市中心、L 分區開關**；相機 zoom out 至 ~1,625 世界單位 |
 | 主題 | 霓虹港風：深藍夜色、霓虹粉紅／青綠、港鐵色帶、紅白藍、雙層巴士、叮叮、天星小輪 |
 
 ### 0.3 設計支柱（所有取捨以此判斷）
@@ -77,7 +77,7 @@
 - **需求（RCI+F）**：`GameState.zoneDemand`（−1..1）；需求 ≥ `AUTO_DEVELOP.minDemand`（0.12）開發商才會起樓；負數＝供過於求、暫停開發。
 - **發展分數（devScore 0–100）**：供電、供水、警、消、校、醫、交通、幸福、地價加權；決定可出哪一級建築（詳見 `ZONING_GAMEPLAY.md` §4）。
 - **服務覆蓋**：既是 devScore 的輸入，也是市民幸福的來源；住了豪宅但無醫院，市民一樣會搬走。
-- **土地**：480×480 共 230,400 格，分區格有限、地價隨發展上升、賣地可換一次性現金；自動建築全城上限 **1,200 棟**（每日 15 棟、每區 6 棟）。
+- **土地**：600×600 共 360,000 格，分區格有限、地價隨發展上升、賣地可換一次性現金；自動建築全城上限 **1,200 棟**（每日 15 棟、每區 6 棟）。
 
 ### 1.3 前 10 分鐘教學腳本（預設「已有城鎮」；1× 速度）
 
@@ -120,10 +120,10 @@
 
 | 項目 | 數值 | 說明 |
 |---|---|---|
-| 網格 | **480×480**（`GRID_WIDTH=480`、`GRID_HEIGHT=480`） | `tileIndex = y*width + x` |
-| 格大小 | `TILE_SIZE=2`（世界 **960×960**，`WORLD_SPAN=960`） | 與舊版一致 |
-| 總格數 | **230,400**（面積約 96×96 的 25 倍） | 可建地 **22.4%**（真實數據：山多平地少） |
-| 比例尺 | `MAP_SCALE = 480/96 = 5`；`HK_DESIGN_SIZE=96` | worldgen 以 96 設計座標繪製，輸出時線性縮放；地理特徵在格數上 ×3.17（維港／河流較闊） |
+| 網格 | **600×600**（`GRID_WIDTH=600`、`GRID_HEIGHT=600`） | `tileIndex = y*width + x` |
+| 格大小 | `TILE_SIZE=2`（世界 **960×960**，`WORLD_SPAN=1200`） | 與舊版一致 |
+| 總格數 | **360,000**（面積約 96×96 的 39 倍） | 可建地 **約 22%（QA 實測；精細海岸線後 ±1%）**，山多平地少 |
+| 比例尺 | `MAP_SCALE = 600/96 = 6.25`；`HK_DESIGN_SIZE=96` | worldgen 以 96 設計座標繪製，輸出時線性縮放；地理特徵在格數上 ×3.17（維港／河流較闊） |
 | 世界座標 | 置中，格中心 `(x+0.5)*TILE - width*TILE/2` | 一律用 `render/coords.ts` helper |
 | 區域 | 7 個（§2.2）；地名標籤以 `MAP_LABELS`（config）為準 | 影響地價、放置限制、UI 地名 |
 | 預置基建 | 3 條過海隧道、3 條跨山隧道、主幹道殘段 | **只限 starter 模式**；empty 模式完全沒有（`generateWorld({starterRoads:false})`） |
@@ -162,7 +162,7 @@ Round 4 不再用 Round 3 的「7 區矩形」程序化分區；地圖上的香�
 
 1. **資料來源**：`src/world/hk-map-data.generated.ts`（由 `tools/build-hk-data.py` 從 CSDI／地政總署 DTM 5m＋342,233 個建築輪廓生成；下載 URL 與授權見 `REAL_GEO_DATA.md`）。
 2. **解碼**：`terrainRle`→10 種地形；`elevation`（water=0）；`density` 0..255；`buildingHeight` 0..255（≈0..500m，>2m 才寫入 Tile）；`labels`／`landmarks`／`regions`／`tunnels`／`spawn` 轉 96 設計座標。
-3. **尺度**：480×480、每格 **140m**、`TILE_SIZE=2`、`WORLD_SPAN=960`、`MAP_SCALE=5`；地圖範圍 HK1980 E 798,275–865,475、N 790,400–857,600。
+3. **尺度**：600×600、每格 **112m**、`TILE_SIZE=2`、`WORLD_SPAN=1200`、`MAP_SCALE=6.25`；地圖範圍 HK1980 E 798,275–865,475、N 790,400–857,600。
 4. **可建地**：實測 **22.4%**（grass／urban／reclaimed／fertile／forest／hill）；水域 **75.6%**；山多平地少（hill 7.5%、mountain 1.7%）。**不再有** Round 3 的「補到 52% 可建」邏輯。
 5. **spawn**：中環格 **(259,299)**；starter 城鎮以此為中心，若 spawn 貼海／不可建，`starter-town.ts` 會找最近可建格。
 6. **starter 道路／隧道**：3 條過海隧道（西／紅／東）由 worldgen 以真實設計 x 鋪水格 road=true＋引道；市區棋盤道路由 `starter-town.ts` 以**連通分量＋BFS**生成（見 §1.5）；**empty 模式完全冇道路（連隧道都冇）**。
@@ -170,8 +170,8 @@ Round 4 不再用 Round 3 的「7 區矩形」程序化分區；地圖上的香�
 8. **真實樓群**：starter 才 render；`tile.density ≥ 28 && buildingHeight ≥ 4m` 才生成，分 3 個 InstancedMesh（tower／block／office），約 **4,089 座**；**唔影響模擬**。
 9. **地名／地標／區塊**：以真實座標放 label／landmark／region，LOD 見 §2.2；機場雙跑道、葵涌貨櫃碼頭按真實位置。
 10. **雪線**：elevation ≥ 0.8（0.8–0.92 漸變）才上雪，只在 snow 或冬季 ≤6°C；低地霜另計。
-11. **海面**：地圖外圍加無邊海面 mesh，隱藏 480 邊界。
-12. **驗收**：startup 解碼＋生成約 1.5–2 秒（boot screen）；starter overview 1.327M tris／402 calls；empty 1.032M tris／37 calls；地圖無穿崩邊界；舊 96×96／304×304 存檔拒絕。
+11. **海面**：地圖外圍加無邊海面 mesh，隱藏 600 邊界。
+12. **驗收**：startup 解碼＋生成約 2.5–4 秒（boot screen）；starter overview ≤2.0M tris／≤550 calls；empty 1.032M tris／37 calls；地圖無穿崩邊界；舊 96×96／304×304 存檔拒絕。
 
 > 詳細數據（DTM 取樣、terrain 分類、density／height 公式、限制）見 **`REAL_GEO_DATA.md`**。
 
@@ -247,7 +247,7 @@ Round 4 不再用 Round 3 的「7 區矩形」程序化分區；地圖上的香�
 
 - 全部由開發商出資：**玩家不用付造價，亦不計其維護費**；玩家只付分區成本。
 - 每次 `newDay` 檢查：需求 ≥ 0.12、`unlockPop ≤ population`、`minDevScore ≤ devScore`、footprint 齊全且同一分區、正交鄰接道路、地形合法 → 按 `weight` 加權抽選。
-- 每日上限（480 地圖放大）：全城 **15 棟**、每區 **6 棟**、全城自動建築上限 **1,200 棟**（`AUTO_DEVELOP`）。
+- 每日上限（600 地圖放大）：全城 **15 棟**、每區 **6 棟**、全城自動建築上限 **1,200 棟**（`AUTO_DEVELOP`）。
 - 連續 8 日無道路連通 → 荒廢自動拆卸（不退款）。
 - 低級建築不會自動升級（🕒 v1.1）；玩家可拆遷退款 30% 等開發商重建。
 
@@ -1014,7 +1014,7 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
 ```
 
 - 需求條（RCI+F）固定在**畫布右下角**（toast 上方），四條垂直／橫向條顯示 −1..1；點擊條可跳到對應分區工具。
-- **minimap** 同樣在畫布右下（需求條右側／上方），**480×480 真實地形**概覽、青色視野框、粉紅城市中心；點擊／拖曳跳轉、**O 全圖／P 市中心／L 分區開關**；手機 132px 預設收起；250ms 節流＋地形快取。
+- **minimap** 同樣在畫布右下（需求條右側／上方），**600×600 真實地形**概覽、青色視野框、粉紅城市中心；點擊／拖曳跳轉、**O 全圖／P 市中心／L 分區開關**；手機 132px 預設收起；250ms 節流＋地形快取。
 - 分區色塊（**`L`**）預設開啟；建築有半透明分區 tint；hover 顯示分區、devScore、下一級門檻。
 - 其餘尺寸（頂欄 64px、左面板 300px、右面板 320px、1920 加寬至 340／360px）不變；手機版見 `UI_SPEC_HK.md` §16。
 
@@ -1025,8 +1025,8 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
 | 頂欄 | 固定頂部 | 日期／天氣／警告／庫房／人口／幸福／輪候／速度／入口 |
 | 建造面板 | 左側 | 區域（4 刷子）＋道路＋拆除；公共／交通／休憩 13 種建築卡；賣地 |
 | 城事面板 | 右側 | 城市概況、**分區供需、發展商動態、地價**、選取建築卡、原因 chips、入內／拆卸 |
-| 開局模式畫面 | 全屏 | 首次載入：「已有城鎮（推薦）」／「由零開始」二選一；顯示 480×480 大地圖 badge、empty「完全空地」文案 |
-| Minimap | 畫布右下 | 480×480 概覽、視野框、城市中心、分區／道路／建築；O/P/L 快捷 |
+| 開局模式畫面 | 全屏 | 首次載入：「已有城鎮（推薦）」／「由零開始」二選一；顯示 600×600 大地圖 badge、empty「完全空地」文案 |
+| Minimap | 畫布右下 | 600×600 概覽、視野框、城市中心、分區／道路／建築；O/P/L 快捷 |
 | 財政面板 | modal | 收入／支出明細、三條稅率滑桿、賣地紀錄、月報表 |
 | 交通面板 | modal | 模式分擔、站點列表、平均通勤、車費收入、停駛警告 |
 | 天氣／警告 | 頂欄下方橫幅 | 現時警告、預計持續、影響、防災提示 |
@@ -1115,40 +1115,40 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
 
 ---
 
-## 12. 存檔與版本（v5 精簡格式，480×480 真實地圖）
+## 12. 存檔與版本（v6 精簡格式，600×600 真實地圖）
 
 | 項目 | 內容 |
 |---|---|
-| `GAME_VERSION` | **5**（`config.ts`） |
+| `GAME_VERSION` | **6**（`config.ts`） |
 | 存檔 key | localStorage 前綴 `victoria-harbour.save.`；slot 0 自動、slot 1–3 手動 |
-| 格式 | **`hk-city-compact`**：`{ format, version:5, seed, width:480, height:480, gameMode, tileEdits:number[], info:{...}, state:Omit<GameState,'tiles'> }` |
+| 格式 | **`hk-city-compact`**：`{ format, version:6, seed, width:600, height:600, gameMode, tileEdits:number[], info:{...}, state:Omit<GameState,'tiles'> }` |
 | 稀疏格 | 只序列化有道路／行人路／分區的格；`packed = road | sidewalk<<1 | zoneCode<<2`；地形由 seed 重新生成（真實數據不變） |
-| 還原 | 用 `seed` 重新 `generateWorld(seed,480,480,{starterRoads: gameMode==='starter'})`（解碼真實數據）→ 套 sparse edits → 由 buildings 重建 `buildingId` → 補 spawn／gameMode |
-| 大小 | 約 **80–140KB**（完整 230,400 格 JSON 會爆 localStorage 配額） |
-| 存檔列表 | 用 `info` 快照（城市名／人口／庫房／日期／地圖 480×480），不重新解碼地圖，避免 1–2 秒卡 |
-| 兼容性 | 只接受 **480×480、version 5**；96×96（v2）／304×304（v4）舊存檔／匯入拒絕（提示重新開局） |
+| 還原 | 用 `seed` 重新 `generateWorld(seed,600,600,{starterRoads: gameMode==='starter'})`（解碼真實數據）→ 套 sparse edits → 由 buildings 重建 `buildingId` → 補 spawn／gameMode |
+| 大小 | 約 **80–140KB**（完整 360,000 格 JSON 會爆 localStorage 配額） |
+| 存檔列表 | 用 `info` 快照（城市名／人口／庫房／日期／地圖 600×600），不重新解碼地圖，避免 1–2 秒卡 |
+| 兼容性 | 只接受 **600×600、version 6**；96×96（v2）／304×304（v4）舊存檔／匯入拒絕（提示重新開局） |
 | 讀檔後 | `ui.mode='city'`、退出室內、清除工具、重算連通性、UI 重繪（`store.on('reset')`） |
 
 **已定稿 state 欄位**：同 Round 3（clock／finance／stats／gameMode／spawn／zoneDemand／vehicles／transit／Tile.zone／Building.auto/zone／UIState.showZones/showStartScreen／citizen.salary/commuteMode 等），另加 **`Tile.density`／`Tile.buildingHeight`**（真實樓群視覺；只 render 用，不需 sparse save——由地形數據重新生成）。
 
 > 📌 v5 只記道路／行人路／分區；地形（含 density／height）由 seed＋生成檔重新解碼；日後若加填海／地形改造，需把地形變更納入 sparse diff。詳見 `LARGE_MAP_NOTES.md` §7。
 
-## 13. 數值平衡與 config 建議（480 真實地理）
+## 13. 數值平衡與 config 建議（600 真實地理）
 
 ### 13.1 平衡總原則
 
 1. **需求是油門、devScore 是門檻**：需求夠但 devScore 低 → 只出低級樓；devScore 高但需求負 → 唔會起樓。
-2. **分區成本要痛但唔致命**：$700–$1,500/格；10×10 住宅區 $120,000（開局 $8M 的 1.5%），480 地圖可劃大片但要留意後續公共設施開支。
+2. **分區成本要痛但唔致命**：$700–$1,500/格；10×10 住宅區 $120,000（開局 $8M 的 1.5%），600 地圖可劃大片但要留意後續公共設施開支。
 3. **自動建築每日 15 棟、每區 6 棟、全城上限 1,200**：面積約 10 倍，開發速率同步放大；高密度實測約 152 棟，上限預留擴充。
 4. **公共設施是關鍵投資**：警／消／校／醫／電／水直接把 devScore 由 31 推到 75–100。
-5. **大地圖需要導航**：minimap（480 真實地形）＋O 全圖／P 市中心是必需品；empty 完全空地圖要靠玩家自己建立地標感。
+5. **大地圖需要導航**：minimap（600 真實地形）＋O 全圖／P 市中心是必需品；empty 完全空地圖要靠玩家自己建立地標感。
 6. **真實地理限制**：可建地只有 22.4%、水域 75.6%；山多平地少係設計壓力，唔可以再要求 worldgen「補到 52% 可建」。
 
 ### 13.2 不可隨意更動的數值（以 config 為準）
 
 | 項目 | 數值 |
 |---|---|
-| 地圖／時間 | **480×480（230,400 格；每格 140m；可建 22.4%）**、`MAP_SCALE=5`、`WORLD_SPAN=960`、`GAME_VERSION=5`；1 日 30 秒、1 月 7 日、1 年 12 月 |
+| 地圖／時間 | **600×600（360,000 格；每格 112m；可建約 22%）**、`MAP_SCALE=6.25`、`WORLD_SPAN=1200`、`GAME_VERSION=6`；1 日 30 秒、1 月 7 日、1 年 12 月 |
 | 分區成本 | 住宅 $1,200／商業 $1,500／工業 $1,500／農業 $700（每格） |
 | 道路 | $15,000／格（自帶行人路）；`SIDEWALK_COST` 不再使用 |
 | `AUTO_DEVELOP` | intervalDays 1、每區每日 **6**、全城每日 **15**、`minDemand=0.12`、`overSupplyDemand=−0.35`、`abandonDays=8`、`maxAutoBuildings=1200` |
@@ -1156,8 +1156,8 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
 | 開局 | starter：$6,500,000、warmup 10 日、目標 120／實測約 146 人、34 棟 auto＋10 設施（學校×2、醫院）、倉庫食品 520；empty：$8,000,000、5 市民（設計）、完全空地 |
 | 稅率 | 薪俸 15%／利得 16.5%／差餉 5%（上限 20／25／12%） |
 | 賣地／煙花 | $2,500,000（15 日）／$800,000（20 日） |
-| 相機 | MIN 16、MAX≈823（`260×MAP_SCALE`）、far≈3,000；`fitMap` 距離≈1,196 |
-| 存檔 | v5 compact（seed＋sparse tileEdits，80–140KB）；只接受 480×480 |
+| 相機 | MIN 16、MAX≈1,625（`260×MAP_SCALE=6.25`）、far≈3,750；`fitMap` 距離≈1,495 |
+| 存檔 | v6 compact（seed＋sparse tileEdits，80–140KB）；只接受 600×600 |
 
 ### 13.3 建議調整／實作清單
 
@@ -1165,12 +1165,12 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
 |---|---|---|---|---|---|
 | 1 | empty 5 名市民 | `createGameState('empty')` 未見 seeding，但 UI 文案寫 5 名 | 補 5 名初始市民（或改文案） | new-game 負責人 | **P0** |
 | 2 | minimap | 已實作（`ui/minimap.ts`，250ms 節流、地形快取、132px 手機版） | 保持；加 hover 地名（可選） | ui-dev | 完成 |
-| 3 | 存檔 v5 | 已實作（`core/save.ts`） | 檢查舊檔提示與匯入拒絕文案 | Lead | P1 |
+| 3 | 存檔 v6 | 已實作（`core/save.ts`） | 檢查舊檔提示與匯入拒絕文案 | Lead | P1 |
 | 4 | zoning 檔頭註解 | 仍寫 2／5／420 | 更新為 6／15／1,200 | systems-dev | P2 |
-| 5 | 相機 zoom out | 已加大（MAX≈823、far≈3,000） | 保持 | world-dev／ui-dev | 完成 |
-| 6 | 城事面板顯示地圖規模 | 未確認 | 顯示「480×480 · 230,400 格」 | ui-dev | P2 |
+| 5 | 相機 zoom out | 已加大（MAX≈1,625、far≈3,750） | 保持 | world-dev／ui-dev | 完成 |
+| 6 | 城事面板顯示地圖規模 | 未確認 | 顯示「600×600 · 360,000 格」 | ui-dev | P2 |
 
-### 13.4 首年預期（480 地圖，僅供 QA 參考）
+### 13.4 首年預期（600 地圖，僅供 QA 參考）
 
 | 時間 | 人口 | 自動建築 | devScore | 備註 |
 |---|---|---|---|---|
@@ -1179,7 +1179,7 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
 | 第 6 月 | 500–800 | 200–350 | 72–88 | 港鐵、發電廠、渡輪 |
 | 第 12 月 | 800–1,200 | 400–900（上限 1,200） | 88–97 | 豪宅、商場、土地接近飽和 |
 
-### 13.5 平衡風險（480 地圖）
+### 13.5 平衡風險（600 地圖）
 
 | 風險 | 徵兆 | 對策 |
 |---|---|---|
@@ -1203,26 +1203,26 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
 | 人口上限 | 1,600 | 1,600（自動建築 1,200 棟） | 不變 |
 | 存檔 | v2 | **v3（新欄位）** | Lead 決定 migration |
 
-## 15. 型別與 config 對照（480 真實地理版）
+## 15. 型別與 config 對照（600 真實地理版）
 
 ### 15.1 地圖與版本常數
 
 | 常數 | 值 | 說明 |
 |---|---|---|
-| `GAME_VERSION` | **5** | save v5 compact |
-| `GRID_WIDTH`／`GRID_HEIGHT` | **480／480** | 230,400 格 |
+| `GAME_VERSION` | **6** | save v6 compact |
+| `GRID_WIDTH`／`GRID_HEIGHT` | **600／600** | 360,000 格 |
 | `TILE_SIZE` | 2 | 每格世界 2 單位 |
-| `MAP_SCALE` | **5**（480/96） | 霧／天空／相機距離／deco 密度 |
-| `WORLD_SPAN` | **960** | 480×2 |
+| `MAP_SCALE` | **6.25**（600/96） | 霧／天空／相機距離／deco 密度 |
+| `WORLD_SPAN` | **1200** | 600×2 |
 | `HK_DESIGN_SIZE` | 96 | worldgen 設計座標基準 |
-| 每格實際距離 | **140m** | 生成數據 `tileMeters` |
-| 相機 | MIN 16／MAX `260×MAP_SCALE`=1,300／far `600×MAP_SCALE`=3,000；fitMap 距離≈1,196 | `city-view.ts`；`MAP_SCALE=5` |
+| 每格實際距離 | **112m** | 生成數據 `tileMeters` |
+| 相機 | MIN 16／MAX `260×MAP_SCALE`=1,625／far `600×MAP_SCALE`=3,750；fitMap 距離≈1,495 | `city-view.ts`；`MAP_SCALE=6.25` |
 
 ### 15.2 真實地理模組
 
 | 檔案／型別 | 內容 |
 |---|---|
-| `src/world/hk-map-data.generated.ts` | `HK_MAP_DATA`：480×480 terrainRle／elevation／density／buildingHeight／labels(69)／landmarks(6)／tunnels(3)／regions(15)／spawn(259,299) |
+| `src/world/hk-map-data.generated.ts` | `HK_MAP_DATA`：600×600 terrainRle／elevation／density／buildingHeight／labels(69)／landmarks(6)／tunnels(3)／regions(15)／spawn(259,299) |
 | `src/world/hk-map-data-types.ts` | `MapData`／`MapLabelKind`／`MapLandmarkKind`／`MapRegionKind` |
 | `tools/build-hk-data.py` | 離線生成（DTM 5m＋Building Outlines；EPSG:2326）；`tools/README.md` 為下載步驟（Lead 維護） |
 | `Tile` | `+ density?: number`（0..255）、`+ buildingHeight?: number`（米；>2m 才寫入）——**只 render／統計，不進模擬** |
@@ -1248,9 +1248,9 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
 | density／height | **只 render**；不影響人口／稅收／地價／開發；UI 不應把它當人口 |
 | 自動建築 | `auto=true`、`zone` 記錄來源；不扣玩家造價；cap 15／日、6／區、1,200 全城 |
 | 分區 pipeline | 已劃未開發格門檻按 `AREA_SCALE = MAP_SCALE² = 25` 放大 |
-| 導航 | `focusTile()`／`fitMap()` 經 `store.emit('focus')`；minimap 480 canvas、真實地形、250ms 節流 |
-| 存檔 | v5 compact；只序列化 sparse tileEdits；地形由 seed＋生成檔重新解碼；96／304 舊檔拒絕 |
-| 效能 | starter overview 1.327M tris／402 calls；empty 1.032M／37 calls；worldgen 1.5–2 秒 |
+| 導航 | `focusTile()`／`fitMap()` 經 `store.emit('focus')`；minimap 600 canvas、真實地形、250ms 節流 |
+| 存檔 | v6 compact；只序列化 sparse tileEdits；地形由 seed＋生成檔重新解碼；96／304 舊檔拒絕 |
+| 效能 | starter overview ≤2.0M tris／≤550 calls；empty ≤1.5M／50 calls；worldgen 2.5–4 秒 |
 
 ## 16. 工程對照與實作優先級（分區版）
 
@@ -1258,7 +1258,7 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
 
 | 章節 | 模組 | 負責 Agent | 驗收要點 |
 |---|---|---|---|
-| §2 真實地圖／render | `world/hk-map-data.generated.ts`、`world/worldgen.ts`、`render/terrain.ts`、`render/environment.ts` | world-dev | 480×480、CSDI DTM＋建築輪廓、terrain／density／height 解碼、真實樓群 4,089（3 InstancedMesh）、雪線 0.8、無邊海面、地名 LOD |
+| §2 真實地圖／render | `world/hk-map-data.generated.ts`、`world/worldgen.ts`、`render/terrain.ts`、`render/environment.ts` | world-dev | 600×600、CSDI DTM＋建築輪廓、terrain／density／height 解碼、真實樓群 4,089（3 InstancedMesh）、雪線 0.8、無邊海面、地名 LOD |
 | §2.4 真實 spawn／隧道 | `worldgen.ts`、`core/starter-town.ts` | world-dev／Lead | spawn (259,299)、3 過海隧道、starter 連通道路（BFS 分量）、empty 0 道路 |
 | §3 建築／分區資料 | `core/config.ts`、`render/buildings.ts` | buildings-dev、Lead | 19 auto＋13 ploppable 模型、`zone`／weight／minDevScore 正確 |
 | §3.1–3.5 分區系統 | `sim/zoning.ts`、`sim/stats.ts` | systems-dev | RCI+F 需求、devScore、自動開發、荒廢、1,200 上限 |
@@ -1268,8 +1268,8 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
 | §6 交通 | `sim/transit.ts` | transport-dev | 13 ploppable 交通站點、車費、颱風停航停駛 |
 | §7 財政 | `sim/finance.ts` | economy-dev | 分區成本入基建支出；auto 維護費不計玩家；稅收照收 |
 | §8 天氣 | `sim/time.ts` | economy-dev | 6 天氣、1/3/8 風球、災害 |
-| §10 UI／導航 | `ui/**`、`styles.css`、`ui/minimap.ts` | ui-dev | 建造面板、需求條、開局畫面、分區 overlay、minimap 480 真實地形（250ms／視野框／O/P/L）、相機 zoom out 1,300 |
-| §12 存檔 | `core/save.ts` | Lead | v5 compact、480×480、舊檔拒絕 |
+| §10 UI／導航 | `ui/**`、`styles.css`、`ui/minimap.ts` | ui-dev | 建造面板、需求條、開局畫面、分區 overlay、minimap 600 真實地形（250ms／視野框／O/P/L）、相機 zoom out 1,300 |
+| §12 存檔 | `core/save.ts` | Lead | v6 compact、600×600、舊檔拒絕 |
 
 ### 16.2 建議實作順序
 
@@ -1288,21 +1288,21 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
 - `placement.ts` 仍有獨立 sidewalk 工具；要移除並改為 zone 工具（工具字串見 §15）。
 - `simulation.ts` 要加 `tickZoning(state)`（每日一次，建議在 `newDay` 人口結算前）。
 - 自動建築**不要**計入 `totalUpkeep`；手動建築才計。
-- 存檔：v5 compact（seed＋sparse tileEdits）；`GAME_VERSION=5`；舊 96×96 檔拒絕。
-- 效能：480 地圖要守 terrain 588k tris、deco 密度歸一、auto 上限 1,200；worldgen 首載 1.5–2 秒由 boot screen 承接。
+- 存檔：v6 compact（seed＋sparse tileEdits）；`GAME_VERSION=6`；舊 96×96 檔拒絕。
+- 效能：600 地圖要守 terrain／deco 密度歸一、auto 上限 1,200；worldgen 首載 2.5–4 秒由 boot screen 承接。
 
-## 17. 設計驗收清單（Definition of Done，480 真實地理版）
+## 17. 設計驗收清單（Definition of Done，600 真實地理版）
 
 ### 17.1 玩法／地圖
 
-- [ ] 地圖 **480×480（230,400 格）**、每格 140m、`MAP_SCALE=5`、可建地 **22.4%**；spawn 中環 **(259,299)**。
+- [ ] 地圖 **600×600（360,000 格）**、每格 **112m**、`MAP_SCALE=6.25`、可建地 **22.4%**；spawn 中環 **(259,299)**。
 - [ ] 真實數據生成：DTM 5m＋342,233 建築輪廓 → terrain／density／height；水域 75.6%、山多平地少。
 - [ ] starter：**連通優先**道路網（全鎮同一分量）、10 項公共設施（學校×2、醫院）、34 棟 auto（7 農田、倉庫食品 520）、約 146 人。
 - [ ] starter 才顯示真實樓群（~4,089 座、3 InstancedMesh）、地標、機場雙跑道、葵涌貨櫃碼頭；empty 全部隱藏。
 - [ ] empty：**0 道路／0 建築／0 分區／0 隧道**、無地標／機場／碼頭；只有自然地形＋樹木＋海面船隻；5 市民（設計）。
 - [ ] 白色階梯已修：雪線 elevation ≥0.8，只在 snow 或冬季 ≤6°C；低地霜另計。
 - [ ] 無邊海面正常；地名 LOD（TOP16／major／minor）正常；機場／貨櫃碼頭位置與真實相符。
-- [ ] 開局畫面選「已有城鎮／由零開始」；顯示 **480×480** 與「CSDI 真實地理」badge。
+- [ ] 開局畫面選「已有城鎮／由零開始」；顯示 **600×600** 與「CSDI 真實地理」badge。
 
 ### 17.2 分區／數值
 
@@ -1313,18 +1313,82 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
 
 ### 17.3 介面／導航
 
-- [ ] minimap **480 canvas**（真實地形底色）、點擊／拖曳跳轉、視野框、全圖／市中心／分區 toggle；手機 132px 預設收起。
-- [ ] 快捷 **O 全圖／P 市中心／L 分區**；相機 zoom out 至 ~1,300、far ~3,000。
-- [ ] 開局畫面、存檔面板顯示 **480×480／230,400 格**、v5 compact、80–140KB；舊 96／304 檔有拒絕提示。
+- [ ] minimap **600 canvas**（真實地形底色）、點擊／拖曳跳轉、視野框、全圖／市中心／分區 toggle；手機 132px 預設收起。
+- [ ] 快捷 **O 全圖／P 市中心／L 分區**；相機 zoom out 至 ~1,625、far ~3,750。
+- [ ] 開局畫面、存檔面板顯示 **600×600／360,000 格**、v6 compact、80–140KB；舊 96／304 檔有拒絕提示。
 - [ ] 說明書新增「地圖與導航」章節（minimap、O/P/L、CSDI 數據來源）。
 
 ### 17.4 工程／效能
 
 - [ ] `npx tsc --noEmit`、`npm run build` 通過。
-- [ ] starter overview **1.327M tris／402 calls**；empty **1.032M tris／37 calls**；首次 worldgen **1.5–2 秒**（boot screen）。
-- [ ] 存檔／讀檔後 gameMode、zoneDemand、tile.zone、Building.auto/zone、新 stats、地圖 480 一致。
+- [ ] starter overview **≤2.0M tris／≤550 calls**；empty **1.032M tris／37 calls**；首次 worldgen **2.5–4 秒**（boot screen）。
+- [ ] 存檔／讀檔後 gameMode、zoneDemand、tile.zone、Building.auto/zone、新 stats、地圖 600 一致。
 - [ ] 60fps 目標：人口 800–1,200、auto 建築 1,200、市民 200+ 同屏。
 - [ ] 無 console error；舊存檔有明確提示。
+
+## 18. Round 5 新增玩法（600 地圖／地下管網／路線／機場碼頭）
+
+> Round 5 在 600×600 真實地理上加入 4 個新系統；完整規格見 `ROUND5_UTILITIES.md`、`ROUND5_TRANSIT_LINES.md`、`ROUND5_AIRPORT_PORT.md`。本章只列 GDD 層面的玩法定位、數值與契約摘要；**MVP vs P2** 以各文件為準。
+
+### 18.1 600×600 地圖與水塘／土地利用
+
+| 項目 | Round 4（480） | Round 5（600） |
+|---|---|---|
+| 地圖 | 480×480＝230,400 格 | **600×600＝360,000 格** |
+| 每格實際距離 | 140m | **112m**（同一 67.2km 範圍，更精細海岸線） |
+| `MAP_SCALE`／`WORLD_SPAN` | 5／960 | **6.25／1,200** |
+| `GAME_VERSION` | 5 | **6**（save v6） |
+| 真實數據 | DTM 5m＋建築輪廓 | 再加**水塘水面／土地利用**細分（水塘、農地、市區、填海） |
+| 可建地 | 22.4% | **約 22%（QA 實測；更精細海岸線後 ±1%）** |
+
+- **水塘**：水塘水面補回後可作供水來源（水務設施在水塘 12 格內 +20% 容量，P2）；亦影響農業／郊野公園分布。
+- **土地利用**：農地／市區／填海地更準確 → 農業區只可 fertile／grass；填海地地價較高；機場島／葵青填海地只適合大型基建。
+- **minimap**：600×600 canvas、真實地形、250ms 節流；相機 zoom out 至 ~1,625。
+- **效能風險**：360,000 格、terrain 三角更多；目標 starter overview ≤2.0M tris／≤550 calls、empty ≤1.5M／50 calls、worldgen 2.5–4 秒（boot screen）。
+- **舊存檔**：96／304／480 全部拒絕（v6）。
+
+### 18.2 地下管網（水／污水／電力）
+
+- 玩家鋪**水管／污水管／電纜**（$500–$800/格），建築 footprint 鄰管即接駁；水源（水務設施／水塘）、污水廠、發電廠／變電站作源頭。
+- 每日 BFS 計容量／壓力／污水負荷；缺水停電污水倒灌會令效率、幸福、污染、火災風險變差。
+- 新 ploppable：`sewagePlant`（3×3、$3.5M、capacity 1,500）、`substation`（2×2、$2.2M、capacity 1,200）、`waterTower`（2×2、$1.2M、儲水 600、+15% 壓力）；P2：抽水站、海水取水。
+- Starter 預建管網；empty 零管網。詳細數值、公式、UI 見 `ROUND5_UTILITIES.md`。
+
+### 18.3 巴士／小巴路線
+
+- 新站點 `busStop`（$60k）、`minibusStop`（$35k）、`minibusTerminus`（$280k）；現有 `busTerminus` 仍是總站。
+- 路線資料：`TransitLine {mode,kind,name,color,stops[],loop,vehicles,vehicleType,fare,active,...}`；玩家在地圖點站建線（2–12 站、需道路連通）。
+- 營運：班次＝服務時段／roundTrip／車數；收入＝乘客×票價×0.9；成本＝車數×$1,200（巴士）／$300（小巴）＋過海隧道費；要平衡車數／等候／載客率。
+- 香港特色：雙層巴士 130 人、綠 Van 19 人固定線、紅 Van 可調票價（P2）、八達通 0.9 折扣；與現有 bus 覆蓋 split，避免雙重計算。詳見 `ROUND5_TRANSIT_LINES.md`。
+
+### 18.4 機場與貨櫃碼頭
+
+- 機場（赤鱲角真實位置）：`airportTerminal`（5×5、$28M、24 gates）、`airportCargoTerminal`（4×4、$16M、600 噸/日）；玩家簽客運／貨運航線，收入＝乘客×$20×0.9＋貨運處理費；旅遊收入；噪音半徑 30 影響住宅幸福 −6／地價 −10%。
+- 貨櫃碼頭（葵青真實位置）：現有 `containerPort`＋`containerYard`（5×5、$6M、1,500 TEU）、`gantryCrane`（2×2、$8M、600 TEU/日／座、最多 6）、`portGate`（2×2、$4M、900 架次/日）；吞吐＝min(吊機、貨櫃場、閘口、道路)；船線合約進出口 goods／electronics；颱風停裝卸。
+- 全部 `ploppable`、不自動開發；解鎖：碼頭 300（現有）、貨櫃場 300、閘口 320、吊機 350、貨運站 900、客運大樓 1,200。詳見 `ROUND5_AIRPORT_PORT.md`。
+
+### 18.5 契約摘要（MVP）
+
+| 項目 | 新增／修改 |
+|---|---|
+| `Tile` | `waterPipe?`／`sewagePipe?`／`powerLine?`（save bit 3/4/5）；P2 `pipeHealth` |
+| `GameState` | `utilities`（結算）／`transitLines`／`nextLineId`／`airport`／`port`／`nextAirRouteId`／`nextPortLaneId` |
+| `BuildingDef` | `utilitySource`／`utilityDemand`；`airport`／`port`；`transit.stopType` |
+| 新 building key | `sewagePlant`／`substation`／`waterTower`／`busStop`／`minibusStop`／`minibusTerminus`／`airportTerminal`／`airportCargoTerminal`／`containerYard`／`gantryCrane`／`portGate`（共 11 個，config 由 Lead 定） |
+| `GameStats` | `waterSupply/waterDemand/waterPressure`、`sewageCapacity/sewageLoad/sewageBacklog`、`powerSupply/powerDemand`、`busLines/minibusLines/lineRiders/lineRevenue/lineOpex`、`airPassengers/airCargoTons/portTeu/tourismIncome/tradeIncome/noisePollution` |
+| `GameActions` | `setUndergroundLayer`／`toggleUtilities`、`openLineBuilder/addLineStop/undoLineStop/finishLine/cancelLineBuilder/updateLine/deleteLine/toggleLineActive`、`openAirportPanel/addAirRoute/updateAirRoute/deleteAirRoute`、`openPortPanel/addPortLane/updatePortLane/deletePortLane` |
+| `UIState` | `showUtilities`／`undergroundLayer`／`showUnderground`／`utilityTab`、`transitTab`／`lineDraft`／`selectedLineId`、`showAirport`／`airportTab`、`showPort`／`portTab` |
+| `ExpenseKind` | P2：`transitOps`／`airportOps`／`portOps`（MVP 可入 `infrastructure`） |
+| Save | v6：pipe bits、utilities、transitLines、airport、port；舊 96／304／480 拒絕 |
+
+### 17.5 Round 5 新增玩法驗收
+
+- [ ] 600×600（360,000 格）·112m/格·可建約 22%·`MAP_SCALE=6.25`·`GAME_VERSION=6`；舊 96／304／480 存檔拒絕。
+- [ ] 管網：水管／污水管／電纜可鋪、建築自動接駁、源頭容量 BFS；缺水／停電／污水倒灌有數值與 UI 後果；starter 預建、empty 零管網。
+- [ ] 路線：巴士站／小巴站／小巴總站可建；可建 2–12 站路線、設定車數／票價／循環；每日收入成本、等候、載客率；錯誤狀態齊全。
+- [ ] 機場：客運／貨運大樓可建（赤鱲角）、可簽客運／貨運航線；航班／乘客／貨運／收入／旅遊／噪音就業正常；8 號風球關閉。
+- [ ] 貨櫃碼頭：貨櫃場／龍門吊／閘口可建（葵青）、可簽船線；吞吐 = min(吊機、場、閘口、道路)；進出口入 goods／electronics；颱風停裝卸。
+- [ ] 所有新面板（地下層 U、路線 tab、機場、碼頭）可運作；save v6 包含 pipe bits／utilities／transitLines／airport／port。
 
 ## 附錄 A：數值速查（分區版，以 config 為準）
 
@@ -1399,10 +1463,10 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
 | 真實樓群 | 約 **4,089 座**（starter render；3 InstancedMesh；density／height 只視覺） |
 | 雪線 | elevation ≥0.8；只在 snow／冬季 ≤6°C |
 | EMPTY | 完全空地、5 市民（設計）、$8,000,000 |
-| 地圖 | 480×480（230,400 格；每格 140m）；`MAP_SCALE=5`、`WORLD_SPAN=960`；`GAME_VERSION=5` |
-| 存檔 | v5 compact（80–140KB，只接受 480×480） |
-| minimap | 480×480 右下、O 全圖／P 市中心／L 分區 |
-| 效能（Round 4） | starter overview 1.327M tris／402 calls；empty 1.032M／37 calls；首次 worldgen 1.5–2 秒 |
+| 地圖 | 600×600（360,000 格；每格 **112m**）；`MAP_SCALE=6.25`、`WORLD_SPAN=1200`；`GAME_VERSION=6` |
+| 存檔 | v6 compact（80–140KB，只接受 600×600） |
+| minimap | 600×600 右下、O 全圖／P 市中心／L 分區 |
+| 效能（Round 4） | starter overview ≤2.0M tris／≤550 calls；empty ≤1.5M／50 calls；首次 worldgen 2.5–4 秒 |
 | STARTER warmupDays | 10 |
 | STARTER targetPopulation | 120 |
 | STARTER layoutRadius | 9 格 |
@@ -1467,7 +1531,7 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
   │     ├─ 'dezone'：清分區（免費）
   │     └─ 'demolish'／建築 key：拆除（退 30%）／手動置建築
   ├─ sellLand／holdFestival／setTaxRate --> finance
-  ├─ save/load/newGame --> core/save.ts（v5 compact：seed＋sparse tileEdits）、core/new-game.ts（starter／empty）
+  ├─ save/load/newGame --> core/save.ts（v6 compact：seed＋sparse tileEdits）、core/new-game.ts（starter／empty）
   └─ focusTile/fitMap --> store.emit('focus') --> CityView（minimap 點擊／O／P）
 
 [每幀] Simulation.update(state, dt, ctx)
@@ -1529,11 +1593,11 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
 | 開發商 | developer | 按需求自動起樓的系統（非玩家） |
 | 地價 | land value | 0–100，影響 devScore／差餉 |
 | 荒廢 | abandonment | 8 日無路自動拆卸 |
-| minimap | minimap | 480×480 真實地形概覽、視野框、點擊跳轉（O/P/L） |
+| minimap | minimap | 600×600 真實地形概覽、視野框、點擊跳轉（O/P/L） |
 | CSDI／DTM | open geodata | 空間數據共享平台／地政總署 5m 數碼地形模型 |
 | density／buildingHeight | building coverage/height | 每格真實建築覆蓋率 0..255／平均高度（只視覺） |
 | 地名 LOD | label LOD | TOP16 任何距離、major 中景、minor 近景 |
-| 存檔 v5 | compact save | seed＋稀疏道路／分區變更，80–140KB |
+| 存檔 v6 | compact save | seed＋稀疏道路／分區變更，80–140KB |
 | `MAP_SCALE` | map scale | 304/96≈3.17，渲染距離與密度換算 |
 
 ---

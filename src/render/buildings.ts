@@ -41,7 +41,15 @@ const GROUND_Y = 0.28;
 const PAD_Y = 0.34;
 
 /** 臨水建築：模型「+x」方向預設面向水面（見 building-prototypes 註解）。 */
-const WATER_FACING = new Set(['ferryPier', 'containerPort', 'promenade']);
+const WATER_FACING = new Set([
+  'ferryPier',
+  'containerPort',
+  'promenade',
+  // Round 5：臨海公用設施（海水化淡廠／污水處理廠／排污口）
+  'desalPlant',
+  'sewagePlant',
+  'sewageOutfall',
+]);
 
 // ─────────────────────────── 動畫部件 ───────────────────────────
 
@@ -217,6 +225,29 @@ function glowSpecFor(key: string, variant: number): GlowSpec {
     case 'park':
     case 'promenade':
       return { color: 0x9fe08a, opacity: 0.55, scale: 1.15 };
+    // ── Round 5 新增 ──
+    case 'waterTower':
+      return { color: 0x7fd6ff, opacity: 0.5, scale: 0.85 };
+    case 'desalPlant':
+      return { color: 0x7fd6ff, opacity: 0.5, scale: 1.4 };
+    case 'sewagePlant':
+      return { color: 0x8fe0a8, opacity: 0.42, scale: 1.3 };
+    case 'sewageOutfall':
+      return { color: 0x7fd6a0, opacity: 0.32, scale: 0.7 };
+    case 'busStop':
+      return { color: 0xffd166, opacity: 0.7, scale: 0.75 };
+    case 'minibusStop':
+      return { color: 0x5cff9d, opacity: 0.65, scale: 0.72 };
+    case 'minibusDepot':
+      return { color: 0xffd166, opacity: 0.55, scale: 1.1 };
+    case 'airportTerminal':
+      return { color: 0xbfe0ff, opacity: 0.75, scale: 1.5 };
+    case 'airCargoTerminal':
+      return { color: 0xffd9a0, opacity: 0.55, scale: 1.3 };
+    case 'portGate':
+      return { color: 0xffd166, opacity: 0.7, scale: 1.05 };
+    case 'portYard':
+      return { color: 0x7fd6ff, opacity: 0.55, scale: 1.3 };
     default:
       return { color: 0xffc07a, opacity: 0.5, scale: 1.0 };
   }

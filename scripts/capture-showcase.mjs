@@ -519,7 +519,7 @@ try {
     store.bumpUI();
     // 304×304 大地圖：用 fitMap 拉遠至全圖 overview
     view.target.set(0, 0, 0);
-    view.distance = 1250;
+    view.distance = 1560;
     view.pitch = 1.3;
     view.yaw = -0.35;
   });
@@ -542,14 +542,49 @@ try {
     st.clock.weatherIntensity = 0;
     window.__HK_CITY__.deriveClockFields(st.clock);
     const T = 2;
-    const tile = { x: 316, y: 303 };
+    const tile = { x: 395, y: 379 };
     view.target.set((tile.x + 0.5) * T - (st.width * T) / 2, 0, (tile.y + 0.5) * T - (st.height * T) / 2);
-    view.distance = 190;
+    view.distance = 240;
     view.pitch = 1.02;
     view.yaw = -0.82;
     store.bumpUI();
   });
   await snap('east', 3200);
+
+  // 13) 地下管網（starter 已有預建管道）
+  await ev(() => {
+    const { actions, store } = window.__HK_CITY__;
+    actions.toggleUnderground?.();
+    store.bumpUI();
+  });
+  await snap('underground', 2800);
+
+  // 14) 公用設施面板
+  await ev(() => {
+    const { actions, store } = window.__HK_CITY__;
+    actions.toggleUnderground?.();
+    actions.toggleUtilityPanel?.();
+    store.bumpUI();
+  });
+  await snap('utility', 2400);
+
+  // 15) 交通／路線面板
+  await ev(() => {
+    const { actions, store } = window.__HK_CITY__;
+    actions.toggleUtilityPanel?.();
+    actions.toggleTransit?.();
+    store.bumpUI();
+  });
+  await snap('transit', 2400);
+
+  // 16) 貿易面板
+  await ev(() => {
+    const { actions, store } = window.__HK_CITY__;
+    actions.toggleTransit?.();
+    actions.toggleTradePanel?.();
+    store.bumpUI();
+  });
+  await snap('trade', 2400);
 
   result.ok = errors.length === 0;
   result.shots = fs.readdirSync(outDir).filter((f) => f.endsWith('.png'));

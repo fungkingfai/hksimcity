@@ -1,11 +1,14 @@
 /**
  * 《維港之城》— 可進入的香港建築室內場景（interiors-dev）
  *
- * 依 `BUILDINGS[key].interior` 生成 32 種香港室內／半室外／戶外場景：
+ * 依 `BUILDINGS[key].interior` 生成 41 種香港室內／半室外／戶外場景
+ * （32 種原有＋9 種 Round 5 新增；busStop／minibusStop 等細站以交通類 fallback 進入）：
  *   唐樓單位、劏房、公屋單位、居屋、私人屋苑、豪宅、農田、茶餐廳、便利店、
  *   街市、超市、商場、酒樓、商廈、工廈、食品廠、石礦場、發電廠、水務設施、
  *   進口商行、貨櫃碼頭、貨倉、學校、醫院、警署、消防局、港鐵站、巴士總站、
- *   電車站、渡輪碼頭、公園、海濱長廊。
+ *   電車站、渡輪碼頭、公園、海濱長廊；
+ *   水塔泵房、海水化淡廠、污水處理廠、排污口泵房、小巴車廠、
+ *   機場客運大樓（離境大堂）、空運貨運站、碼頭閘口、貨櫃堆場控制室。
  *
  * 每個室內都有：香港主題陳設、日夜窗光（街景／維港景交叉淡入）、
  * 天氣視覺（雨痕、颱風閃電、陰天光暗）、霓虹招牌閃爍、人物象徵、
@@ -30,6 +33,7 @@ import {
   addACUnit,
   addAltar,
   addBarrelDrum,
+  addBeam,
   addBench,
   addBird,
   addBoardPartition,
@@ -277,7 +281,7 @@ function buildRoom(scene: THREE.Scene, shell: THREE.Group, dims: Dims, spec: Roo
     }
     if (w > 9.5) {
       for (const sx of [-0.28, 0.28]) {
-        addBox(shell, lam(shade(accent, 1.1)), 0.3, h, 0.3, sx * w, h / 2, 0);
+        addBox(shell, lam(shade(accent, 0.95)), 0.3, h, 0.3, sx * w, h / 2, 0);
       }
     }
   }
@@ -399,9 +403,16 @@ function addBoard(
   ry: number,
   w: number,
   h: number,
-  opts: { bg?: number; fg?: string; border?: string; font?: string } = {},
+  opts: { bg?: number; fg?: string; border?: string; font?: string; texW?: number; texH?: number } = {},
 ): THREE.Mesh {
-  const mat = signBoardMat(key, lines, { w: 256, h: 128, ...opts });
+  const mat = signBoardMat(key, lines, {
+    w: opts.texW ?? 256,
+    h: opts.texH ?? 128,
+    bg: opts.bg,
+    fg: opts.fg,
+    border: opts.border,
+    font: opts.font,
+  });
   const g = new THREE.Group();
   g.position.set(x, y, z);
   g.rotation.y = ry;
@@ -453,7 +464,7 @@ function peopleCount(room: 'resident' | 'worker', n: number): number {
   return Math.max(1, Math.min(5, Math.ceil(n / 5)));
 }
 
-// ─────────────────────────── 32 種室內陳設 ───────────────────────────
+// ─────────────────────────── 32 種原有室內陳設 ───────────────────────────
 
 /** 1. 唐樓單位：鐵閘、碌架床、舊電視、吊扇、神枱。 */
 function fillTongLau(ctx: FillCtx): void {
@@ -1174,7 +1185,7 @@ function fillPoliceStation(ctx: FillCtx): void {
   addDocumentDesk(root, -w * 0.28, -d * 0.1, 0.2, 1.8);
   addOfficeDesk(root, -w * 0.34, -d * 0.3, 0.2);
   addNoticeBoard(root, w * 0.02, h * 0.55, -d / 2 + 0.26, 0, 1.8, 1.0);
-  addBoard(ctx, 'police-motto', ['香港警察', '服務為本 · 精益求精'], 0, h * 0.5, d * 0.44, Math.PI, 1.8, 0.6, { bg: 0x24354f, fg: '#ffffff' });
+  addBoard(ctx, 'police-motto', ['香港警察', '服務為本 · 精益求精'], 0, h * 0.82, -d / 2 + 0.26, 0, 1.8, 0.6, { bg: 0x24354f, fg: '#ffffff' });
   addBoard(ctx, 'police-notice', ['報案須知', '請出示身份證', '保持冷靜'], -w * 0.42, h * 0.5, d * 0.2, Math.PI / 2, 0.9, 0.7, { bg: 0xf2f0e6, fg: '#1f3a5f', border: '#24354f' });
   addPerson(root, { x: -w * 0.1, z: d * 0.04, ry: 0, kind: 'police' });
   addPerson(root, { x: -w * 0.28, z: d * 0.06, ry: Math.PI * 0.9, kind: 'police' });
@@ -1402,11 +1413,750 @@ function fillGenericWork(ctx: FillCtx): void {
   addPerson(root, { x: -w * 0.1, z: d * 0.3, ry: Math.PI, kind: 'worker' });
 }
 
+// ═══════════════════════ Round 5 新增零件（水務／污水／機場／碼頭／小巴） ═══════════════════════
+
+/** 行李篋（機場／客運站用）。 */
+function addLuggage(parent: THREE.Object3D, x: number, y: number, z: number, color = 0x3a5f8f, scale = 1): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, y, z);
+  g.scale.setScalar(scale);
+  addBox(g, lam(color), 0.42, 0.5, 0.26, 0, 0.27, 0);
+  addBox(g, lam(shade(color, 0.82)), 0.42, 0.04, 0.26, 0, 0.16, 0);
+  addBox(g, lam(0x8a9096), 0.16, 0.03, 0.04, 0, 0.53, 0);
+  addCyl(g, lam(0x2a2f36), 0.035, 0.035, 0.03, -0.14, 0.04, 0.1, 6, 0, Math.PI / 2);
+  addCyl(g, lam(0x2a2f36), 0.035, 0.035, 0.03, 0.14, 0.04, 0.1, 6, 0, Math.PI / 2);
+  parent.add(g);
+  return g;
+}
+
+/** 航班資料顯示牌（離境大堂）。 */
+function addFlightBoard(ctx: FillCtx, x: number, y: number, z: number, ry = 0, w = 3.2, h = 1.9): THREE.Mesh {
+  return addBoard(
+    ctx,
+    'flight-board',
+    [
+      '航班資料 DEPARTURES',
+      'CX 502  台北 TAIPEI      10:30  24',
+      'HX 618  曼谷 BANGKOK     11:15  12',
+      'UO 860  東京 TOKYO       12:05  31',
+      'AK 139  新加坡 SINGAPORE 13:40   5',
+      'MU 738  上海 SHANGHAI    14:25  18',
+      'CI 906  台北 TAIPEI      15:10  24',
+      'KA 201  北京 BEIJING     16:00   9',
+    ],
+    x,
+    y,
+    z,
+    ry,
+    w,
+    h,
+    { bg: 0x0b1622, fg: '#7fe0b0', border: '#2f6f8f', texW: 512, texH: 320 },
+  );
+}
+
+/** 登機閘口牌。 */
+function addGateSign(ctx: FillCtx, gate: string, dest: string, x: number, y: number, z: number, ry = 0): THREE.Mesh {
+  return addBoard(ctx, `gate-${gate}`, [`閘口 GATE ${gate}`, `往 ${dest}`], x, y, z, ry, 1.5, 0.72, {
+    bg: 0x0f2a1f,
+    fg: '#5cff9d',
+    border: '#5cff9d',
+  });
+}
+
+/** 懸掛飛機模型（客運大樓裝飾）。 */
+function addPlaneModel(parent: THREE.Object3D, x: number, y: number, z: number, scale = 1, color = 0xf2f0e8): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, y, z);
+  g.scale.setScalar(scale);
+  g.rotation.y = -0.35;
+  const body = lam(color);
+  const accent = lam(0x2f5f8f);
+  addCyl(g, body, 0.2, 0.2, 2.6, 0, 0, 0, 12, 0, Math.PI / 2);
+  const nose = addCone(g, body, 0.2, 0.5, 1.55, 0, 0, 12);
+  nose.rotation.z = -Math.PI / 2;
+  addBox(g, body, 0.9, 0.06, 2.5, 0.1, 0.02, 0);
+  addBox(g, accent, 0.92, 0.05, 0.34, 0.1, 0.035, 0);
+  addBox(g, body, 0.55, 0.5, 0.06, -0.95, 0.22, 0);
+  addBox(g, body, 0.5, 0.04, 1.0, -1.1, 0.02, 0);
+  for (const side of [-1, 1]) addCyl(g, lam(0x8a9096), 0.09, 0.09, 0.5, 0.05, -0.14, side * 0.75, 8, 0, Math.PI / 2);
+  addBox(g, basic(0x9fd8ff), 1.6, 0.04, 0.03, 0.25, 0.04, 0.2);
+  markAnim(g, 'bob');
+  parent.add(g);
+  return g;
+}
+
+/** 航空公司登記櫃位（櫃檯＋行李輸送帶＋螢幕）。 */
+function addCheckInCounter(parent: THREE.Object3D, x: number, z: number, ry = 0, airlineColor = 0x1f4f7a): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, 0, z);
+  g.rotation.y = ry;
+  addBox(g, lam(0xf2f2ee), 2.6, 0.95, 0.62, 0, 0.48, 0);
+  addBox(g, lam(0xd8dde0), 2.66, 0.06, 0.68, 0, 0.97, 0);
+  addBox(g, lam(airlineColor), 2.6, 0.4, 0.03, 0, 0.62, 0.32);
+  addBox(g, lam(0xe8e4dc), 2.2, 0.24, 0.5, 0, 0.06, 0.1);
+  addBox(g, lam(0x3a4048), 2.8, 0.42, 0.5, 0, 0.32, -0.85);
+  addBox(g, lam(0x2a2f36), 2.8, 0.06, 0.5, 0, 0.55, -0.85);
+  addLuggage(g, -0.7, 0.58, -0.85, 0x3a5f8f, 0.8);
+  addLuggage(g, 0.1, 0.58, -0.85, 0xb4453a, 0.75);
+  addBox(g, lam(0x22262a), 0.42, 0.3, 0.04, -0.8, 1.2, -0.2);
+  addBox(g, basic(0x8fd8ff), 0.38, 0.24, 0.01, -0.8, 1.2, -0.17);
+  addBox(g, lam(0x2a2e33), 0.34, 0.02, 0.14, -0.8, 0.99, 0.02);
+  addBox(g, lam(airlineColor), 0.9, 0.28, 0.05, 0.6, 1.35, 0.04);
+  for (const side of [-1, 1]) addCyl(g, lam(0x9aa0a6), 0.02, 0.02, 0.9, side * 1.15, 0.45, 0.7, 6);
+  addBox(g, lam(0x9aa0a6), 2.3, 0.03, 0.03, 0, 0.9, 0.7);
+  parent.add(g);
+  return g;
+}
+
+/** 機場候機排椅。 */
+function addAirportSeats(parent: THREE.Object3D, x: number, z: number, ry = 0, seats = 4): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, 0, z);
+  g.rotation.y = ry;
+  const metal = lam(0x8a9096);
+  const seatMat = lam(0x2f5f8f);
+  const span = seats * 0.6;
+  addBox(g, metal, span, 0.07, 0.5, 0, 0.42, 0);
+  for (let i = 0; i < seats; i++) {
+    const sx = -((seats - 1) * 0.6) / 2 + i * 0.6;
+    addBox(g, metal, 0.08, 0.42, 0.5, sx - 0.26, 0.21, 0);
+    addBox(g, seatMat, 0.46, 0.09, 0.48, sx, 0.47, 0);
+    addBox(g, seatMat, 0.46, 0.5, 0.07, sx, 0.72, -0.22);
+  }
+  addBox(g, metal, 0.1, 0.42, 0.5, span / 2, 0.21, 0);
+  parent.add(g);
+  return g;
+}
+
+/** 香港公共小巴（綠 van／紅 van）。 */
+function addMinibus(parent: THREE.Object3D, x: number, z: number, ry = 0, color = 0x3f9a6a): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, 0, z);
+  g.rotation.y = ry;
+  const body = lam(color);
+  const glassM = basic(0xbfe8f0);
+  addBox(g, body, 3.4, 1.3, 1.5, 0, 0.98, 0);
+  addBox(g, lam(shade(color, 0.82)), 3.4, 0.26, 1.52, 0, 0.36, 0);
+  addBox(g, lam(0xe0b33a), 2.9, 0.06, 1.54, 0, 1.5, 0);
+  for (let i = 0; i < 4; i++) addBox(g, glassM, 0.5, 0.42, 0.02, -1.2 + i * 0.72, 1.28, 0.76);
+  addBox(g, glassM, 0.04, 0.52, 1.1, 1.71, 1.28, 0);
+  addBox(g, lam(0x2a3f4f), 0.06, 0.62, 0.5, 0.98, 0.72, 0.76);
+  addBox(g, lam(0x1a1d20), 0.8, 0.22, 0.04, 1.5, 1.55, 0.62);
+  addBox(g, lam(0x3f9a6a), 0.9, 0.16, 0.24, 1.2, 1.72, 0);
+  for (const sx of [-1.05, 1.05]) {
+    for (const sz of [-0.72, 0.72]) {
+      addCyl(g, lam(0x1a1d20), 0.34, 0.34, 0.16, sx, 0.34, sz, 12, 0, Math.PI / 2);
+      addCyl(g, lam(0x8a9096), 0.16, 0.16, 0.18, sx, 0.34, sz, 8, 0, Math.PI / 2);
+    }
+  }
+  addBox(g, lam(0xf2f0e6), 0.3, 0.12, 0.02, 1.72, 0.62, 0.3);
+  parent.add(g);
+  return g;
+}
+
+/** 貨櫃車（拖頭＋40 呎貨櫃）。 */
+function addContainerTruck(parent: THREE.Object3D, x: number, z: number, ry = 0, containerColor: number = IPAL.containerRed): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, 0, z);
+  g.rotation.y = ry;
+  addBox(g, lam(containerColor), 3.2, 1.05, 1.28, -0.7, 1.3, 0);
+  for (let i = 0; i < 5; i++) addBox(g, lam(shade(containerColor, 0.8)), 0.02, 0.9, 1.3, -1.9 + i * 0.62, 1.3, 0);
+  addBox(g, lam(0x3a4048), 4.2, 0.18, 1.0, 0, 0.62, 0);
+  addBox(g, lam(0xf2f0e8), 1.15, 1.15, 1.3, 1.85, 1.0, 0);
+  addBox(g, lam(0x2f5f8f), 1.15, 0.28, 1.32, 1.85, 0.5, 0);
+  addBox(g, basic(0x9fd8e8), 0.9, 0.5, 0.04, 1.9, 1.35, 0.66);
+  addBox(g, basic(0xfff2cc), 0.14, 0.12, 0.05, 2.36, 0.72, 0.5);
+  addBox(g, basic(0xfff2cc), 0.14, 0.12, 0.05, 2.36, 0.72, -0.5);
+  for (const sx of [-1.7, -0.7, 1.7]) {
+    for (const sz of [-0.6, 0.6]) addCyl(g, lam(0x1a1d20), 0.42, 0.42, 0.2, sx, 0.42, sz, 12, 0, Math.PI / 2);
+  }
+  parent.add(g);
+  return g;
+}
+
+/** 地磅（貨櫃車稱重）。 */
+function addWeighbridge(parent: THREE.Object3D, x: number, z: number, ry = 0): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, 0, z);
+  g.rotation.y = ry;
+  addBox(g, lam(0x5f656b), 3.4, 0.12, 1.9, 0, 0.1, 0);
+  addBox(g, lam(0x757b82), 3.0, 0.03, 1.62, 0, 0.17, 0);
+  for (const side of [-1, 1]) addBox(g, lam(0xd9b23f), 3.4, 0.05, 0.08, 0, 0.04, side * 0.96);
+  addBox(g, lam(0x2a2f36), 0.18, 1.2, 0.18, -1.9, 0.6, 0.0);
+  addBox(g, basic(0xffd166), 0.44, 0.22, 0.03, -1.9, 1.28, 0.09);
+  parent.add(g);
+  return g;
+}
+
+/** 欄杆閘（碼頭閘口／車閘，臂會升降）。 */
+function addBarrierGate(parent: THREE.Object3D, x: number, z: number, ry = 0, color = 0xe0b33a): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, 0, z);
+  g.rotation.y = ry;
+  addBox(g, lam(0x8a9096), 0.36, 1.2, 0.36, 0, 0.6, 0);
+  addBox(g, lam(0x2a2f36), 0.42, 0.2, 0.42, 0, 1.25, 0);
+  addBox(g, lam(0xd9b23f), 0.5, 0.3, 0.06, 0, 1.05, 0.24);
+  const arm = new THREE.Group();
+  arm.position.set(0.1, 1.16, 0);
+  addBox(arm, lam(color), 2.6, 0.1, 0.12, 1.3, 0, 0);
+  for (let i = 0; i < 4; i++) addBox(arm, lam(0xb02a2a), 0.22, 0.11, 0.13, 0.5 + i * 0.6, 0, 0);
+  markAnim(arm, 'barrier');
+  g.add(arm);
+  parent.add(g);
+  return g;
+}
+
+/** 抽水／加壓泵組。 */
+function addPumpUnit(parent: THREE.Object3D, x: number, z: number, ry = 0, scale = 1, color = 0x3f6f9f): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, 0, z);
+  g.rotation.y = ry;
+  g.scale.setScalar(scale);
+  addBox(g, lam(0x6f757b), 1.1, 0.18, 1.0, 0, 0.09, 0);
+  addCyl(g, lam(color), 0.34, 0.34, 0.9, 0, 0.62, 0, 14, 0, Math.PI / 2);
+  addCyl(g, lam(0x9aa0a6), 0.2, 0.2, 0.26, 0.56, 0.62, 0, 12, 0, Math.PI / 2);
+  addBox(g, lam(0x3a4048), 0.45, 0.5, 0.45, -0.5, 0.5, 0);
+  addCyl(g, lam(0x8a9096), 0.09, 0.09, 0.75, 0.2, 1.12, 0, 8);
+  addCyl(g, lam(0xd94a3f), 0.15, 0.15, 0.06, 0.2, 0.78, 0.42, 10, 0, Math.PI / 2);
+  addBox(g, lam(0x2a2f36), 0.2, 0.14, 0.16, 0.2, 0.72, -0.4);
+  markAnim(g, 'bob');
+  parent.add(g);
+  return g;
+}
+
+/** 逆滲透（RO）膜架（海水化淡廠）。 */
+function addROMembraneRack(parent: THREE.Object3D, x: number, z: number, ry = 0, len = 2.6): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, 0, z);
+  g.rotation.y = ry;
+  const steel = lam(0x8a9096);
+  for (const sx of [-len / 2, len / 2]) {
+    for (const sz of [-0.4, 0.4]) addBox(g, steel, 0.08, 1.8, 0.08, sx, 0.9, sz);
+  }
+  addBox(g, lam(0x6f757b), len + 0.1, 0.1, 0.96, 0, 0.05, 0);
+  for (let lv = 0; lv < 3; lv++) {
+    addBox(g, lam(0xc9ced2), len, 0.08, 0.9, 0, 0.55 + lv * 0.55, 0);
+    for (let i = 0; i < 5; i++) {
+      addCyl(g, lam(0xe4e8ea), 0.085, 0.085, len * 0.9, 0, 0.66 + lv * 0.55, -0.32 + i * 0.16, 10, 0, Math.PI / 2);
+    }
+  }
+  addBox(g, lam(0x2f7f9f), len * 0.5, 0.16, 0.04, 0, 1.88, 0.24);
+  parent.add(g);
+  return g;
+}
+
+/** 圓形沉澱池（污水處理廠，刮泥臂會旋轉）。 */
+function addSettlingTank(parent: THREE.Object3D, x: number, z: number, r = 1.3): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, 0, z);
+  addCyl(g, lam(0x9a978d), r, r * 1.03, 0.8, 0, 0.4, 0, 24);
+  addCyl(g, basic(0x4f7f6a), r * 0.88, r * 0.88, 0.04, 0, 0.79, 0, 24);
+  addCyl(g, lam(0x8a8f92), r * 1.05, r * 1.05, 0.09, 0, 0.85, 0, 24);
+  addCyl(g, lam(0x8a8f92), r * 1.0, r * 1.0, 0.09, 0, 1.0, 0, 24);
+  for (let i = 0; i < 10; i++) {
+    const a = (i / 10) * Math.PI * 2;
+    addCyl(g, lam(0x8a8f92), 0.025, 0.025, 0.4, Math.cos(a) * r * 1.02, 0.9, Math.sin(a) * r * 1.02, 4);
+  }
+  const arm = new THREE.Group();
+  arm.position.set(0, 0.9, 0);
+  addBox(arm, lam(0xd9b23f), r * 1.9, 0.07, 0.12, 0, 0, 0);
+  for (const side of [-1, 1]) addBox(arm, lam(0x5f656b), 0.08, 0.55, 0.08, side * r * 0.85, -0.28, 0);
+  addBox(arm, lam(0x8a9096), 0.3, 0.2, 0.3, 0, 0.12, 0);
+  markAnim(arm, 'slow-spin');
+  g.add(arm);
+  addCyl(g, lam(0x8a9096), 0.1, 0.1, 0.5, 0, 1.15, 0, 8);
+  parent.add(g);
+  return g;
+}
+
+/** 曝氣池（氣泡＋欄杆）。 */
+function addAerationTank(parent: THREE.Object3D, x: number, z: number, w = 3.2, d = 1.6): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, 0, z);
+  addBox(g, lam(0x8a8f92), w, 0.7, d, 0, 0.35, 0);
+  addBox(g, basic(0x3f6f5a), w - 0.2, 0.04, d - 0.2, 0, 0.72, 0);
+  for (let i = 0; i < 14; i++) {
+    const bx = -w / 2 + 0.25 + ((i * 7) % 10) * (w - 0.5) / 10;
+    const bz = -d / 2 + 0.2 + ((i * 5) % 6) * (d - 0.4) / 6;
+    addSphere(g, basic(0x9fd8c0), 0.045 + ((i * 3) % 4) * 0.01, bx, 0.76, bz, 6, 5);
+  }
+  for (const side of [-1, 1]) {
+    addBox(g, lam(0xd9b23f), w, 0.05, 0.05, 0, 1.0, side * (d / 2 - 0.05));
+    addCyl(g, lam(0xd9b23f), 0.03, 0.03, 0.5, -w / 2 + 0.1, 0.85, side * (d / 2 - 0.05), 5);
+    addCyl(g, lam(0xd9b23f), 0.03, 0.03, 0.5, w / 2 - 0.1, 0.85, side * (d / 2 - 0.05), 5);
+  }
+  parent.add(g);
+  return g;
+}
+
+/** 監控幕牆（控制室）。 */
+function addMonitorWall(
+  parent: THREE.Object3D,
+  x: number,
+  y: number,
+  z: number,
+  ry = 0,
+  w = 2.2,
+  h = 1.3,
+  cols = 3,
+  rows = 2,
+): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, y, z);
+  g.rotation.y = ry;
+  addBox(g, lam(0x1a1d20), w + 0.1, h + 0.1, 0.12, 0, 0, 0);
+  const cw = w / cols;
+  const ch = h / rows;
+  const colors = [0x2f7f9f, 0x2f9f7f, 0x3f6f9f, 0x2f8f9f, 0x3f7f8f, 0x2f6f8f];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      addBox(g, basic(colors[(r * cols + c) % colors.length]), cw - 0.08, ch - 0.08, 0.01, -w / 2 + cw * (c + 0.5), h / 2 - ch * (r + 0.5), 0.07);
+      addBox(g, basic(0xbfe8f0), cw * 0.3, 0.02, 0.01, -w / 2 + cw * (c + 0.5), h / 2 - ch * (r + 0.5) + 0.08, 0.075);
+    }
+  }
+  addBox(g, lam(0x2a2f36), 0.1, h, 0.08, -w / 2 - 0.04, 0, 0);
+  parent.add(g);
+  return g;
+}
+
+/** X 光行李檢查機（機場／空運貨運站）。 */
+function addXrayMachine(parent: THREE.Object3D, x: number, z: number, ry = 0): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, 0, z);
+  g.rotation.y = ry;
+  addBox(g, lam(0xdfe3e6), 2.0, 1.5, 1.0, 0, 0.75, 0);
+  addBox(g, lam(0x2a2f36), 0.72, 0.5, 1.02, 0, 0.9, 0);
+  addBox(g, lam(0x1a1d20), 0.56, 0.36, 0.02, 0, 0.9, 0.52);
+  addBox(g, basic(0x7fe0b0), 0.5, 0.3, 0.01, 0, 0.9, 0.53);
+  addBox(g, lam(0x3a4048), 2.4, 0.08, 0.5, 0, 0.75, 0);
+  addBox(g, lam(IPAL.cardboard), 0.4, 0.3, 0.4, -0.5, 0.78, 0);
+  addBox(g, lam(IPAL.cardboardDark), 0.3, 0.24, 0.3, 0.3, 0.78, 0);
+  addBox(g, basic(0x2f8f9f), 0.34, 0.05, 0.02, 0, 1.4, 0.4);
+  parent.add(g);
+  return g;
+}
+
+/** 空運貨箱 ULD（銀色航空貨箱）。 */
+function addULDPallet(parent: THREE.Object3D, x: number, z: number, ry = 0): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, 0, z);
+  g.rotation.y = ry;
+  addBox(g, lam(0xc9ced2), 1.15, 0.9, 1.0, 0, 0.45, 0);
+  addBox(g, lam(0x9aa0a6), 1.18, 0.08, 1.03, 0, 0.9, 0);
+  for (let i = 0; i < 4; i++) addBox(g, lam(0x8a9096), 0.04, 0.86, 1.02, -0.5 + i * 0.33, 0.45, 0);
+  addBox(g, lam(0xf2f0e6), 0.3, 0.2, 0.01, 0, 0.6, 0.51);
+  addBox(g, lam(0xd94a3f), 0.3, 0.05, 0.01, 0, 0.85, 0.51);
+  addBox(g, lam(0x6f757b), 1.1, 0.1, 0.95, 0, 0.05, 0);
+  parent.add(g);
+  return g;
+}
+
+/** 貨運磅秤（空運貨運站）。 */
+function addCargoScale(parent: THREE.Object3D, x: number, z: number, ry = 0): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, 0, z);
+  g.rotation.y = ry;
+  addBox(g, lam(0x5f656b), 1.7, 0.1, 1.25, 0, 0.1, 0);
+  addBox(g, lam(0x757b82), 1.5, 0.04, 1.1, 0, 0.16, 0);
+  addBox(g, lam(0xd9b23f), 1.7, 0.04, 0.09, 0, 0.16, 0.6);
+  addBox(g, lam(0x2a2f36), 0.16, 1.15, 0.16, -0.95, 0.58, 0);
+  addBox(g, basic(0x7fe0b0), 0.44, 0.22, 0.03, -0.95, 1.2, 0.09);
+  addBox(g, lam(IPAL.cardboard), 0.6, 0.45, 0.5, 0.2, 0.4, 0);
+  addBox(g, lam(IPAL.cardboardDark), 0.5, 0.4, 0.45, -0.35, 0.38, 0.1);
+  parent.add(g);
+  return g;
+}
+
+// ═══════════════════════ Round 5 新增 9 種室內陳設 ═══════════════════════
+
+/** 33. 水塔加壓泵房：主泵、上水立管、閥門、加壓控制箱。 */
+function fillWaterTowerPump(ctx: FillCtx): void {
+  const { root, dims, building } = ctx;
+  const { w, d, h } = dims;
+  addPumpUnit(root, -w * 0.2, -d * 0.2, 0.15, 1.0, 0x3f7fb0);
+  addPumpUnit(root, w * 0.16, -d * 0.2, -0.2, 0.85, 0x3f7fb0);
+  // 上水立管直上天花
+  addCyl(root, lam(0x8a9096), 0.17, 0.17, h - 0.32, w * 0.34, (h - 0.32) / 2, -d * 0.32, 14);
+  addCyl(root, lam(0x9aa0a6), 0.22, 0.22, 0.12, w * 0.34, 0.8, -d * 0.32, 14);
+  addValveWheel(root, w * 0.34, 1.5, -d * 0.32 + 0.26, 0.24);
+  // 橫管與加壓閥
+  addPipeRun(root, -w * 0.44, -d * 0.04, w * 0.3, -d * 0.04, 1.85, 0.15, 0x8a9096);
+  addValveWheel(root, -w * 0.1, 2.06, -d * 0.04, 0.26);
+  addValveWheel(root, w * 0.18, 2.06, -d * 0.04, 0.2);
+  // 加壓控制箱與水錶
+  addBox(root, lam(0x2a3036), 1.0, 1.3, 0.35, -w * 0.38, 0.65, d * 0.06);
+  addBox(root, basic(0x5cff9d), 0.5, 0.16, 0.02, -w * 0.38, 1.1, d * 0.24);
+  addBox(root, lam(0x1a1d20), 0.4, 0.3, 0.04, -w * 0.38, 1.32, d * 0.24);
+  addCyl(root, lam(0x6f8f9a), 0.3, 0.3, 0.95, w * 0.4, 0.48, d * 0.28, 14);
+  addPipeRun(root, w * 0.4, d * 0.28, w * 0.4, d * 0.08, 0.95, 0.12, 0x6f8f9a);
+  addBoard(ctx, 'pump-room', ['水塔加壓泵房', 'WATER TOWER PUMP ROOM'], 0, h * 0.58, -d / 2 + 0.26, 0, 2.1, 0.72, {
+    bg: 0x2f5f8f,
+    fg: '#ffffff',
+  });
+  addExitSign(root, -w * 0.44, h - 0.4, d * 0.3);
+  addFireHose(root, -w * 0.44, 1.2, d * 0.02, Math.PI / 2);
+  const n = peopleCount('worker', building.workers.length);
+  for (let i = 0; i < n; i++) addPerson(root, { x: -w * 0.3 + i * 0.9, z: d * 0.16, ry: Math.PI * (0.7 + i * 0.1), kind: 'worker' });
+}
+
+/** 34. 海水化淡廠：RO 膜架、高壓泵、濾水池、控制台。 */
+function fillDesalPlant(ctx: FillCtx): void {
+  const { root, dims, building } = ctx;
+  const { w, d, h } = dims;
+  addROMembraneRack(root, -w * 0.26, -d * 0.24, 0, 2.8);
+  addROMembraneRack(root, w * 0.08, -d * 0.24, 0, 2.8);
+  addROMembraneRack(root, w * 0.34, d * 0.06, -Math.PI / 2, 2.6);
+  addPumpUnit(root, -w * 0.28, d * 0.14, 0.35, 1.15, 0x2f7f9f);
+  addPumpUnit(root, w * 0.14, d * 0.14, -0.3, 1.15, 0x2f7f9f);
+  addFilterTank(root, -w * 0.02, -d * 0.26, 2.4, 1.3);
+  addPipeRun(root, -w * 0.46, d * 0.32, w * 0.46, d * 0.32, 0.9, 0.24, 0x2f7f9f);
+  addPipeRun(root, -w * 0.46, -d * 0.1, -w * 0.46, d * 0.32, 2.3, 0.14, 0x8fa6b8);
+  addPipeRun(root, -w * 0.46, -d * 0.1, w * 0.46, -d * 0.1, 2.3, 0.14, 0x8fa6b8);
+  addValveWheel(root, w * 0.28, 2.55, -d * 0.1, 0.26);
+  addValveWheel(root, -w * 0.3, 2.55, -d * 0.1, 0.22);
+  addBox(root, glass(0x9fd0e0, 0.16), w * 0.52, h * 0.46, 0.04, -w * 0.24, h * 0.3, d * 0.04);
+  addControlPanel(root, -w * 0.24, d * 0.3, 0, 3.0);
+  addControlPanel(root, w * 0.28, d * 0.24, 0.1, 2.2);
+  for (let i = 0; i < 4; i++) addCyl(root, glass(0x9fd0e0, 0.5), 0.06, 0.06, 0.2, w * 0.34 + i * 0.14, 1.05, d * 0.36, 8);
+  addBoard(ctx, 'desal', ['海水化淡廠', 'DESALINATION PLANT'], 0, h * 0.6, -d / 2 + 0.26, 0, 2.4, 0.78, {
+    bg: 0x2f7f9f,
+    fg: '#ffffff',
+  });
+  addBoard(ctx, 'desal-notice', ['高壓設備', 'HIGH PRESSURE'], -w * 0.42, h * 0.42, -d * 0.3, Math.PI / 2, 1.0, 0.6, {
+    bg: 0xe0b33a,
+    fg: '#1f2937',
+    border: '#b02a2a',
+  });
+  addExitSign(root, w * 0.44, h - 0.42, d * 0.3);
+  addFireHose(root, w * 0.44, 1.2, -d * 0.3, -Math.PI / 2);
+  const n = peopleCount('worker', building.workers.length);
+  const kinds: ('worker' | 'office')[] = ['office', 'worker', 'office', 'worker', 'worker'];
+  for (let i = 0; i < n; i++) {
+    addPerson(root, { x: -w * 0.26 + i * 1.0, z: d * 0.08 + (i % 2) * 0.22, ry: Math.PI * (0.7 + i * 0.1), kind: kinds[i % kinds.length] });
+  }
+}
+
+/** 35. 污水處理廠：沉澱池、曝氣池、污泥泵、控制台。 */
+function fillSewagePlant(ctx: FillCtx): void {
+  const { root, dims, building } = ctx;
+  const { w, d, h } = dims;
+  addSettlingTank(root, -w * 0.26, -d * 0.18, 1.3);
+  addSettlingTank(root, w * 0.12, -d * 0.18, 1.3);
+  addAerationTank(root, -w * 0.05, d * 0.22, 3.4, 1.6);
+  addPumpUnit(root, -w * 0.4, d * 0.3, 0.2, 0.95, 0x6f6a4a);
+  addPipeRun(root, -w * 0.44, -d * 0.02, w * 0.4, -d * 0.02, 1.95, 0.18, 0x6f7a4a);
+  addPipeRun(root, w * 0.4, -d * 0.02, w * 0.4, d * 0.3, 1.95, 0.14, 0x6f7a4a);
+  addValveWheel(root, 0, 2.16, -d * 0.02, 0.26);
+  addControlPanel(root, w * 0.32, d * 0.3, 0.1, 2.2);
+  addDocumentDesk(root, w * 0.02, d * 0.36, 0, 1.6);
+  for (let i = 0; i < 3; i++) addCyl(root, glass(0x8fb0bf, 0.55), 0.05, 0.05, 0.16, w * 0.02 + i * 0.14, 0.86, d * 0.36, 8);
+  addBoard(ctx, 'sewage', ['污水處理廠', 'SEWAGE TREATMENT WORKS'], 0, h * 0.6, -d / 2 + 0.26, 0, 2.6, 0.78, {
+    bg: 0x4f6f5a,
+    fg: '#ffffff',
+  });
+  addBoard(ctx, 'sewage-notice', ['沉澱池', '請勿靠近'], -w * 0.42, h * 0.42, d * 0.1, Math.PI / 2, 0.9, 0.55, {
+    bg: 0xe0b33a,
+    fg: '#1f2937',
+  });
+  addHarbourRail(root, 0, -d * 0.4, w * 0.7);
+  addExitSign(root, -w * 0.44, h - 0.42, d * 0.34);
+  const n = peopleCount('worker', building.workers.length);
+  const kinds: ('worker' | 'office')[] = ['worker', 'office', 'worker', 'worker', 'office'];
+  for (let i = 0; i < n; i++) {
+    addPerson(root, { x: -w * 0.24 + i * 1.0, z: d * 0.06 + (i % 2) * 0.18, ry: Math.PI * (0.65 + i * 0.12), kind: kinds[i % kinds.length] });
+  }
+}
+
+/** 36. 排污口泵房：抽水泵、出海排放管、格柵地面。 */
+function fillSewageOutfall(ctx: FillCtx): void {
+  const { root, dims, building } = ctx;
+  const { w, d, h } = dims;
+  addPumpUnit(root, -w * 0.16, -d * 0.14, 0.1, 1.2, 0x4f6f5a);
+  addPumpUnit(root, w * 0.2, -d * 0.14, -0.15, 0.9, 0x4f6f5a);
+  // 出海排放管（穿過後牆）
+  addBeam(root, lam(0x6f757b), 0, 0.62, d * 0.2, 0, 0.62, -d * 0.56, 0.34, 12);
+  addCyl(root, lam(0x8a9096), 0.24, 0.24, 0.5, 0, 0.62, -d * 0.28, 12, 0, Math.PI / 2);
+  addValveWheel(root, 0, 1.15, -d * 0.1, 0.3);
+  // 格柵地面與水漬
+  addBox(root, lam(0x3a4048), 1.8, 0.03, 1.2, -w * 0.06, 0.03, d * 0.2);
+  for (let i = 0; i < 5; i++) addBox(root, lam(0x1a1d20), 1.7, 0.05, 0.06, -w * 0.06, 0.05, d * 0.2 - 0.4 + i * 0.2);
+  addBox(root, basic(0x3f6f5a), w * 0.5, 0.02, d * 0.24, w * 0.1, 0.02, d * 0.1);
+  addControlPanel(root, -w * 0.02, d * 0.28, 0, 2.0);
+  addBoard(ctx, 'outfall', ['排污口泵房', 'OUTFALL PUMPING STATION'], 0, h * 0.6, -d / 2 + 0.26, 0, 2.4, 0.78, {
+    bg: 0x2f4f5f,
+    fg: '#ffffff',
+  });
+  addBoard(ctx, 'outfall-notice', ['污水設備', '未經許可不得進入'], w * 0.34, h * 0.44, -d / 2 + 0.26, 0, 1.1, 0.62, {
+    bg: 0xe0b33a,
+    fg: '#1f2937',
+    border: '#b02a2a',
+  });
+  addExitSign(root, -w * 0.44, h - 0.4, -d * 0.3);
+  addFireHose(root, w * 0.44, 1.2, -d * 0.3, -Math.PI / 2);
+  const n = peopleCount('worker', building.workers.length);
+  for (let i = 0; i < n; i++) addPerson(root, { x: -w * 0.26 + i * 0.95, z: d * 0.16, ry: Math.PI * (0.7 + i * 0.1), kind: 'worker' });
+}
+
+/** 37. 小巴車廠：綠 van／紅 van、維修坑、工具架、油泵。 */
+function fillMinibusDepot(ctx: FillCtx): void {
+  const { root, dims, building } = ctx;
+  const { w, d, h } = dims;
+  addMinibus(root, -w * 0.22, -d * 0.26, 0.06, 0x3f9a6a);
+  addMinibus(root, w * 0.3, -d * 0.02, Math.PI * 0.04, 0xd94a3f);
+  // 維修坑（地面暗色＋黃黑警示）
+  addBox(root, lam(0x1a1d20), 2.6, 0.04, 1.4, -w * 0.14, 0.03, d * 0.04);
+  for (let i = 0; i < 6; i++) {
+    addBox(root, lam(0xe0b33a), 0.34, 0.05, 0.1, -w * 0.14 - 1.0 + i * 0.42, 0.06, d * 0.04 - 0.75);
+    addBox(root, lam(0xe0b33a), 0.34, 0.05, 0.1, -w * 0.14 - 1.0 + i * 0.42, 0.06, d * 0.04 + 0.75);
+  }
+  addShelfUnit(root, w * 0.38, -d * 0.3, -Math.PI / 2, { w: 1.6, h: 1.8, levels: 3, goods: [0x8a9096, 0xd94a3f, 0x3f7fb0, 0xe0b33a] });
+  addCyl(root, lam(0xd94a3f), 0.22, 0.22, 1.25, w * 0.4, 0.63, -d * 0.04, 12);
+  addBox(root, lam(0x2a2f36), 0.4, 0.3, 0.2, w * 0.4, 1.2, -d * 0.04 + 0.18);
+  addDocumentDesk(root, -w * 0.08, d * 0.36, 0, 1.8);
+  addBox(root, lam(0x3a4048), 0.5, 0.1, 0.3, -w * 0.08, 0.82, d * 0.36);
+  addBoard(ctx, 'minibus-depot', ['小巴車廠', 'MINIBUS DEPOT'], 0, h * 0.56, -d / 2 + 0.26, 0, 2.2, 0.72, {
+    bg: 0x2f7f5a,
+    fg: '#ffffff',
+  });
+  addExitSign(root, w * 0.44, h - 0.42, d * 0.34);
+  addFireHose(root, -w * 0.44, 1.2, d * 0.2, Math.PI / 2);
+  const n = peopleCount('worker', building.workers.length);
+  const kinds: ('worker' | 'office')[] = ['worker', 'office', 'worker', 'worker', 'office'];
+  for (let i = 0; i < n; i++) {
+    addPerson(root, { x: -w * 0.28 + i * 1.0, z: d * 0.02 + (i % 2) * 0.22, ry: Math.PI * (0.7 + i * 0.1), kind: kinds[i % kinds.length] });
+  }
+}
+
+/** 38. 機場客運大樓（離境大堂）：登記櫃位、航班牌、X 光、候機座椅、懸掛飛機。 */
+function fillAirportTerminal(ctx: FillCtx): void {
+  const { root, dims, building } = ctx;
+  const { w, d, h } = dims;
+  addNeon(ctx, '香港國際機場', IPAL.neonCyan, 0, h * 0.68, -d / 2 + 0.32, 0, 3.2, 0.72);
+  addBoard(ctx, 'departures', ['離境大堂 DEPARTURES'], 0, h * 0.84, -d / 2 + 0.3, 0, 4.0, 0.62, {
+    bg: 0x10243a,
+    fg: '#eaf4ff',
+  });
+  // 航空公司登記櫃位 ×3
+  addCheckInCounter(root, -w * 0.28, -d * 0.18, 0, 0x1f4f7a);
+  addCheckInCounter(root, 0, -d * 0.18, 0, 0xb02a2a);
+  addCheckInCounter(root, w * 0.28, -d * 0.18, 0, 0x2f7f5a);
+  // 航班資料牌（右側牆）
+  addFlightBoard(ctx, w / 2 - 0.26, h * 0.55, -d * 0.3, -Math.PI / 2, 2.8, 1.7);
+  // 保安檢查（X 光機＋金屬探測門柱）
+  addXrayMachine(root, -w * 0.2, d * 0.16, 0);
+  for (const sx of [0.04, 0.16, 0.28]) addBox(root, lam(0x8a9096), 0.26, 1.65, 0.26, w * sx, 0.82, d * 0.16);
+  addBox(root, lam(0x8a9096), w * 0.26, 0.18, 0.26, w * 0.16, 1.7, d * 0.16);
+  // 候機座椅 ×2 排
+  addAirportSeats(root, -w * 0.28, d * 0.36, Math.PI, 4);
+  addAirportSeats(root, w * 0.18, d * 0.36, Math.PI, 4);
+  // 登機閘口牌（右側牆）
+  addGateSign(ctx, '24', '台北 TAIPEI', w * 0.42, h * 0.5, -d / 2 + 0.28, 0);
+  addGateSign(ctx, '12', '曼谷 BANGKOK', w * 0.42, h * 0.32, -d / 2 + 0.28, 0);
+  // 懸掛飛機模型
+  addPlaneModel(root, 0, h * 0.86, d * 0.18, 1.1);
+  // 行李與旅客
+  addLuggage(root, -w * 0.12, 0, d * 0.3, 0x3a5f8f, 1.0);
+  addLuggage(root, w * 0.2, 0, d * 0.28, 0xd94a3f, 0.9);
+  addLuggage(root, w * 0.06, 0, d * 0.24, 0x3f7f5a, 0.8);
+  addTrashBin(root, w * 0.4, d * 0.3);
+  addPottedPlant(root, -w * 0.42, d * 0.34, 1.4, false);
+  addPottedPlant(root, w * 0.42, -d * 0.06, 1.2, false);
+  addExitSign(root, -w * 0.44, h - 0.42, d * 0.3);
+  addExitSign(root, w * 0.44, h - 0.42, d * 0.3);
+  const n = Math.max(3, peopleCount('worker', building.workers.length) + 1);
+  const kinds: ('tourist' | 'office' | 'shopper' | 'elder' | 'kid')[] = ['tourist', 'office', 'tourist', 'shopper', 'elder'];
+  for (let i = 0; i < Math.min(5, n); i++) {
+    addPerson(root, {
+      x: -w * 0.34 + i * 1.15,
+      z: d * 0.22 + (i % 2) * 0.14,
+      ry: Math.PI * (0.5 + i * 0.12),
+      kind: kinds[i % kinds.length],
+      mask: i % 2 === 0,
+    });
+  }
+}
+
+/** 39. 空運貨運站：ULD 貨箱、卡板、X 光、磅秤、報關枱。 */
+function fillAirCargoTerminal(ctx: FillCtx): void {
+  const { root, dims, building } = ctx;
+  const { w, d, h } = dims;
+  addULDPallet(root, -w * 0.12, -d * 0.26, 0.1);
+  addULDPallet(root, w * 0.12, -d * 0.24, -0.1);
+  addULDPallet(root, w * 0.36, -d * 0.06, 0.2);
+  addPalletRack(root, -w * 0.38, -d * 0.02, Math.PI / 2, { w: 2.6, h: 2.6, levels: 3 });
+  addPallet(root, w * 0.06, -d * 0.04, 0.2);
+  addCardboardBoxes(root, w * 0.06, -d * 0.04, 4, 1.0);
+  addCardboardBoxes(root, w * 0.2, d * 0.02, 3, 0.9);
+  addXrayMachine(root, -w * 0.36, d * 0.12, Math.PI / 2);
+  addCargoScale(root, w * 0.28, d * 0.14, -0.3);
+  addConveyor(root, -w * 0.32, d * 0.02, Math.PI / 2, 2.6);
+  addDocumentDesk(root, 0, d * 0.34, 0, 2.0);
+  addTelephone(root, 0.3, 0.8, d * 0.34, 0.2);
+  addFilingCabinet(root, -w * 0.42, d * 0.32, Math.PI / 2);
+  addFilingCabinet(root, -w * 0.42, d * 0.14, Math.PI / 2);
+  addBoard(ctx, 'air-cargo', ['空運貨運站', 'AIR CARGO TERMINAL'], 0, h * 0.58, -d / 2 + 0.26, 0, 2.8, 0.8, {
+    bg: 0x2f5f8f,
+    fg: '#ffffff',
+  });
+  addBoard(
+    ctx,
+    'cargo-info',
+    ['貨運資料', 'CX 2084  HKG→TPE  已裝載', 'KA 841   HKG→PVG  處理中', 'UO 660   HKG→NRT  待報關'],
+    w / 2 - 0.26,
+    h * 0.4,
+    -d * 0.02,
+    -Math.PI / 2,
+    1.5,
+    0.9,
+    { bg: 0x0d1622, fg: '#7fe0b0', border: '#2f6f8f' },
+  );
+  addExitSign(root, -w * 0.44, h - 0.42, d * 0.32);
+  addFireHose(root, w * 0.44, 1.2, -d * 0.3, -Math.PI / 2);
+  const n = peopleCount('worker', building.workers.length);
+  const kinds: ('worker' | 'office')[] = ['worker', 'office', 'worker', 'worker', 'office'];
+  for (let i = 0; i < n; i++) {
+    addPerson(root, { x: -w * 0.28 + i * 1.0, z: d * 0.04 + (i % 2) * 0.22, ry: Math.PI * (0.7 + i * 0.1), kind: kinds[i % kinds.length] });
+  }
+}
+
+/** 40. 碼頭閘口：閘亭、地磅、欄杆閘、貨櫃車。 */
+function fillPortGate(ctx: FillCtx): void {
+  const { root, dims, building } = ctx;
+  const { w, d, h } = dims;
+  // 閘亭（左後）
+  addBox(root, lam(0xf2f0e8), 2.3, 2.2, 1.7, -w * 0.32, 1.1, -d * 0.26);
+  addBox(root, glass(0xbfe0ea, 0.22), 1.8, 0.8, 0.03, -w * 0.32, 1.5, -d * 0.26 + 0.86);
+  addBox(root, lam(0xd9b23f), 2.4, 0.14, 1.8, -w * 0.32, 2.26, -d * 0.26);
+  addBox(root, lam(0x2a2f36), 0.7, 0.35, 0.3, -w * 0.32, 1.05, -d * 0.26 + 0.95);
+  addBox(root, basic(0x8fd8ff), 0.5, 0.22, 0.01, -w * 0.32, 1.1, -d * 0.26 + 1.11);
+  // 地磅（前景中央）
+  addWeighbridge(root, -w * 0.02, d * 0.08, 0);
+  // 欄杆閘
+  addBarrierGate(root, -w * 0.24, d * 0.06, 0, 0xe0b33a);
+  addBarrierGate(root, w * 0.24, d * 0.02, Math.PI, 0xd94a3f);
+  // 貨櫃車（右後，縮細避免遮擋視線）
+  const truck = addContainerTruck(root, w * 0.18, -d * 0.14, Math.PI * 0.97, IPAL.containerBlue);
+  truck.scale.setScalar(0.8);
+  // 後方貨櫃堆
+  addContainerStack(root, w * 0.36, -d * 0.4, 0.15, { rows: 1, cols: 2, levels: 2 });
+  // 招牌與告示
+  addBoard(ctx, 'port-gate', ['碼頭閘口', 'PORT GATE 3'], 0, h * 0.64, -d / 2 + 0.3, 0, 2.8, 0.9, {
+    bg: 0x10243a,
+    fg: '#ffd166',
+  });
+  addNeon(ctx, '貨櫃碼頭', IPAL.neonGold, -w * 0.36, h * 0.4, -d / 2 + 0.32, 0, 1.8, 0.55);
+  addBoard(ctx, 'port-notice', ['排隊等候', 'KEEP CLEAR'], w * 0.4, 1.5, -d / 2 + 0.26, 0, 1.1, 0.55, {
+    bg: 0xe0b33a,
+    fg: '#1f2937',
+  });
+  addHarbourRail(root, 0, -d * 0.44, w * 0.8);
+  addExitSign(root, -w * 0.44, h - 0.4, d * 0.3);
+  const n = peopleCount('worker', building.workers.length);
+  const kinds: ('worker' | 'office' | 'police')[] = ['office', 'worker', 'police', 'worker', 'office'];
+  for (let i = 0; i < n; i++) {
+    addPerson(root, { x: -w * 0.3 + i * 0.9, z: d * 0.06 + (i % 2) * 0.2, ry: Math.PI * (0.6 + i * 0.12), kind: kinds[i % kinds.length] });
+  }
+}
+
+/** 41. 貨櫃堆場控制室：控制台、監控幕牆、維港景、操作員。 */
+function fillPortYardControl(ctx: FillCtx): void {
+  const { root, dims, building } = ctx;
+  const { w, d, h } = dims;
+  addControlPanel(root, -w * 0.18, -d * 0.18, 0, 3.4);
+  addControlPanel(root, w * 0.22, -d * 0.18, 0, 2.4);
+  addMonitorWall(root, -w / 2 + 0.24, h * 0.56, d * 0.02, Math.PI / 2, 2.2, 1.3, 3, 2);
+  for (const sx of [-w * 0.16, w * 0.04]) {
+    addBox(root, lam(0x2f3337), 0.52, 0.08, 0.52, sx, 0.46, -d * 0.02);
+    addBox(root, lam(0x2f3337), 0.52, 0.58, 0.08, sx, 0.78, -d * 0.02 - 0.24);
+    addBox(root, lam(0x5f656b), 0.06, 0.4, 0.06, sx, 0.2, -d * 0.02);
+  }
+  addDocumentDesk(root, w * 0.34, d * 0.12, 0, 1.8);
+  addTelephone(root, w * 0.28, 0.8, d * 0.12, -0.2);
+  addTelephone(root, w * 0.4, 0.8, d * 0.12, 0.3);
+  for (let i = 0; i < 3; i++) addCyl(root, lam(0xf2f0e6), 0.04, 0.035, 0.1, w * 0.3 + i * 0.1, 0.84, d * 0.14, 8);
+  addBoard(ctx, 'yard-control', ['貨櫃堆場', 'YARD CONTROL 控制室'], w / 2 - 0.26, h * 0.55, -d * 0.24, -Math.PI / 2, 2.2, 0.72, {
+    bg: 0x2f3f4f,
+    fg: '#ffd166',
+  });
+  addNeon(ctx, '控制塔', IPAL.neonCyan, w * 0.36, h * 0.62, -d / 2 + 0.32, 0, 1.8, 0.6);
+  addBoard(
+    ctx,
+    'yard-status',
+    ['堆場狀態', '1 號泊位  龍門吊 A  運作中', '2 號泊位  龍門吊 B  待機'],
+    -w * 0.26,
+    h * 0.4,
+    -d / 2 + 0.28,
+    0,
+    1.6,
+    0.8,
+    { bg: 0x0d1622, fg: '#7fe0b0', border: '#2f6f8f' },
+  );
+  addWaterCooler(root, w * 0.44, d * 0.34);
+  addPottedPlant(root, -w * 0.42, d * 0.36, 1.2, false);
+  addExitSign(root, -w * 0.44, h - 0.42, -d * 0.3);
+  addExitSign(root, w * 0.44, h - 0.42, -d * 0.3);
+  const n = Math.max(2, peopleCount('worker', building.workers.length));
+  const kinds: ('office' | 'worker')[] = ['office', 'office', 'worker', 'office', 'worker'];
+  for (let i = 0; i < Math.min(4, n); i++) {
+    addPerson(root, { x: -w * 0.24 + i * 0.9, z: d * 0.14 + (i % 2) * 0.18, ry: Math.PI * (0.7 + i * 0.1), kind: kinds[i % kinds.length] });
+  }
+}
+
+/** 42. 巴士站（細站）：候車亭、站牌、雙層巴士、乘客。 */
+function fillBusStop(ctx: FillCtx): void {
+  const { root, dims, building } = ctx;
+  const { w, d } = dims;
+  addBox(root, lam(0x565a5e), w * 1.3, 0.03, d * 0.8, 0, 0.015, d * 0.1);
+  addBusShelter(root, -w * 0.2, d * 0.16, 0.08);
+  addBusStopFlag(root, w * 0.08, d * 0.2, 0.2, '968', '銅鑼灣');
+  addBusStopFlag(root, w * 0.26, d * 0.2, 0.2, '960', '中環');
+  const bus = addDoubleDeckerBus(root, w * 0.16, -d * 0.08, Math.PI * 0.02, 0xd9b23f);
+  bus.scale.setScalar(0.82);
+  addBench(root, -w * 0.34, d * 0.02, Math.PI);
+  addLampPost(root, -w * 0.12, d * 0.3, 3.2);
+  addTrashBin(root, w * 0.34, d * 0.02);
+  addTree(root, -w * 0.42, -d * 0.3, 0.75, false);
+  addBoard(ctx, 'bus-stop-sign', ['巴士站', 'BUS STOP'], -w * 0.06, 2.4, -d * 0.34, 0, 1.6, 0.5, {
+    bg: 0xd9b23f,
+    fg: '#1f2937',
+  });
+  const n = Math.max(2, peopleCount('worker', building.workers.length) + 2);
+  const kinds: ('office' | 'elder' | 'student' | 'shopper')[] = ['office', 'elder', 'student', 'shopper'];
+  for (let i = 0; i < Math.min(4, n); i++) {
+    addPerson(root, { x: -w * 0.32 + i * 0.75, z: d * 0.26 + (i % 2) * 0.1, ry: -Math.PI * 0.35, kind: kinds[i % kinds.length] });
+  }
+  addBird(root, w * 0.2, 0.3, -d * 0.2);
+}
+
+/** 43. 小巴站（細站）：綠色專線小巴、站牌、乘客。 */
+function fillMinibusStop(ctx: FillCtx): void {
+  const { root, dims, building } = ctx;
+  const { w, d } = dims;
+  addBox(root, lam(0x565a5e), w * 1.3, 0.03, d * 0.8, 0, 0.015, d * 0.1);
+  addMinibus(root, w * 0.08, -d * 0.06, Math.PI * 0.02, 0x3f9a6a);
+  addCyl(root, lam(0x8a9096), 0.03, 0.03, 2.3, -w * 0.16, 1.15, d * 0.16, 8);
+  addBoard(ctx, 'minibus-stop', ['小巴站', '綠色專線小巴', '41A 往 觀塘'], -w * 0.16, 2.3, d * 0.2, 0, 1.5, 0.9, {
+    bg: 0x2f8f5f,
+    fg: '#ffffff',
+  });
+  addBench(root, -w * 0.3, d * 0.24, Math.PI);
+  addLampPost(root, w * 0.34, d * 0.16, 3.2);
+  addTrashBin(root, w * 0.26, d * 0.26);
+  addTree(root, -w * 0.4, -d * 0.28, 0.8, false);
+  const n = Math.max(2, peopleCount('worker', building.workers.length) + 2);
+  const kinds: ('shopper' | 'elder' | 'student' | 'office')[] = ['shopper', 'elder', 'student', 'office'];
+  for (let i = 0; i < Math.min(4, n); i++) {
+    addPerson(root, { x: -w * 0.28 + i * 0.7, z: d * 0.1 + (i % 2) * 0.12, ry: -Math.PI * 0.4, kind: kinds[i % kinds.length] });
+  }
+  addBird(root, w * 0.14, 0.28, -d * 0.2);
+}
+
 // ─────────────────────────── 樣式對應表 ───────────────────────────
 
 type FillFn = (ctx: FillCtx) => void;
 
-const FILLERS: Record<string, FillFn> = {
+/** 室內樣式 → 陳設函式（`BUILDINGS[key].interior` 對應；Round 5 已加入 9 個新 key）。 */
+export const INTERIOR_FILLERS: Record<string, FillFn> = {
   tongLau: fillTongLau,
   subdividedFlat: fillSubdividedFlat,
   publicHousing: fillPublicHousing,
@@ -1439,6 +2189,18 @@ const FILLERS: Record<string, FillFn> = {
   ferryPier: fillFerryPier,
   park: fillPark,
   promenade: fillPromenade,
+  // ── Round 5 新增 ──
+  waterTower: fillWaterTowerPump,
+  desalPlant: fillDesalPlant,
+  sewagePlant: fillSewagePlant,
+  sewageOutfall: fillSewageOutfall,
+  minibusDepot: fillMinibusDepot,
+  airportTerminal: fillAirportTerminal,
+  airCargoTerminal: fillAirCargoTerminal,
+  portGate: fillPortGate,
+  portYard: fillPortYardControl,
+  busStop: fillBusStop,
+  minibusStop: fillMinibusStop,
 };
 
 const CATEGORY_FALLBACK: Record<string, FillFn> = {
@@ -1524,10 +2286,61 @@ function specFor(style: string, def: BuildingDef): StyleSpec {
       return { room: { outdoor: true, floor: 'grass', skyline: true, lampCount: 0 }, fill: fillFarm, camLift: 0.2 };
     case 'quarry':
       return { room: { outdoor: true, floor: 'concrete', skyline: true, lampCount: 0 }, fill: fillQuarry, camLift: 0.2 };
+    // ── Round 5 新增 ──
+    case 'waterTower':
+      return { room: { floor: 'concrete', wall: 'metal', ceiling: 'grey', accent: 0x3f7fb0, lampCount: 2 }, fill: fillWaterTowerPump };
+    case 'desalPlant':
+      return { room: { floor: 'concrete', wall: 'metal', ceiling: 'grey', accent: 0x6f8f9f, lampCount: 3 }, fill: fillDesalPlant, wAdd: 0.6 };
+    case 'sewagePlant':
+      return { room: { semi: true, floor: 'concrete', wall: 'concrete', ceiling: 'grey', accent: 0x6f6a4a, lampCount: 3 }, fill: fillSewagePlant };
+    case 'sewageOutfall':
+      return { room: { floor: 'concrete', wall: 'tile', ceiling: 'grey', accent: 0x4f6f5a, lampCount: 2 }, fill: fillSewageOutfall };
+    case 'minibusDepot':
+      return { room: { semi: true, floor: 'concrete', wall: 'metal', ceiling: 'grey', accent: 0xd9b23f, lampCount: 3 }, fill: fillMinibusDepot };
+    case 'airportTerminal':
+      return {
+        room: {
+          floor: 'marble',
+          wall: 'white',
+          ceiling: 'panel',
+          window: 'harbour',
+          windowCount: 3,
+          floorToCeiling: true,
+          accent: 0x8fa6c0,
+          lampCount: 4,
+        },
+        fill: fillAirportTerminal,
+        wAdd: 1.0,
+      };
+    case 'airCargoTerminal':
+      return {
+        room: { floor: 'concrete', wall: 'white', ceiling: 'grey', window: 'street', windowCount: 1, accent: 0x5f8faf, lampCount: 3 },
+        fill: fillAirCargoTerminal,
+      };
+    case 'portGate':
+      return { room: { semi: true, floor: 'asphalt', wall: 'metal', ceiling: 'grey', accent: 0xd9b23f, lampCount: 2 }, fill: fillPortGate };
+    case 'portYard':
+      return {
+        room: {
+          floor: 'tileBlue',
+          wall: 'white',
+          ceiling: 'grey',
+          window: 'harbour',
+          windowCount: 2,
+          floorToCeiling: true,
+          accent: 0x2f5f8f,
+          lampCount: 3,
+        },
+        fill: fillPortYardControl,
+      };
+    case 'busStop':
+      return { room: { outdoor: true, floor: 'asphalt', skyline: true, lampCount: 0 }, fill: fillBusStop, camLift: -1.0 };
+    case 'minibusStop':
+      return { room: { outdoor: true, floor: 'asphalt', skyline: true, lampCount: 0 }, fill: fillMinibusStop, camLift: -1.0 };
     default:
       return {
         room: { floor: 'vinyl', wall: 'cream', ceiling: 'white', window: 'street', windowCount: 1 },
-        fill: CATEGORY_FALLBACK[def.category] ?? fillGenericHome,
+        fill: INTERIOR_FILLERS[style] ?? CATEGORY_FALLBACK[def.category] ?? fillGenericHome,
       };
   }
 }
@@ -1691,6 +2504,12 @@ export function createInteriorView(state: GameState, buildingId: number): Interi
       switch (part.kind) {
         case 'fan':
           part.obj.rotation.y = part.baseRotY + elapsed * 3.2 + part.phase;
+          break;
+        case 'slow-spin':
+          part.obj.rotation.y = part.baseRotY + elapsed * 0.22 + part.phase * 0.1;
+          break;
+        case 'barrier':
+          part.obj.rotation.z = part.baseRotZ + (Math.sin(elapsed * 0.5 + part.phase) * 0.5 + 0.5) * 1.05;
           break;
         case 'person':
           part.obj.position.y = part.baseY + Math.sin(t * 1.5) * 0.008;

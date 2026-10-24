@@ -93,6 +93,16 @@ try {
       treasury: Math.round(st.finance.treasury),
       zoneDemand: st.stats.zoneDemand,
       autoBuildings: st.buildings.filter((b) => b.auto).length,
+      pipes: {
+        water: st.tiles.filter((t) => t.waterPipe).length,
+        sewer: st.tiles.filter((t) => t.sewerPipe).length,
+        power: st.tiles.filter((t) => t.powerCable).length,
+      },
+      utilities: st.utilities && {
+        water: Number(st.utilities.water.coverage.toFixed(2)),
+        sewage: Number(st.utilities.sewage.coverage.toFixed(2)),
+        power: Number(st.utilities.power.coverage.toFixed(2)),
+      },
     };
   });
   check(
@@ -100,6 +110,12 @@ try {
     starter.mode === 'starter' && starter.showStart === false && starter.buildings >= 20 && starter.zones >= 60 &&
       starter.population >= 20 && starter.autoBuildings >= 8,
     starter,
+  );
+  check(
+    'starter 預建地下管網：水／污水／電力覆蓋',
+    starter.pipes.water > 100 && starter.utilities != null &&
+      starter.utilities.water >= 0.8 && starter.utilities.sewage >= 0.8 && starter.utilities.power >= 0.8,
+    { pipes: starter.pipes, utilities: starter.utilities },
   );
   await page.evaluate(() => {
     const { store, view } = window.__HK_CITY__;
@@ -194,7 +210,7 @@ try {
       spawn: st.spawn,
     };
   });
-  check('香港地圖 480×480（真實地理數據；面積約舊版 25 倍）', world.width === 480 && world.height === 480 && world.width * world.height >= 96 * 96 * 25, { width: world.width, height: world.height });
+  check('香港地圖 600×600（真實地理數據；面積約舊版 39 倍）', world.width === 600 && world.height === 600 && world.width * world.height >= 96 * 96 * 39, { width: world.width, height: world.height });
   check('維港／山地／填海地存在', (world.terrains.water ?? 0) > 300 && (world.terrains.mountain ?? 0) > 30 && (world.terrains.reclaimed ?? 0) > 50, {
     water: world.terrains.water,
     mountain: world.terrains.mountain,
@@ -242,6 +258,7 @@ try {
     if (!base) return { error: '找不到合適區塊' };
     const bx = base.x;
     const by = base.y;
+    window.__HK_VERIFY_BASE__ = { bx, by };
 
     const placedRoad = [];
     const placeAt = (tool, x, y) => {
@@ -556,6 +573,10 @@ try {
       school: tryPlace('school', 2, 2),
       park: tryPlace('park', 2, 2),
     };
+    // Round 5：鋪設地下管網（道路下三管＋公用設施接駁），令供水／供電真正生效
+    const dbg = window.__HK_CITY__.zoneDebug;
+    dbg?.layStarterPipes?.(st);
+    const utilSnapshot = dbg?.computeUtilitySnapshot?.(st, true) ?? null;
     st.stats.population = realPop;
     st.clock.paused = false;
     st.clock.speed = 3;
@@ -563,6 +584,14 @@ try {
     st.clock.speed = 1;
     return {
       ok,
+      utilities: utilSnapshot && {
+        pipes: utilSnapshot.pipeCounts,
+        waterCap: utilSnapshot.water.capacity,
+        waterCoverage: Number(utilSnapshot.water.coverage.toFixed(2)),
+        powerCoverage: Number(utilSnapshot.power.coverage.toFixed(2)),
+        sewageCoverage: Number(utilSnapshot.sewage.coverage.toFixed(2)),
+        waterQuality: Number(utilSnapshot.waterQuality.toFixed(2)),
+      },
       coverage: {
         power: Number(st.stats.powerCoverage.toFixed(2)),
         water: Number(st.stats.waterCoverage.toFixed(2)),
@@ -577,6 +606,12 @@ try {
   });
   check('公共設施可手動放置（發電／水務／警／消／校／公園）', Object.values(services.ok).filter(Boolean).length >= 3, services);
   check('服務覆蓋納入統計', services.coverage.power >= 0 && services.coverage.police >= 0, services.coverage);
+  check(
+    '地下管網：發電／水務設施經管道接駁',
+    services.utilities != null && services.utilities.waterCap > 0 &&
+      (services.utilities.pipes.water + services.utilities.pipes.power + services.utilities.pipes.sewer) > 20,
+    services.utilities,
+  );
 
   // ── 6. 需求平衡：過量住宅分區應令住宅需求下降 ──
   const oversupply = await page.evaluate(() => {
@@ -646,6 +681,138 @@ try {
     st.clock.paused = true;
   });
   await snap(shots.night, 2400);
+
+  // ── 7.5 Round 5：地下管網工具／巴士路線／貿易設施 ──
+  const pipeTool = await page.evaluate(() => {
+    const { store, actions } = window.__HK_CITY__;
+    const st = store.state;
+    const W = st.width;
+    const H = st.height;
+    const okTerrain = new Set(['grass', 'urban', 'reclaimed', 'fertile', 'forest', 'hill']);
+    let target = -1;
+    for (let y = 4; y < H - 4 && target < 0; y++) {
+      for (let x = 4; x < W - 4; x++) {
+        const i = y * W + x;
+        const t = st.tiles[i];
+        if (!okTerrain.has(t.terrain) || t.road || t.buildingId >= 0 || t.waterPipe) continue;
+        target = i;
+        break;
+      }
+    }
+    if (target < 0) return { error: 'no tile' };
+    st.finance.treasury = Math.max(st.finance.treasury, 5_000_000);
+    const before = st.finance.treasury;
+    actions.setTool('pipe:water');
+    actions.applyToolAt(target);
+    const placed = st.tiles[target].waterPipe === true;
+    const spent = before - st.finance.treasury;
+    actions.setTool('pipe:remove');
+    actions.applyToolAt(target);
+    const removed = st.tiles[target].waterPipe !== true;
+    actions.setTool(null);
+    return { placed, spent, removed };
+  });
+  check('地下食水管工具：可鋪設（扣款）及拆除（退款）', pipeTool.placed === true && pipeTool.spent > 0 && pipeTool.removed === true, pipeTool);
+
+  const toggles = await page.evaluate(() => {
+    const { store, actions } = window.__HK_CITY__;
+    const st = store.state;
+    actions.toggleUnderground?.();
+    const undergroundOn = st.ui.showUnderground === true;
+    actions.toggleUnderground?.();
+    const undergroundOff = st.ui.showUnderground === false;
+    actions.toggleUtilityPanel?.();
+    const utilityPanel = st.ui.showUtilityPanel === true;
+    actions.toggleUtilityPanel?.();
+    actions.toggleTradePanel?.();
+    const tradePanel = st.ui.showTradePanel === true;
+    actions.toggleTradePanel?.();
+    return { undergroundOn, undergroundOff, utilityPanel, tradePanel };
+  });
+  check(
+    '地下管網／公用设施／貿易面板可開關',
+    toggles.undergroundOn && toggles.undergroundOff && toggles.utilityPanel && toggles.tradePanel,
+    toggles,
+  );
+
+  const transitLine = await page.evaluate(async () => {
+    const { store, actions } = window.__HK_CITY__;
+    // 用 starter 模式（已有連通巴士總站／道路）驗證建線流程
+    actions.startGame('starter', 20261021);
+    await new Promise((r) => setTimeout(r, 2500));
+    const st = store.state;
+    st.finance.treasury = 40_000_000;
+    const W = st.width;
+    const H = st.height;
+    const terminal = st.buildings.find((b) => b.key === 'busTerminus');
+    if (!terminal) return { error: 'no bus terminus in starter' };
+    const fits = (x, y) => {
+      if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1) return false;
+      const t = st.tiles[y * W + x];
+      return t.buildingId < 0 && !t.road && t.terrain !== 'water' && t.terrain !== 'mountain';
+    };
+    const touchRoad = (x, y) => {
+      for (const [nx, ny] of [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]]) {
+        if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+        if (st.tiles[ny * W + nx].road) return true;
+      }
+      return false;
+    };
+    let stopId = -1;
+    // 在巴士總站附近／沿線找一個貼路空地放新巴士站
+    outer: for (let r = 2; r <= 24; r++) {
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          const x = terminal.x + dx;
+          const y = terminal.y + dy;
+          if (!fits(x, y) || !touchRoad(x, y)) continue;
+          window.__HK_CITY__.zoneDebug?.placeBuilding?.(st, 'busStop', x, y);
+          if (st.buildings.length > 0 && st.buildings[st.buildings.length - 1].key === 'busStop') {
+            stopId = st.buildings[st.buildings.length - 1].id;
+            break outer;
+          }
+        }
+      }
+    }
+    if (stopId < 0) return { error: 'no bus stop spot' };
+    const result = actions.createTransitLine?.({
+      mode: 'bus',
+      stopIds: [terminal.id, stopId],
+      loop: true,
+      vehicleCount: 1,
+      fare: 6,
+    });
+    const lines = st.transitLines ?? [];
+    return {
+      result,
+      lineCount: lines.length,
+      lineName: lines[0]?.name,
+      lineColor: lines[0]?.color,
+      transitEnabled: typeof actions.beginLineEditor === 'function',
+      terminal: { x: terminal.x, y: terminal.y },
+      stop: stopId,
+    };
+  });
+  check(
+    '巴士路線：建造車站／總站並開通路線',
+    transitLine.error == null && transitLine.result?.ok === true && transitLine.lineCount >= 1,
+    transitLine,
+  );
+
+  const trade = await page.evaluate(() => {
+    const { store } = window.__HK_CITY__;
+    const st = store.state;
+    return {
+      airport: st.trade?.airport ?? null,
+      port: st.trade?.port ?? null,
+      stats: {
+        passengers: st.stats.airportPassengers ?? null,
+        throughput: st.stats.portThroughput ?? null,
+        revenue: st.stats.tradeRevenue ?? null,
+      },
+    };
+  });
+  check('機場／貨櫃碼頭貿易狀態就緒', trade.airport != null && trade.port != null, trade);
 
   // ── 8. 分區顯示開關 ──
   const zonesToggle = await page.evaluate(() => {

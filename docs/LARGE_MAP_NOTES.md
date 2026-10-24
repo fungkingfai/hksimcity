@@ -1,6 +1,7 @@
 # 《維港之城》大地圖改版筆記（LARGE_MAP_NOTES.md，Round 4）
 
-> 文件版本：2.0（2026-10-24）｜撰寫：game-designer
+> 文件版本：2.1（2026-10-24）｜撰寫：game-designer
+> **Round 5 更新**：地圖將升級至 **600×600（360,000 格、112m/格、`MAP_SCALE=6.25`、`GAME_VERSION=6`）**，並加入水塘／土地利用數據、地下管網、巴士／小巴路線、機場與貨櫃碼頭；Round 5 規格見 `ROUND5_UTILITIES.md`／`ROUND5_TRANSIT_LINES.md`／`ROUND5_AIRPORT_PORT.md` 及 `GAME_DESIGN_HK.md` §18。本文 Round 4 480 內容保留作歷史對照。
 > 專案：`hk-city/`｜用途：記錄 Round 3（304 程序化）→ **Round 4（480×480 真實地理）** 的實作對照、效能、導航、存檔與已知限制；供 Lead／world-dev／ui-dev／systems-dev／QA 查閱。
 > 相關文件：`REAL_GEO_DATA.md`（數據來源與生成流程）、`GAME_DESIGN_HK.md`（§2 地圖／§12 存檔）、`UI_SPEC_HK.md`（§5 minimap）、`ZONING_GAMEPLAY.md`（真實地形與分區）。
 > 標記：**✅ 已實作（依 `src/` 核對）**｜**⚠️ 文件規格**｜**📌 已知限制／不一致**。

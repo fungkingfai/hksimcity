@@ -55,8 +55,10 @@ export type TerrainType =
  */
 export type ResourceKey = 'food' | 'goods' | 'electronics' | 'materials';
 
-/** 公用設施：食水與電力（不作物流運送，以覆蓋半徑提供服務） */
-export type UtilityKind = 'water' | 'power';
+/** 公用設施：食水、污水、電力（地下管網：管道／電纜接駁 + 容量池） */
+export type UtilityKind = 'water' | 'sewage' | 'power';
+/** 可鋪設的地下管線種類 */
+export type PipeKind = 'water' | 'sewer' | 'power';
 
 /** 公共交通模式 */
 export type TransitMode = 'mtr' | 'bus' | 'tram' | 'ferry';
@@ -130,6 +132,12 @@ export interface Tile {
   density?: number;
   /** 真實平均建築高度（米；render 用嚟決定遠景樓宇高度） */
   buildingHeight?: number;
+  /** 地下食水管（獨立圖層；可與道路／分區／建築共存） */
+  waterPipe?: boolean;
+  /** 地下污水管 */
+  sewerPipe?: boolean;
+  /** 地下電力電纜 */
+  powerCable?: boolean;
 }
 
 // ─────────────────────────── 建築 ───────────────────────────
@@ -179,10 +187,12 @@ export interface TransitDef {
 /** 公用設施定義（發電廠／水務設施） */
 export interface UtilityDef {
   kind: UtilityKind;
-  /** 服務半徑（格） */
+  /** 服務半徑（格；管網模式保留作 UI／舊徑相容） */
   radius: number;
-  /** 供應容量（人口單位；不足會停電／缺水） */
+  /** 供應容量（人口當量 PE／電力單位；不足會停電／缺水） */
   capacity: number;
+  /** 是否供應源（true = 發電廠／水廠／污水廠；false／undefined = 舊式／需求端） */
+  source?: boolean;
 }
 
 export interface BuildingDef {
@@ -225,6 +235,12 @@ export interface BuildingDef {
   minDevScore?: number;
   /** 玩家可手動放置的地標／公共設施（true＝出現在建造面板） */
   ploppable?: boolean;
+  /** 只可建於指定真實地理區塊（機場／貨櫃碼頭） */
+  requiredRegion?: 'airport' | 'containerPort';
+  /** 貿易設施角色（機場／碼頭營運結算用） */
+  tradeRole?: 'airportPassenger' | 'airportCargo' | 'portTerminal' | 'portGate' | 'portYard';
+  /** 路線站點種類（巴士／小巴站；有值即可以作為路線站） */
+  stopMode?: 'bus' | 'minibus';
 }
 
 export interface Building {
@@ -257,6 +273,10 @@ export interface Building {
   auto?: boolean;
   /** 自動開發建築所屬分區 */
   zone?: ZoneType;
+  /** 公用設施接駁狀態（由 sim/utilities.ts 每日更新；只作 UI／視覺） */
+  powered?: boolean;
+  watered?: boolean;
+  sewered?: boolean;
 }
 
 // ─────────────────────────── 市民 ───────────────────────────
@@ -346,6 +366,8 @@ export interface Vehicle {
   load: number;
   /** 物流車輛：攜帶的貨物 */
   cargo?: { resource: ResourceKey; amount: number; fromId: number; toId: number };
+  /** 所屬巴士／小巴路線（Round 5，optional；唔影響舊存檔） */
+  lineId?: number;
   /** 由交通系統管理（true）還是由物流系統管理（false） */
   transit: boolean;
   done: boolean;
@@ -362,6 +384,112 @@ export interface TransitState {
   suspended: boolean;
   /** 各模式的每日載客量（統計用） */
   byMode: Record<TransitMode, number>;
+}
+
+// ─────────────────────────── 地下公用設施（Round 5） ───────────────────────────
+
+/** 網絡供應統計（水／污水／電力同構） */
+export interface UtilityNetworkStat {
+  /** 全城供應容量（人口當量 PE／電力單位） */
+  capacity: number;
+  /** 全城需求 */
+  demand: number;
+  /** 實際供應（min(capacity,demand)） */
+  supplied: number;
+  /** 人口加權覆蓋率 0..1（已接駁且獲供應） */
+  coverage: number;
+  /** 已接駁建築數 */
+  connectedBuildings: number;
+  /** 未接駁建築數 */
+  unconnectedBuildings: number;
+  /** 供應源建築數 */
+  sources: number;
+  /** 短缺比例 0..1（1 - supplyRatio） */
+  shortage: number;
+}
+
+export interface UtilitySnapshot {
+  /** 計算時的 worldRevision（快取簽章） */
+  revision: number;
+  water: UtilityNetworkStat;
+  sewage: UtilityNetworkStat & {
+    /** 已處理量 */
+    treated: number;
+    /** 未處理溢出比例 0..1 */
+    overflow: number;
+  };
+  power: UtilityNetworkStat;
+  pipeCounts: { water: number; sewer: number; power: number };
+  /** 食水水質 0..1（污染源／排污口附近會下降） */
+  waterQuality: number;
+  /** 每月管線維護費（港幣） */
+  pipeUpkeep: number;
+}
+
+// ─────────────────────────── 巴士／小巴路線（Round 5） ───────────────────────────
+
+export type TransitLineMode = 'bus' | 'minibus';
+
+/** 玩家建立的巴士／小巴路線 */
+export interface TransitLine {
+  id: number;
+  mode: TransitLineMode;
+  name: string;
+  /** #rrggbb */
+  color: string;
+  /** 站點（BusStop／MinibusStop／BusTerminus／MinibusDepot 的 building id，順序） */
+  stopIds: number[];
+  /** 循環線（true）或雙向（false） */
+  loop: boolean;
+  /** 車隊數量 1..12 */
+  vehicleCount: number;
+  /** 票價（港幣） */
+  fare: number;
+  createdDay: number;
+  /** 最近一日載客量 */
+  ridershipToday: number;
+  /** 本月車費收入 */
+  faresThisMonth: number;
+  /** 上月總載客量 */
+  lastMonthRidership: number;
+  /** 是否停駛 */
+  suspended?: boolean;
+}
+
+export interface TransitLineInput {
+  mode: TransitLineMode;
+  stopIds: number[];
+  loop: boolean;
+  vehicleCount: number;
+  fare: number;
+  name?: string;
+  color?: string;
+}
+
+// ─────────────────────────── 機場／貨櫃碼頭（Round 5） ───────────────────────────
+
+export interface AirportState {
+  passengerCapacity: number;
+  passengers: number;
+  cargoCapacity: number;
+  cargo: number;
+  revenueToday: number;
+  jobs: number;
+  /** 最近一日噪音投訴（0..1） */
+  noiseComplaints: number;
+}
+
+export interface PortState {
+  teuCapacity: number;
+  throughput: number;
+  revenueToday: number;
+  jobs: number;
+}
+
+export interface TradeState {
+  airport: AirportState;
+  port: PortState;
+  lastUpdatedDay: number;
 }
 
 // ─────────────────────────── 時間 ───────────────────────────
@@ -504,6 +632,16 @@ export interface GameStats {
   hospitalCoverage: number;
   /** 平均發展分數 0..100（地價／環境） */
   landValue: number;
+  /** 污水處理覆蓋率 0..1（Round 5） */
+  sewageCoverage?: number;
+  /** 食水水質 0..1（Round 5） */
+  waterQuality?: number;
+  /** 機場每日客流（Round 5） */
+  airportPassengers?: number;
+  /** 貨櫃碼頭每日吞吐（TEU，Round 5） */
+  portThroughput?: number;
+  /** 貿易設施每日收入（港幣，Round 5） */
+  tradeRevenue?: number;
 }
 
 export interface UIState {
@@ -530,6 +668,18 @@ export interface UIState {
   showStartScreen: boolean;
   /** 遞增，方便 UI 偵測變更 */
   revision: number;
+  /** 地下管網圖層（Round 5） */
+  showUnderground?: boolean;
+  /** 公用設施面板（Round 5） */
+  showUtilityPanel?: boolean;
+  /** 機場／碼頭貿易面板（Round 5） */
+  showTradePanel?: boolean;
+  /** 交通面板選中的路線 */
+  selectedLineId?: number | null;
+  /** 是否正在建線模式 */
+  lineEditorActive?: boolean;
+  /** 建線草稿（UI／main 共用） */
+  lineDraft?: { mode: TransitLineMode; stopIds: number[] } | null;
 }
 
 export interface GameState {
@@ -546,6 +696,13 @@ export interface GameState {
   carts: Cart[];
   vehicles: Vehicle[];
   transit: TransitState;
+  /** 地下公用設施快照（每日／放置後重算；hydrate 後重算） */
+  utilities?: UtilitySnapshot;
+  /** 巴士／小巴路線 */
+  transitLines?: TransitLine[];
+  nextTransitLineId?: number;
+  /** 機場／貨櫃碼頭營運狀態 */
+  trade?: TradeState;
   /** 開局模式（starter／empty） */
   gameMode: NewGameMode;
   /** 分區需求 -1..1（residential／commercial／industrial／farmland） */
@@ -620,6 +777,31 @@ export interface GameActions {
   toggleHelp(): void;
   toggleSavePanel(): void;
   closeOverlays(): void;
+  /** 地下管網圖層（Round 5） */
+  toggleUnderground?(): void;
+  /** 公用設施面板 */
+  toggleUtilityPanel?(): void;
+  /** 機場／碼頭貿易面板 */
+  toggleTradePanel?(): void;
+  /** 進入建線模式（選站） */
+  beginLineEditor?(mode: TransitLineMode): void;
+  /** 建線模式中加入／移除站點（building id；再點同一站 = 移除） */
+  toggleLineStop?(buildingId: number): void;
+  /** 完成建線（建立 TransitLine） */
+  finishLineEditor?(): void;
+  /** 取消建線 */
+  cancelLineEditor?(): void;
+  /** 建立巴士／小巴路線 */
+  createTransitLine?(input: TransitLineInput): { ok: boolean; reason?: string; id?: number };
+  /** 修改路線（車數／票價／名稱／顏色／循環） */
+  updateTransitLine?(
+    id: number,
+    patch: Partial<Pick<TransitLine, 'vehicleCount' | 'fare' | 'name' | 'color' | 'loop' | 'suspended'>>,
+  ): { ok: boolean; reason?: string };
+  /** 刪除路線 */
+  deleteTransitLine?(id: number): boolean;
+  /** 升級機場／貨櫃碼頭建築 */
+  upgradeTradeBuilding?(buildingId: number): { ok: boolean; reason?: string; cost?: number };
 }
 
 // ─────────────────────────── 存檔 ───────────────────────────

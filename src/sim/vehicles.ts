@@ -29,9 +29,10 @@
  *   執行期快取（道路索引、BFS buffer、生成節奏）放在 WeakMap，不進存檔。
  */
 
-import { BUILDINGS, WEATHER_EFFECT } from '../core/config';
+import { BUILDINGS, TRANSIT_LINE_CONFIG, WEATHER_EFFECT } from '../core/config';
 import { mulberry32, type Rng } from '../core/rng';
-import type { Building, GameState, TransitMode, Vehicle, VehicleKind } from '../core/types';
+import type { Building, GameState, TransitLine, TransitMode, Vehicle, VehicleKind } from '../core/types';
+import { getTransitLines, lineRoadPath } from './transit';
 
 // ─────────────────────────── 常數（檔案頂部集中管理） ───────────────────────────
 
@@ -101,6 +102,8 @@ export interface VehicleDiagnostics {
   spawnSuccess: number;
   spawnFailures: number;
   retired: number;
+  /** 目前路線車輛數（巴士／小巴） */
+  lineVehicles: number;
 }
 
 const diagnostics: VehicleDiagnostics = {
@@ -111,6 +114,7 @@ const diagnostics: VehicleDiagnostics = {
   spawnSuccess: 0,
   spawnFailures: 0,
   retired: 0,
+  lineVehicles: 0,
 };
 
 /** 讀取交通系統執行期診斷（累計值；新局／讀檔後會沿用同一組計數） */
@@ -197,6 +201,42 @@ function ensureRoadIndex(state: GameState, rt: VehiclesRuntime): RoadIndex {
 }
 
 // ─────────────────────────── 小工具 ───────────────────────────
+
+/** 車輛所屬路線（Vehicle.lineId，Round 5）；非路線車輛回傳 null */
+function vehicleLineId(vehicle: Vehicle): number | null {
+  const lineId = vehicle.lineId;
+  return typeof lineId === 'number' && lineId > 0 ? lineId : null;
+}
+
+function setVehicleLineId(vehicle: Vehicle, lineId: number): void {
+  vehicle.lineId = lineId;
+}
+
+/** 路線顏色 #rrggbb → 0xrrggbb（解不到用巴士黃） */
+function parseLineColor(color: string | undefined): number {
+  if (!color) return 0xd9b23f;
+  const match = /^#([0-9a-fA-F]{6})$/.exec(color);
+  return match ? parseInt(match[1], 16) : 0xd9b23f;
+}
+
+/** 目前非路線車輛（generic 車流）數量 */
+function countGenericVehicles(state: GameState): number {
+  let count = 0;
+  for (const vehicle of state.vehicles) {
+    if (vehicle.done) continue;
+    if (vehicleLineId(vehicle) === null) count++;
+  }
+  return count;
+}
+
+/** 目前路線車輛數量 */
+function countLineVehicles(state: GameState): number {
+  let count = 0;
+  for (const vehicle of state.vehicles) {
+    if (!vehicle.done && vehicleLineId(vehicle) !== null) count++;
+  }
+  return count;
+}
 
 function clamp(v: number, min: number, max: number): number {
   return v < min ? min : v > max ? max : v;
@@ -759,6 +799,8 @@ function countVehiclesByKind(state: GameState): Record<string, number> {
   const counts: Record<string, number> = {};
   for (const vehicle of state.vehicles) {
     if (vehicle.done) continue;
+    // 路線車輛有自己的車數管理，唔計入 generic 車流目標
+    if (vehicleLineId(vehicle) !== null) continue;
     counts[vehicle.kind] = (counts[vehicle.kind] ?? 0) + 1;
   }
   return counts;
@@ -889,6 +931,168 @@ function updateRoadVehicle(
   return true;
 }
 
+/** 更新一輛路線巴士／小巴（沿 line path 循環；到總站調頭）；回傳 false 代表應回收 */
+function updateLineVehicle(
+  state: GameState,
+  rt: VehiclesRuntime,
+  index: RoadIndex,
+  vehicle: Vehicle,
+  line: TransitLine,
+  gameMinutes: number,
+  globalSpeedFactor: number,
+): boolean {
+  const path = vehicle.path;
+  const last = path.length - 1;
+  if (last < 1) return false;
+  const seg = clamp(Math.floor(vehicle.pathProgress), 0, last - 1);
+  const tileA = path[seg];
+  const tileB = path[seg + 1];
+  if (!index.isRoad[tileA] || !index.isRoad[tileB]) return false; // 道路被拆：下一幀重新派路
+
+  let factor = globalSpeedFactor;
+  if (index.degree[tileA] >= 3) factor *= INTERSECTION_SLOWDOWN;
+  const occupancy = rt.occupancy;
+  if (occupancy) {
+    const same = occupancy[tileA];
+    const ahead = occupancy[tileB] ?? 0;
+    if (same > 1) factor *= Math.max(JAM_SLOWDOWN, 1 / (1 + (same - 1) * 0.6));
+    if (ahead > 2) factor *= 0.78;
+  }
+  factor = clamp(factor, 0.12, 1.6);
+
+  vehicle.pathProgress += Math.max(0.001, vehicle.speed * factor) * gameMinutes;
+  if (vehicle.pathProgress >= last) {
+    if (line.loop) {
+      // 循環線：lineRoadPath 已把起點補喺尾格，回捲即可無縫循環
+      vehicle.pathProgress -= last;
+      if (vehicle.pathProgress < 0) vehicle.pathProgress = 0;
+    } else {
+      // 雙向線：到總站後反轉自己條 path 調頭
+      vehicle.path.reverse();
+      vehicle.pathProgress = 0;
+    }
+    vehicle.load = Math.max(
+      1,
+      Math.round(TRANSIT_LINE_CONFIG.capacityPerVehicle[line.mode] * (0.25 + rt.rng() * 0.5)),
+    );
+  }
+  updateVehiclePose(state, vehicle);
+  return true;
+}
+
+/** 生成一輛路線車輛（巴士／小巴；沿站點道路循環） */
+function spawnLineVehicle(
+  state: GameState,
+  rt: VehiclesRuntime,
+  index: RoadIndex,
+  line: TransitLine,
+): Vehicle | null {
+  if (state.vehicles.length >= MAX_TRAFFIC_VEHICLES) return null;
+  if (line.vehicleCount <= 0 || line.suspended) return null;
+  const path = lineRoadPath(state, line);
+  if (!path || path.length < 2) return null;
+  void index;
+  const kind: VehicleKind = line.mode === 'bus' ? 'bus' : 'minibus';
+  const rng = rt.rng;
+  const vehiclePath = path.slice();
+  // 非循環線：一半車輛由另一方向開出（雙向服務）
+  if (!line.loop && rng() < 0.5) vehiclePath.reverse();
+  const startProgress = rng() * (vehiclePath.length - 1);
+  const vehicle: Vehicle = {
+    id: state.nextVehicleId++,
+    kind,
+    x: 0,
+    y: 0,
+    angle: 0,
+    path: vehiclePath,
+    pathProgress: startProgress,
+    speed: VEHICLE_SPEED[kind] * (0.94 + rng() * 0.12),
+    color: parseLineColor(line.color),
+    load: Math.round(TRANSIT_LINE_CONFIG.capacityPerVehicle[line.mode] * (0.25 + rng() * 0.5)),
+    transit: true,
+    done: false,
+  };
+  setVehicleLineId(vehicle, line.id);
+  updateVehiclePose(state, vehicle);
+  state.vehicles.push(vehicle);
+  return vehicle;
+}
+
+/**
+ * 同步路線車輛：
+ *  - 刪線／停駛／颱風 → 移除相關車輛
+ *  - 減少車數 → 移除多餘車輛
+ *  - 新增線／加車 → 逐步補車（每幀最多 2 架）
+ *  - 路線車輛總數會佔用 MAX_TRAFFIC_VEHICLES quota，generic 車流自動讓位
+ */
+function syncLineVehicles(state: GameState, rt: VehiclesRuntime, index: RoadIndex): void {
+  const lines = getTransitLines(state);
+  const stormy = state.clock.weather === 'storm';
+  const byLine = new Map<number, Vehicle[]>();
+  for (const vehicle of state.vehicles) {
+    if (vehicle.done) continue;
+    const lineId = vehicleLineId(vehicle);
+    if (lineId === null) continue;
+    const list = byLine.get(lineId);
+    if (list) list.push(vehicle);
+    else byLine.set(lineId, [vehicle]);
+  }
+
+  const lineById = new Map<number, TransitLine>();
+  for (const line of lines) lineById.set(line.id, line);
+
+  // 目標車數（停駛／颱風 = 0；再按總 quota 縮減）
+  const desired = new Map<number, number>();
+  let desiredTotal = 0;
+  for (const line of lines) {
+    const count = line.vehicleCount > 0 && !line.suspended && !stormy ? line.vehicleCount : 0;
+    desired.set(line.id, count);
+    desiredTotal += count;
+  }
+  const lineBudget = Math.max(0, MAX_TRAFFIC_VEHICLES - countGenericVehicles(state));
+  if (desiredTotal > lineBudget) {
+    const scale = lineBudget / Math.max(1, desiredTotal);
+    for (const [id, count] of desired) desired.set(id, Math.max(0, Math.floor(count * scale)));
+  }
+
+  // 移除多餘／失效路線車輛
+  for (const [lineId, vehicles] of byLine) {
+    const line = lineById.get(lineId);
+    const target = line ? desired.get(lineId) ?? 0 : 0;
+    for (let i = target; i < vehicles.length; i++) {
+      if (vehicles[i].done) continue;
+      vehicles[i].done = true;
+      diagnostics.retired++;
+    }
+  }
+
+  // 補充車輛（每幀最多 2 架）
+  let spawnBudget = 2;
+  for (const line of lines) {
+    if (spawnBudget <= 0) break;
+    const target = desired.get(line.id) ?? 0;
+    if (target <= 0) continue;
+    const current = byLine.get(line.id)?.length ?? 0;
+    let missing = Math.max(0, target - current);
+    while (missing > 0 && spawnBudget > 0 && state.vehicles.length < MAX_TRAFFIC_VEHICLES) {
+      if (!spawnLineVehicle(state, rt, index, line)) break;
+      spawnBudget--;
+      missing--;
+    }
+  }
+  diagnostics.lineVehicles = countLineVehicles(state);
+}
+
+/** 將 generic 車流目標壓縮到指定總量（路線車輛佔用 quota 時用） */
+function capTargetsToBudget(targets: VehicleTargets, budget: number): void {
+  const keys: (keyof VehicleTargets)[] = ['bus', 'minibus', 'taxi', 'car', 'motorcycle', 'tram', 'ferry'];
+  let sum = 0;
+  for (const key of keys) sum += targets[key];
+  if (sum <= budget || sum <= 0) return;
+  const scale = budget / sum;
+  for (const key of keys) targets[key] = Math.floor(targets[key] * scale);
+}
+
 /** 更新一艘渡輪；回傳 false 代表應回收（靠岸／颱風停航） */
 function updateFerryVehicle(state: GameState, vehicle: Vehicle, gameMinutes: number): boolean {
   if (state.transit.suspended || state.clock.weather === 'storm') return false;
@@ -929,8 +1133,10 @@ export function tickVehicles(state: GameState, gameMinutes: number): void {
   const nightBoost = isNight(state) ? 1.12 : 1;
   const speedFactor = clamp(weatherFactor * nightBoost, 0.15, 1.3);
 
-  // ── 1) 移動現有車輛 ──
+  // ── 1) 移動現有車輛（generic 車流 + 巴士／小巴路線車輛） ──
   const targets = trafficVehicleTargets(state);
+  const lineCount = countLineVehicles(state);
+  if (lineCount > 0) capTargetsToBudget(targets, Math.max(4, MAX_TRAFFIC_VEHICLES - lineCount));
   rt.targetTotal =
     targets.bus +
     targets.minibus +
@@ -940,10 +1146,28 @@ export function tickVehicles(state: GameState, gameMinutes: number): void {
     targets.tram +
     targets.ferry;
 
+  const lineById = new Map<number, TransitLine>();
+  for (const line of getTransitLines(state)) lineById.set(line.id, line);
+  const stormy = state.clock.weather === 'storm';
+
   for (const vehicle of state.vehicles) {
     if (vehicle.done) continue;
     if (vehicle.kind === 'ferry') {
       if (!updateFerryVehicle(state, vehicle, dt)) {
+        vehicle.done = true;
+        diagnostics.retired++;
+      }
+      continue;
+    }
+    const lineId = vehicleLineId(vehicle);
+    if (lineId !== null) {
+      const line = lineById.get(lineId);
+      if (!line || line.suspended || stormy) {
+        vehicle.done = true;
+        diagnostics.retired++;
+        continue;
+      }
+      if (!updateLineVehicle(state, rt, index, vehicle, line, dt, speedFactor)) {
         vehicle.done = true;
         diagnostics.retired++;
       }
@@ -959,6 +1183,9 @@ export function tickVehicles(state: GameState, gameMinutes: number): void {
   for (let i = state.vehicles.length - 1; i >= 0; i--) {
     if (state.vehicles[i].done) state.vehicles.splice(i, 1);
   }
+
+  // ── 2b) 路線車輛同步（刪線／停駛／加減車／颱風） ──
+  syncLineVehicles(state, rt, index);
 
   // ── 3) 生成（依目標數量與節奏） ──
   if (index.roadTiles.length < 8) return;

@@ -7,6 +7,7 @@ import {
   BUILDINGS,
   BUILDING_LIST,
   CATEGORY_INFO,
+  GAME_VERSION,
   GRID_HEIGHT,
   GRID_WIDTH,
   RESOURCES,
@@ -54,10 +55,10 @@ beforeEach(() => {
 // ─────────────────────────── 設定資料表 ───────────────────────────
 
 describe('香港設定資料表', () => {
-  it('地圖為 480×480（真實香港地理數據；96×96 的 25 倍面積）、起始庫房與道路造價合理', () => {
-    expect(GRID_WIDTH).toBe(480);
-    expect(GRID_HEIGHT).toBe(480);
-    expect(GRID_WIDTH * GRID_HEIGHT).toBeGreaterThanOrEqual(96 * 96 * 25);
+  it('地圖為 600×600（真實香港地理數據；96×96 的約 39 倍面積）、起始庫房與道路造價合理', () => {
+    expect(GRID_WIDTH).toBe(600);
+    expect(GRID_HEIGHT).toBe(600);
+    expect(GRID_WIDTH * GRID_HEIGHT).toBeGreaterThanOrEqual(96 * 96 * 39);
     expect(START_TREASURY).toBeGreaterThan(1_000_000);
     expect(ROAD_COST).toBeGreaterThan(0);
     expect(SIDEWALK_COST).toBeGreaterThan(0);
@@ -139,7 +140,7 @@ describe('香港設定資料表', () => {
         expect(def.transit.fare).toBeGreaterThan(0);
       }
       if (def.utility) {
-        expect(['water', 'power']).toContain(def.utility.kind);
+        expect(['water', 'power', 'sewage']).toContain(def.utility.kind);
         expect(def.utility.radius).toBeGreaterThan(0);
         expect(def.utility.capacity).toBeGreaterThan(0);
       }
@@ -213,20 +214,23 @@ describe('香港設定資料表', () => {
 // ─────────────────────────── 香港地圖 ───────────────────────────
 
 describe('香港地圖世界生成', () => {
-  it('生成 480×480、tile 陣列與 spawn', () => {
+  it('生成 600×600、tile 陣列與 spawn', () => {
     const world = generateWorld(20261021);
-    expect(world.width).toBe(480);
-    expect(world.height).toBe(480);
-    expect(world.tiles.length).toBe(480 * 480);
+    expect(world.width).toBe(600);
+    expect(world.height).toBe(600);
+    expect(world.tiles.length).toBe(600 * 600);
     expect(world.spawn.x).toBeGreaterThan(0);
     expect(world.spawn.y).toBeGreaterThan(0);
-    expect(world.spawn.x).toBeLessThan(480);
-    expect(world.spawn.y).toBeLessThan(480);
-    for (const tile of world.tiles) {
+    expect(world.spawn.x).toBeLessThan(600);
+    expect(world.spawn.y).toBeLessThan(600);
+    // 600×600 有 360,000 格：抽樣檢查（逐格 expect 會令測試超時）
+    for (let i = 0; i < world.tiles.length; i += 997) {
+      const tile = world.tiles[i];
       expect(tile.buildingId).toBe(-1);
       expect(tile.elevation).toBeGreaterThanOrEqual(0);
       expect(tile.elevation).toBeLessThanOrEqual(1);
     }
+    expect(world.tiles[world.tiles.length - 1].elevation).toBeGreaterThanOrEqual(0);
   });
 
   it('有維港水域、山地與多種地形', () => {
@@ -341,7 +345,32 @@ describe('存檔系統', () => {
     expect(normalizeState({ width: 10, height: 10, tiles: [], buildings: [] })).toBeNull();
   });
 
-  it('精簡存檔可序列化且體積合理（480 地圖唔會爆 localStorage）', async () => {
+  it('地下管道／電纜經 compact 存檔還原（v6 pipe bits）', async () => {
+    const { serializeCompact, hydrateCompact } = await import('../src/core/save');
+    const state = createGameState(7, 'empty');
+    // 找一格可建地鋪三種管
+    let target = -1;
+    for (let i = 0; i < state.tiles.length; i++) {
+      const t = state.tiles[i];
+      if (['grass', 'urban', 'fertile', 'forest', 'hill', 'reclaimed'].includes(t.terrain) && !t.road) {
+        target = i;
+        break;
+      }
+    }
+    expect(target).toBeGreaterThanOrEqual(0);
+    state.tiles[target].waterPipe = true;
+    state.tiles[target].sewerPipe = true;
+    state.tiles[target].powerCable = true;
+    const raw = JSON.parse(serializeCompact(state, 2));
+    const loaded = hydrateCompact(raw);
+    expect(loaded).toBeTruthy();
+    expect(loaded!.tiles[target].waterPipe).toBe(true);
+    expect(loaded!.tiles[target].sewerPipe).toBe(true);
+    expect(loaded!.tiles[target].powerCable).toBe(true);
+    expect(loaded!.version).toBe(GAME_VERSION);
+  });
+
+  it('精簡存檔可序列化且體積合理（600 地圖唔會爆 localStorage）', async () => {
     const { serializeCompact } = await import('../src/core/save');
     const state: GameState = createGameState(3);
     const json = serializeCompact(state, 1);

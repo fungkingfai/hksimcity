@@ -28,6 +28,7 @@ import type { BuildingCategory, BuildingDef, GameActions, GameState, ZoneType } 
 import type { GameStore } from '../core/store';
 import { clamp, delegate, esc, hexColor, num, qs, qsa, setClass, setHidden, setText } from './dom';
 import { buildingGlyph, ico, sealHtml } from './icons';
+import { toggleUnderground, toggleUtilityPanel } from './round5-helpers';
 
 export interface BuildPanelView {
   update(state: GameState): void;
@@ -65,7 +66,14 @@ function buildingsOf(category: BuildingCategory): BuildingDef[] {
 /** 卡片副標：一眼看出用途 */
 function cardSubtitle(def: BuildingDef): string {
   const bits: string[] = [];
-  if (def.utility) bits.push(def.utility.kind === 'power' ? '供電' : '供水', `半徑 ${def.utility.radius}`);
+  if (['airportTerminal', 'airCargoTerminal'].includes(def.key)) bits.push('只限機場區');
+  if (['portGate', 'portYard'].includes(def.key)) bits.push('只限碼頭區');
+  if (def.key === 'containerPort') bits.push('需臨水');
+  if (def.utility) {
+    const utilityName =
+      def.utility.kind === 'power' ? '供電' : def.utility.kind === 'sewage' ? '污水處理' : '供水';
+    bits.push(utilityName, def.utility.source ? `容量 ${num(def.utility.capacity)}` : `半徑 ${def.utility.radius}`);
+  }
   if (def.transit) bits.push(`${TRANSIT_INFO[def.transit.mode].name}站`, `半徑 ${def.transit.radius}`);
   if (def.service) {
     const kind = def.service.kind;
@@ -112,11 +120,16 @@ function buildTip(def: BuildingDef): string {
     rows.push(row('交通', `${TRANSIT_INFO[def.transit.mode].name} · 半徑 ${def.transit.radius} 格`));
     rows.push(row('運力', `每日 ${num(def.transit.capacity)} 人次 · 車費 $${def.transit.fare}`));
   }
+  if (['airportTerminal', 'airCargoTerminal'].includes(def.key)) rows.push(row('位置限制', '只限機場區'));
+  if (['portGate', 'portYard'].includes(def.key)) rows.push(row('位置限制', '只限碼頭區'));
+  if (def.key === 'containerPort') rows.push(row('位置限制', '需臨水'));
   if (def.utility) {
+    const utilityLabel =
+      def.utility.kind === 'power' ? '供電' : def.utility.kind === 'sewage' ? '污水處理' : '供水';
     rows.push(
       row(
-        def.utility.kind === 'power' ? '供電' : '供水',
-        `半徑 ${def.utility.radius} 格 · 容量 ${num(def.utility.capacity)} 人`,
+        utilityLabel,
+        `半徑 ${def.utility.radius} 格 · 容量 ${num(def.utility.capacity)} 人${def.utility.source ? ' · 供應源' : ''}`,
       ),
     );
   }
@@ -233,6 +246,12 @@ export function createBuildPanel(container: HTMLElement, store: GameStore, actio
         </div>
       </div>
       <div class="panel-head-actions">
+        <button type="button" class="zone-toggle icon-only" data-act="toggle-underground" title="地下管網（U）" aria-label="地下管網">
+          ${ico('pipe')}
+        </button>
+        <button type="button" class="zone-toggle icon-only" data-act="toggle-utility" title="公用設施面板" aria-label="公用設施面板">
+          ${ico('gauge')}
+        </button>
         <button type="button" class="zone-toggle" data-act="toggle-zones" title="顯示／隱藏分區色塊（L）" aria-label="顯示分區色塊">
           ${ico('layers')}<span>分區</span>
         </button>
@@ -310,6 +329,8 @@ export function createBuildPanel(container: HTMLElement, store: GameStore, actio
   const dezoneBtn = qs<HTMLElement>(root, '[data-tool="dezone"]')!;
   const demolishBtn = qs<HTMLElement>(root, '[data-tool="demolish"]')!;
   const zoneToggleBtn = qs<HTMLElement>(root, '[data-act="toggle-zones"]')!;
+  const undergroundBtn = qs<HTMLElement>(root, '[data-act="toggle-underground"]')!;
+  const utilityBtn = qs<HTMLElement>(root, '[data-act="toggle-utility"]')!;
   const zoneButtons = new Map<ZoneType, { btn: HTMLElement; demand: HTMLElement }>();
   for (const zone of ZONE_ORDER) {
     const btn = qs<HTMLElement>(root, `[data-zone="${zone}"]`);
@@ -411,6 +432,14 @@ export function createBuildPanel(container: HTMLElement, store: GameStore, actio
     }
     if (act === 'toggle-zones') {
       actions.toggleZones();
+      return;
+    }
+    if (act === 'toggle-underground') {
+      toggleUnderground(store, actions);
+      return;
+    }
+    if (act === 'toggle-utility') {
+      toggleUtilityPanel(store, actions);
       return;
     }
     if (act === 'tool') {
@@ -515,6 +544,8 @@ export function createBuildPanel(container: HTMLElement, store: GameStore, actio
     }
     setText(plopCountEl, `${PLOPPABLE_BUILDINGS.length} 種`);
     setClass(zoneToggleBtn, 'active', ui.showZones);
+    setClass(undergroundBtn, 'active', Boolean(ui.showUnderground));
+    setClass(utilityBtn, 'active', Boolean(ui.showUtilityPanel));
 
     setClass(roadBtn, 'active', ui.tool === 'road');
     setClass(dezoneBtn, 'active', ui.tool === 'dezone');
