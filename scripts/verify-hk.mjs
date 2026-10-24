@@ -194,13 +194,13 @@ try {
       spawn: st.spawn,
     };
   });
-  check('香港地圖 304×304（面積約舊版 10 倍）', world.width === 304 && world.height === 304 && world.width * world.height >= 96 * 96 * 10, { width: world.width, height: world.height });
+  check('香港地圖 480×480（真實地理數據；面積約舊版 25 倍）', world.width === 480 && world.height === 480 && world.width * world.height >= 96 * 96 * 25, { width: world.width, height: world.height });
   check('維港／山地／填海地存在', (world.terrains.water ?? 0) > 300 && (world.terrains.mountain ?? 0) > 30 && (world.terrains.reclaimed ?? 0) > 50, {
     water: world.terrains.water,
     mountain: world.terrains.mountain,
     reclaimed: world.terrains.reclaimed,
   });
-  check('可建比例合理', world.buildableRatio > 0.4, { ratio: Number(world.buildableRatio.toFixed(3)) });
+  check('可建比例合理（真實香港多山多海）', world.buildableRatio > 0.15, { ratio: Number(world.buildableRatio.toFixed(3)) });
 
   // ── 3. 鋪路（整合行人路）＋劃分區 ──
   const build = await page.evaluate(() => {
@@ -230,7 +230,7 @@ try {
             if (okTerrain.has(t.terrain)) okCount++;
           }
         }
-        if (blocked || okCount < 230) continue;
+        if (blocked || okCount < 190) continue;
         const dist = Math.hypot(x + 9 - sx, y + 8 - sy);
         const score = okCount - dist * 2;
         if (score > bestScore) {
@@ -284,7 +284,7 @@ try {
       }
     }
     // 郊外農地：附近農地／平地補農業區
-    if (zoneCounts.farmland < 8) {
+    if (zoneCounts.farmland < 32) {
       outer: for (let r = 2; r <= 20; r++) {
         for (let dy = -r; dy <= r; dy++) {
           for (let dx = -r; dx <= r; dx++) {
@@ -296,6 +296,34 @@ try {
         }
       }
     }
+    // 真實地形：如基地附近冇農地，喺全圖搵 2×2 可耕地補農業區（確保四區齊全）
+    if (zoneCounts.farmland < 32) {
+      const farmTerrain = new Set(['fertile', 'grass']);
+      let blocks = 0;
+      for (let y = 2; y < H - 3 && blocks < 2; y++) {
+        for (let x = 2; x < W - 3 && blocks < 2; x++) {
+          let ok = true;
+          for (let yy = 0; yy < 2 && ok; yy++) {
+            for (let xx = 0; xx < 2; xx++) {
+              const t = st.tiles[idx(x + xx, y + yy)];
+              if (!farmTerrain.has(t.terrain) || t.road || t.buildingId >= 0 || t.zone) {
+                ok = false;
+                break;
+              }
+            }
+          }
+          if (!ok) continue;
+          let added = 0;
+          for (let yy = 0; yy < 2; yy++) for (let xx = 0; xx < 2; xx++) {
+            const r = window.__HK_CITY__.zoneDebug?.paintZone?.(st, x + xx, y + yy, 'farmland');
+            if (r?.ok) added++;
+          }
+          if (added === 4) zoneCounts.farmland += 4;
+          blocks++;
+        }
+      }
+    }
+
     // 手動放置自動建築應被拒絕
     const beforeManual = st.buildings.length;
     placeAt('tongLau', bx + 2, by + 2);
@@ -510,9 +538,8 @@ try {
       for (let y = 2; y < H - 2; y++) {
         for (let x = 2; x < W - 2; x++) {
           if (!fits(x, y, w, h) || !touches(x, y, w, h)) continue;
-          actions.setTool(key);
           const before = st.buildings.length;
-          actions.applyToolAt(idx(x, y));
+          window.__HK_CITY__.zoneDebug?.placeBuilding?.(st, key, x, y);
           if (st.buildings.length > before) return true;
         }
       }
@@ -530,7 +557,6 @@ try {
       park: tryPlace('park', 2, 2),
     };
     st.stats.population = realPop;
-    actions.setTool(null);
     st.clock.paused = false;
     st.clock.speed = 3;
     for (let d = 0; d < 12; d++) for (let k = 0; k < 20; k++) simulation.update(st, 0.5, ctx);
@@ -559,15 +585,16 @@ try {
     const W = st.width;
     const idx = (x, y) => y * W + x;
     const before = st.stats.zoneDemand.residential;
-    // 大量額外劃住宅區
+    st.finance.treasury += 40_000_000;
+    // 大量額外劃住宅區（經 paintZone API，保持 typed tile index 一致）
     let painted = 0;
     for (let y = 2; y < st.height - 2 && painted < 8000; y++) {
       for (let x = 2; x < W - 2 && painted < 8000; x++) {
         const t = st.tiles[idx(x, y)];
         if (t.road || t.buildingId >= 0 || t.zone) continue;
         if (!['grass', 'urban', 'reclaimed', 'fertile', 'forest', 'hill'].includes(t.terrain)) continue;
-        t.zone = 'residential';
-        painted++;
+        const r = window.__HK_CITY__.zoneDebug?.paintZone?.(st, x, y, 'residential');
+        if (r?.ok) painted++;
       }
     }
     st.clock.paused = false;

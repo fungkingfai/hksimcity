@@ -505,7 +505,7 @@ function boot(): void {
     ZONES,
     deriveClockFields,
     // QA／debug 用：分區查詢與自動建築（正常遊玩唔會用）
-    zoneDebug: { paintZone, eraseZone, placeAutoBuilding, computeZoneDemand, zoneStats },
+    zoneDebug: { paintZone, eraseZone, placeAutoBuilding, placeBuilding, computeZoneDemand, zoneStats },
   };
   if (uiMode === 'mobile') {
     setTimeout(() => {

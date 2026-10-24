@@ -30,6 +30,8 @@
  */
 
 import { GRID_HEIGHT, GRID_WIDTH } from '../core/config';
+import { HK_MAP_DATA } from './hk-map-data.generated';
+import type { MapData, MapLabelKind, MapLandmarkKind, MapRegionKind } from './hk-map-data-types';
 import { clamp, hash2d, mulberry32, ValueNoise } from '../core/rng';
 import type { TerrainType, Tile } from '../core/types';
 
@@ -75,14 +77,14 @@ export interface HkRegion {
 }
 
 /** 維港三條過海隧道（設計 x 座標；y 範圍由地形決定） */
-export const HK_TUNNELS: { name: string; x: number }[] = [
+const LEGACY_TUNNELS: { name: string; x: number }[] = [
   { name: '西區海底隧道', x: 33 },
   { name: '紅磡海底隧道', x: 52 },
   { name: '東區海底隧道', x: 70 },
 ];
 
 /** 香港地名標籤（對齊 core/config.ts MAP_LABELS 的概念位置，並按實際海岸微調） */
-export const HK_PLACES: HkPlace[] = [
+const LEGACY_PLACES: HkPlace[] = [
   { name: '新界', x: 44, y: 13, kind: 'district' },
   { name: '大帽山', x: 34, y: 8, kind: 'mountain' },
   { name: '沙田', x: 58, y: 21, kind: 'district' },
@@ -122,7 +124,7 @@ export const HK_PLACES: HkPlace[] = [
 ];
 
 /** 地標（設計座標） */
-export const HK_LANDMARKS: HkLandmark[] = [
+const LEGACY_LANDMARKS: HkLandmark[] = [
   { name: '山頂凌霄閣', x: 34, y: 70, kind: 'peakTower' },
   { name: '天壇大佛', x: 8, y: 62, kind: 'buddha' },
   { name: '中環摩天輪', x: 41, y: 60, kind: 'ferrisWheel' },
@@ -132,7 +134,7 @@ export const HK_LANDMARKS: HkLandmark[] = [
 ];
 
 /** 地區塊（設計座標；渲染用） */
-export const HK_REGIONS: HkRegion[] = [
+const LEGACY_REGIONS: HkRegion[] = [
   { name: '中環天際線', x0: 36, y0: 60, x1: 52, y1: 66, kind: 'skyline' },
   { name: '尖沙咀天際線', x0: 42, y0: 45, x1: 56, y1: 51, kind: 'skyline' },
   { name: '觀塘商廈', x0: 62, y0: 40, x1: 72, y1: 47, kind: 'skyline' },
@@ -145,7 +147,195 @@ export const HK_REGIONS: HkRegion[] = [
 ];
 
 /** 走陸行 spawn 附近預置道路的設計座標（回報與文檔用） */
-export const HK_SPAWN_DESIGN = { x: 44, y: 63 };
+const LEGACY_SPAWN_DESIGN = { x: 44, y: 63 };
+
+// ─────────────────────────── 真實地理數據（CSDI／地政總署） ───────────────────────────
+
+const DATA: MapData = HK_MAP_DATA as MapData;
+
+function b64ToBytes(b64: string): Uint8Array {
+  const bin = globalThis.atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+function rleDecode(rle: Uint8Array, size: number): Uint8Array {
+  const out = new Uint8Array(size);
+  let p = 0;
+  for (let i = 0; i + 1 < rle.length && p < size; i += 2) {
+    const value = rle[i];
+    const count = rle[i + 1];
+    for (let k = 0; k < count && p < size; k++) out[p++] = value;
+  }
+  return out;
+}
+
+const TERRAIN_CODE_TO_TYPE: TerrainType[] = [
+  'water', 'sand', 'grass', 'fertile', 'wetland', 'forest', 'hill', 'mountain', 'urban', 'reclaimed',
+];
+
+interface DecodedMapData {
+  terrain: Uint8Array;
+  elevation: Uint8Array;
+  density: Uint8Array;
+  buildingHeight: Uint8Array;
+  width: number;
+  height: number;
+  spawn: { x: number; y: number };
+}
+
+let decodedCache: DecodedMapData | null = null;
+
+function decodedMapData(): DecodedMapData {
+  if (decodedCache) return decodedCache;
+  const width = DATA.width;
+  const height = DATA.heightTiles;
+  const size = width * height;
+  decodedCache = {
+    terrain: rleDecode(b64ToBytes(DATA.terrainRle), size),
+    elevation: b64ToBytes(DATA.elevation),
+    density: b64ToBytes(DATA.density),
+    buildingHeight: b64ToBytes(DATA.buildingHeight),
+    width,
+    height,
+    spawn: { ...DATA.spawn },
+  };
+  return decodedCache;
+}
+
+/** 真實香港地名（設計座標，renderer 會按狀態尺寸換算） */
+export const HK_PLACES: HkPlace[] = DATA.labels.map(([name, x, y, kind]) => ({
+  name,
+  x,
+  y,
+  kind: kind as HkPlaceKind,
+}));
+
+/** 真實地標（設計座標） */
+export const HK_LANDMARKS: HkLandmark[] = DATA.landmarks.map(([name, x, y, kind]) => ({
+  name,
+  x,
+  y,
+  kind: kind as HkLandmark['kind'],
+}));
+
+/** 真實市區／機場／貨櫃碼頭區塊（設計座標；terrain render 用） */
+export const HK_REGIONS: HkRegion[] = DATA.regions.map(([name, x0, y0, x1, y1, kind]) => ({
+  name,
+  x0,
+  y0,
+  x1,
+  y1,
+  kind: kind as MapRegionKind,
+}));
+
+/** 三條過海隧道（設計 x 座標；roads renderer 用） */
+export const HK_TUNNELS: { name: string; x: number }[] = DATA.tunnels.map(([name, x]) => ({
+  name,
+  x,
+}));
+
+export const HK_SPAWN_DESIGN = { x: 0, y: 0 };
+{
+  const sx = DATA.width / HK_DESIGN_SIZE;
+  const sy = DATA.heightTiles / HK_DESIGN_SIZE;
+  HK_SPAWN_DESIGN.x = (DATA.spawn.x + 0.5) / sx - 0.5;
+  HK_SPAWN_DESIGN.y = (DATA.spawn.y + 0.5) / sy - 0.5;
+}
+
+const ROAD_TERRAINS = new Set<TerrainType>(['urban', 'reclaimed', 'grass', 'forest', 'hill', 'fertile']);
+
+/** 真實地理地圖生成（480×480；由 CSDI／地政總署數據離線生成） */
+function generateRealWorld(seed: number, options: GenerateWorldOptions): WorldGenResult {
+  const data = decodedMapData();
+  const { width, height, spawn } = data;
+  const tiles: Tile[] = new Array(width * height);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = y * width + x;
+      const code = data.terrain[i];
+      const terrain = TERRAIN_CODE_TO_TYPE[code] ?? 'water';
+      const isWater = terrain === 'water';
+      const elevByte = data.elevation[i];
+      const elevation = isWater ? 0 : 0.3 + (elevByte / 255) * 0.62;
+      const density = data.density[i];
+      const buildingHeight = (data.buildingHeight[i] / 255) * 500;
+      tiles[i] = {
+        terrain,
+        elevation,
+        variant: hash2d(x, y, seed + 7) * 0.999 + 0.0005,
+        buildingId: -1,
+        road: false,
+        sidewalk: false,
+        zone: null,
+        density: density || undefined,
+        buildingHeight: buildingHeight > 2 ? buildingHeight : undefined,
+      };
+    }
+  }
+  const result: WorldGenResult = { width, height, tiles, spawn: { ...spawn } };
+  if (options.starterRoads !== false) {
+    buildStarterRoads(result, seed);
+  }
+  return result;
+}
+
+/** starter 模式：三條過海隧道（街道由 core/starter-town.ts 以連通優先方式生成；empty 模式完全冇道路） */
+function buildStarterRoads(world: WorldGenResult, seed: number): void {
+  const { width, height, tiles } = world;
+  const idx = (x: number, y: number): number => y * width + x;
+  const addRoad = (x: number, y: number, tunnel: boolean): void => {
+    if (x < 0 || y < 0 || x >= width || y >= height) return;
+    const t = tiles[idx(x, y)];
+    if (!tunnel && t.terrain === 'water') return;
+    t.road = true;
+    t.sidewalk = !tunnel;
+    t.zone = null;
+  };
+  const sx = width / HK_DESIGN_SIZE;
+  for (const tunnel of HK_TUNNELS) {
+    const tx = Math.max(1, Math.min(width - 2, Math.round((tunnel.x + 0.5) * sx - 0.5)));
+    let best: { start: number; end: number } | null = null;
+    let y = 0;
+    while (y < height) {
+      if (tiles[idx(tx, y)].terrain === 'water') {
+        const start2 = y;
+        while (y < height && tiles[idx(tx, y)].terrain === 'water') y++;
+        const end = y - 1;
+        if (end - start2 + 1 >= 3 && (!best || end - start2 > best.end - best.start)) {
+          best = { start: start2, end };
+        }
+      } else {
+        y++;
+      }
+    }
+    if (!best) continue;
+    for (let yy = best.start; yy <= best.end; yy++) addRoad(tx, yy, true);
+    for (const dir of [-1, 1] as const) {
+      const portalY = dir < 0 ? best.start - 1 : best.end + 1;
+      for (let k = 0; k < 2; k++) {
+        const py = portalY + dir * k;
+        addRoad(tx, py, false);
+        addRoad(tx + 1, py, false);
+        addRoad(tx - 1, py, false);
+      }
+    }
+  }
+  void seed;
+}
+
+/** 對外 API：480×480 用真實地理數據；其他尺寸回退程序化生成（測試用） */
+export function generateWorld(
+  seed = 20261021,
+  width = GRID_WIDTH,
+  height = GRID_HEIGHT,
+  options: GenerateWorldOptions = {},
+): WorldGenResult {
+  if (width === DATA.width && height === DATA.heightTiles) return generateRealWorld(seed, options);
+  return generateProceduralWorld(seed, width, height, options);
+}
+
 
 // ─────────────────────────── 幾何工具 ───────────────────────────
 
@@ -499,7 +689,7 @@ export interface GenerateWorldOptions {
   starterRoads?: boolean;
 }
 
-export function generateWorld(
+function generateProceduralWorld(
   seed = 20261021,
   width = GRID_WIDTH,
   height = GRID_HEIGHT,
@@ -1279,7 +1469,7 @@ export function generateWorld(
 
   // ───────────── 11. spawn 開局街區（平整、可建、非水域） ─────────────
 
-  const spawnDesign = HK_SPAWN_DESIGN;
+  const spawnDesign = LEGACY_SPAWN_DESIGN;
   const spawnTile = toTile(spawnDesign.x, spawnDesign.y);
   {
     // 以 spawn 為中心約 17×11 的市中心街區，全部平整為 urban/reclaimed；
@@ -1369,7 +1559,7 @@ export function generateWorld(
       }
     }
     // 三條過海隧道：在指定設計 x 找到最長的一段水域，鋪成隧道
-    for (const tunnel of HK_TUNNELS) {
+    for (const tunnel of LEGACY_TUNNELS) {
       const tx = clamp(Math.round((tunnel.x + 0.5) * sx - 0.5), 1, width - 2);
       // 掃描所有水域連續段，選取中心在維港範圍（設計 y 48~66）者
       let best: { start: number; end: number } | null = null;

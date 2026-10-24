@@ -294,19 +294,19 @@ export function createRoadsView(state: GameState): RoadsView {
   const isSidewalkAt = (x: number, y: number, s: GameState): boolean =>
     x < 0 || y < 0 || x >= s.width || y >= s.height ? false : Boolean(s.tiles[y * s.width + x].sidewalk);
 
-  /** 是否港島北岸電車走廊（設計座標） */
+  /** 是否港島北岸電車走廊（真實 480 地圖 design 座標：北岸 y≈57.5–62.5、dx≈46–67） */
   const isTramCorridor = (x: number, y: number): boolean => {
     const dx = (x + 0.5) / kx - 0.5;
     const dy = (y + 0.5) / ky - 0.5;
-    return dy >= 60.5 && dy <= 67.5 && dx >= 23 && dx <= 71;
+    return dy >= 57.5 && dy <= 62.5 && dx >= 46 && dx <= 67;
   };
 
-  /** 舊區紅白磚人行道（中環／灣仔／銅鑼灣／九龍舊區） */
+  /** 舊區紅白磚人行道（港島北岸中環／灣仔／銅鑼灣／鰂魚涌；九龍舊區 y≈50–58） */
   const isRedPavement = (x: number, y: number): boolean => {
     const dx = (x + 0.5) / kx - 0.5;
     const dy = (y + 0.5) / ky - 0.5;
-    const hkNorth = dy >= 58.5 && dy <= 67 && dx >= 22 && dx <= 70;
-    const kowloonOld = dy >= 39 && dy <= 52 && dx >= 35 && dx <= 60;
+    const hkNorth = dy >= 57.0 && dy <= 62.5 && dx >= 45 && dx <= 67;
+    const kowloonOld = dy >= 50 && dy <= 58 && dx >= 47 && dx <= 63;
     return hkNorth || kowloonOld;
   };
 

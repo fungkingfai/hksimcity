@@ -54,7 +54,7 @@ import {
   tileXY,
   walkAccessTiles,
 } from './pathfinding';
-import { updateConnectedBuildings } from './placement';
+import { updateConnectedBuildings, worldRevisionOf } from './placement';
 
 /** 相容舊版：其他模組可能 import updateConnectivity */
 export { updateConnectedBuildings as updateConnectivity } from './placement';
@@ -100,6 +100,9 @@ interface LogisticsRuntime {
   cycleDeadline: number;
   /** 本次派遣週期嘅路徑搜尋預算已用完（剩餘派遣留待下個週期） */
   budgetExhausted: boolean;
+  /** 「街口送貨」後備路徑快取（key `fromId:toId`；worldRevision 變更即清） */
+  freightCache: Map<string, number[] | null>;
+  freightSig: string;
 }
 
 /** 一次派遣週期內重用的建築分類清單（避免每個目標都 O(全部建築) 掃描） */
@@ -132,6 +135,8 @@ function runtimeOf(state: GameState): LogisticsRuntime {
       cycle: null,
       cycleDeadline: 0,
       budgetExhausted: false,
+      freightCache: new Map(),
+      freightSig: '',
     };
     // 讀檔後：把仍在途的貨車重新計入目的地容量預留
     for (const cart of state.carts) {
@@ -271,14 +276,31 @@ function canShipFrom(state: GameState, building: Building): boolean {
  * 貨車會停在最近的馬路街口，貨物由職員推車仔上落（findFreightPath 回傳的 path
  * 起點／終點是街口道路格，spawnCart / completeCart 照常扣貨入庫）。
  */
+/**
+ * 貨運路徑：先試建築→建築直達；冇路可達時用「貨車停街口、職員送貨」後備。
+ * 後備路徑係昂貴 A*（480 地圖長途可達 5–6ms），用快取避免同一對建築每次派遣重算。
+ */
 function findFreightPath(state: GameState, from: Building, to: Building): number[] | null {
   const direct = findPathBetweenBuildings(state, from.id, to.id);
   if (direct && direct.length) return direct;
+  const rt = runtimeOf(state);
+  const sig = `${worldRevisionOf()}:${state.buildings.length}:${state.nextBuildingId}`;
+  if (rt.freightSig !== sig) {
+    rt.freightSig = sig;
+    rt.freightCache.clear();
+  }
+  const key = `${from.id}:${to.id}`;
+  if (rt.freightCache.has(key)) return rt.freightCache.get(key) ?? null;
   const fromStops = streetRoadStops(state, from, false);
   const goals = streetRoadStops(state, to);
-  if (!fromStops.length || !goals.length) return null;
-  const hit = findRoadPathToAny(state, fromStops[0], goals);
-  return hit && hit.path.length ? hit.path : null;
+  let path: number[] | null = null;
+  if (fromStops.length && goals.length) {
+    const hit = findRoadPathToAny(state, fromStops[0], goals);
+    path = hit && hit.path.length ? hit.path : null;
+  }
+  if (rt.freightCache.size >= 4096) rt.freightCache.clear();
+  rt.freightCache.set(key, path);
+  return path;
 }
 
 /** 建築是否接上可行人網絡（行人路或馬路；用 pathfinding 快取） */

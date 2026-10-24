@@ -42,11 +42,11 @@ const MODES: ModeDef[] = [
     title: '已有城鎮',
     badge: '新手推薦',
     icon: 'city',
-    desc: `${MAP_LABEL} 大地圖上已有中環起步城鎮：道路、分區、唐樓公屋、街市與基本公共設施齊備，適合先學懂分區與需求。`,
+    desc: `${MAP_LABEL} 真實香港地圖（CSDI／地政總署數據）上已有中環起步城鎮：道路、分區、唐樓公屋、街市與基本公共設施齊備，適合先學懂分區與需求。`,
     points: [
-      `${MAP_LABEL} 大地圖 · 預建中環起步城鎮`,
-      '已有街市、學校、警署等公共設施',
-      '可直接擴建，或重新規劃市區',
+      `${MAP_LABEL} 真實香港地圖 · 預建中環起步城鎮`,
+      '真實海岸線／地形（CSDI 地政總署 DTM 5m 數據）',
+      '已有街市、學校、警署等公共設施，可直接擴建',
     ],
     stats: [
       ['起始庫房', formatMoneyShort(STARTER_TOWN.treasury)],
@@ -59,11 +59,11 @@ const MODES: ModeDef[] = [
     title: '由零開始',
     badge: '挑戰',
     icon: 'sprout',
-    desc: `完全空地圖：冇道路、冇建築、冇任何預置設施；5 名市民＋${formatMoneyShort(START_TREASURY)}，由第一條路開始。地圖 ${MAP_LABEL}（比舊版大約 10 倍面積）。`,
+    desc: `完全空地圖：冇道路、冇建築、冇任何預置設施；5 名市民＋${formatMoneyShort(START_TREASURY)}，由第一條路開始。地圖 ${MAP_LABEL}（約舊版 25 倍面積）。`,
     points: [
       '完全空地：0 道路、0 建築、0 分區',
       '5 名市民、$800 萬起動資金',
-      `地圖 ${MAP_LABEL}（約 ${num(MAP_CELLS)} 格，舊版 10 倍面積）`,
+      `地圖 ${MAP_LABEL}（約 ${num(MAP_CELLS)} 格，舊版 25 倍面積）`,
     ],
     stats: [
       ['起始庫房', formatMoneyShort(START_TREASURY)],
@@ -96,6 +96,7 @@ export function createStartScreen(
         </div>
         <p class="ss-tagline">分區城市建造模擬 · 你劃地，開發商起樓，維港由你塑造</p>
         <span class="ss-map-tag">${MAP_LABEL} 大地圖 · 約 ${num(MAP_CELLS)} 格</span>
+        <span class="ss-data-src">地圖數據：香港地理空間數據共享平台（CSDI）· 地政總署 DTM 5m／建築物輪廓</span>
       </header>
 
       <div class="ss-modes" role="radiogroup" aria-label="開局模式">

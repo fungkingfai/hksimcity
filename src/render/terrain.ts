@@ -189,10 +189,10 @@ export function createTerrainView(state: GameState): TerrainView {
   const kx = width / 96;
   const ky = height / 96;
   /**
-   * 裝飾密度歸一：304² 面積約為 96² 的 10 倍，所有「逐格機率」裝飾（樹木、花草、
-   * 貨櫃、菜田等）都要乘 1/(kx*ky)，令全圖裝飾總數同 96 地圖相若。
+   * 裝飾密度歸一：480² 面積係 96² 的 25 倍。真實香港地圖郊野仍然要夠樹，
+   * 所以目標係「96 地圖的 3 倍」左右（比 1/(kx*ky) 稍密，但唔會 ×25 爆 tris）。
    */
-  const deco = Math.min(1, 1 / (kx * ky));
+  const deco = Math.min(1, 3 / (kx * ky));
   /** 只有「已有城鎮」模式才顯示市區遠景假樓群；empty 由零開始保留完全空地。 */
   const showcaseCity = state.gameMode === 'starter';
   const designToWorld = (dx: number, dy: number): { x: number; z: number } => ({
@@ -533,6 +533,7 @@ export function createTerrainView(state: GameState): TerrainView {
   const waterUniforms = {
     uTime: { value: 0 },
     uWave: { value: 0.02 },
+    uDetailScale: { value: 1 },
     uSunDir: { value: new THREE.Vector3(0.4, 0.8, 0.3) },
     uSunColor: { value: new THREE.Color(0xfff0cf) },
     uSkyColor: { value: new THREE.Color(0x9ec8e8) },
@@ -556,8 +557,10 @@ export function createTerrainView(state: GameState): TerrainView {
       vertexShader: /* glsl */ `
         uniform float uTime;
         uniform float uWave;
+        uniform float uDetailScale;
         uniform float uStorm;
         attribute float aDeep;
+        attribute float aOuter;
         varying float vDeep;
         varying vec3 vWorldPos;
         varying vec3 vNormalW;
@@ -569,13 +572,13 @@ export function createTerrainView(state: GameState): TerrainView {
           float w2 = sin((p.x + p.z) * 2.9 + t * 2.1);
           float w3 = sin(p.z * 0.7 - t * 0.55) * 0.6;
           float h = (w1 * 0.6 + w2 * 0.3 + w3 * 0.25) * uWave * (1.0 + uStorm * 2.4);
-          p.y += h;
+          p.y += h * (1.0 - aOuter);
           float dx1 = 1.6 * cos(p.x * 1.6 + t * 1.3) * cos(p.z * 1.2 - t * 0.9);
           float dz1 = -1.2 * sin(p.x * 1.6 + t * 1.3) * sin(p.z * 1.2 - t * 0.9);
           float dx2 = 2.9 * cos((p.x + p.z) * 2.9 + t * 2.1);
           float dhx = (dx1 * 0.6 + dx2 * 0.3) * uWave * (1.0 + uStorm * 2.4);
           float dhz = (dz1 * 0.6 + dx2 * 0.3) * uWave * (1.0 + uStorm * 2.4);
-          vNormalW = normalize(vec3(-dhx, 1.0, -dhz));
+          vNormalW = aOuter > 0.5 ? vec3(0.0, 1.0, 0.0) : normalize(vec3(-dhx, 1.0, -dhz));
           vec4 wp = modelMatrix * vec4(p, 1.0);
           vWorldPos = wp.xyz;
           vDeep = aDeep;
@@ -584,6 +587,7 @@ export function createTerrainView(state: GameState): TerrainView {
       `,
       fragmentShader: /* glsl */ `
         uniform float uTime;
+        uniform float uDetailScale;
         uniform vec3 uSunDir;
         uniform vec3 uSunColor;
         uniform vec3 uSkyColor;
@@ -607,7 +611,7 @@ export function createTerrainView(state: GameState): TerrainView {
           vec3 N = normalize(vNormalW);
           float camDist = length(cameraPosition - vWorldPos);
           // 遠景淡出細節，避免水波在遠處產生摩爾紋
-          float detail = 1.0 - smoothstep(35.0, 130.0, camDist);
+          float detail = 1.0 - smoothstep(35.0 * uDetailScale, 130.0 * uDetailScale, camDist);
           float rip = sin(vWorldPos.x * 9.0 + uTime * 6.0) * sin(vWorldPos.z * 8.0 - uTime * 5.0);
           N = normalize(N + vec3(rip * 0.07 * uRain, 0.0, rip * 0.06 * uRain) * detail);
           float fres = pow(clamp(1.0 - max(dot(N, V), 0.0), 0.0, 1.0), 3.0);
@@ -625,6 +629,8 @@ export function createTerrainView(state: GameState): TerrainView {
           // 岸邊白沫（近岸淺水 + 雨天／颱風）
           float foam = smoothstep(0.55, 0.95, 1.0 - vDeep) * (0.15 + uRain * 0.5 + uStorm * 0.5);
           foam *= 0.5 + 0.5 * sin(vWorldPos.x * 3.0 + vWorldPos.z * 2.0 + uTime * 2.5);
+          // 遠處 damp foam，避免近岸白沫在 overview 變成摩爾紋
+          foam *= 0.3 + 0.7 * detail;
           col += vec3(0.82, 0.9, 0.92) * foam * (0.25 + uDaylight * 0.5);
           // 雨天的水面灰暗
           col *= 1.0 - uRain * 0.1 - uStorm * 0.12;
@@ -647,6 +653,47 @@ export function createTerrainView(state: GameState): TerrainView {
   waterMesh.frustumCulled = false;
   track(waterMesh);
   group.add(waterMesh);
+
+  // ───────────── 3b. 無邊海面（地圖外的外框 quads，用水 shader 同一材質） ─────────────
+  // 地圖尺寸 960×960；overview 時地圖外係天空背景會見到方形邊。加四塊大 quads
+  // 圍住地圖外圍（-5000..5000），並用水 shader 同一 deep 顏色 + 霧 → 無邊海面。
+  // 注意：唔可以再放一大塊響地圖下面（同地形深度差太細會 zoom out 時 z-fight）。
+  {
+    const halfW = (width * TILE) / 2;
+    const halfH = (height * TILE) / 2;
+    const ext = Math.max(halfW, halfH) + 4200;
+    const rects: [number, number, number, number][] = [
+      // x0, z0, x1, z1
+      [-ext, -ext, ext, -halfH + 0.01], // 北
+      [-ext, halfH - 0.01, ext, ext], // 南
+      [-ext, -halfH, -halfW + 0.01, halfH], // 西
+      [halfW - 0.01, -halfH, ext, halfH], // 東
+    ];
+    const pos: number[] = [];
+    const deep: number[] = [];
+    const outerAttr: number[] = [];
+    const idx: number[] = [];
+    rects.forEach(([x0, z0, x1, z1]) => {
+      const base = pos.length / 3;
+      pos.push(x0, WATER_SURFACE_Y, z0, x1, WATER_SURFACE_Y, z0, x0, WATER_SURFACE_Y, z1, x1, WATER_SURFACE_Y, z1);
+      for (let k = 0; k < 4; k++) {
+        // aDeep = 0：外框用淺水色，同地圖邊緣水面顏色一致（無邊海面）
+        deep.push(0);
+        outerAttr.push(1);
+      }
+      idx.push(base, base + 2, base + 1, base + 1, base + 2, base + 3);
+    });
+    const outerGeo = track(new THREE.BufferGeometry());
+    outerGeo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    outerGeo.setAttribute('aDeep', new THREE.Float32BufferAttribute(deep, 1));
+    outerGeo.setAttribute('aOuter', new THREE.Float32BufferAttribute(outerAttr, 1));
+    outerGeo.setIndex(idx);
+    const outerMeshes = new THREE.Mesh(outerGeo, waterMat);
+    outerMeshes.name = 'terrain-outer-sea';
+    outerMeshes.frustumCulled = false;
+    track(outerMeshes);
+    group.add(outerMeshes);
+  }
 
   // ───────────── 4. 植被／道具擺放 ─────────────
 
@@ -846,7 +893,8 @@ export function createTerrainView(state: GameState): TerrainView {
           if (designX < region.x0 || designX > region.x1 || designY < region.y0 || designY > region.y1) continue;
           const stacks = 3;
           for (let s = 0; s < stacks; s++) {
-            if (h(3400 + s) > deco * 0.66) continue; // 304 地圖：貨櫃總數歸一
+            // 真實葵涌碼頭區塊（480 地圖約 24×19 格）；每格約 0.6 疊貨櫃
+            if (h(3400 + s) > 0.2) continue;
             L.container.push({
               tile: i,
               x: wx + jx(401 + s) * 0.5,
@@ -1031,63 +1079,67 @@ export function createTerrainView(state: GameState): TerrainView {
       office: [],
     };
 
-    // ── 市區遠景假樓群（只限「已有城鎮」starter 模式；empty 模式完全唔生成） ──
-    //  1. spawn 周邊淨空 + 密度／高度漸變（換算成世界尺度，304 地圖唔會過大）；
-    //  2. 只有 HK_REGIONS 內（中環／尖沙咀／觀塘／荃灣天際線與新市鎮）有高樓；
-    //     其餘 urban/reclaimed 區只有少量低層舊樓；
-    //  3. 所有機率 × deco，令 304² 大地圖的假樓總數同 96 地圖相若；
-    //  4. road／building 佔用格照舊在 rebuildOccupancy 隱藏。
+    // ── 真實建築密度樓群（starter 模式；empty 由零開始完全冇） ──
+    //  用 CSDI／地政總署真實數據：tile.density（0..255 建築覆蓋率）、
+    //  tile.buildingHeight（米，平均建築高度）決定每格樓宇數量／高度／種類。
+    //  - density 高（市區）→ 每格 1–2 座；郊區 density 低 → 稀疏或冇樓
+    //  - 杏花邨／柴灣／小西灣等真實高層住宅：density 高 + buildingHeight 高 → 住宅塔樓
+    //  - 中環／尖沙咀／觀塘 skyline 區 + 高樓 → 玻璃商廈（office）
+    //  - 全部 InstancedMesh，額外 3 draw calls
     if (showcaseCity) {
       const skylineRegions = HK_REGIONS.filter((r) => r.kind === 'skyline' || r.kind === 'newTown');
-      const spawnDx = (state.spawn.x + 0.5) / kx - 0.5;
-      const spawnDy = (state.spawn.y + 0.5) / ky - 0.5;
-      // 96 地圖的 7 格淨空 / 9 格漸變 → 304 地圖按設計座標縮小，保持相同世界距離
-      const worldToDesign = 1 / Math.sqrt(kx * ky);
-      const SPAWN_CLEAR = 7 * worldToDesign;
-      const TAPER_LEN = 9 * worldToDesign;
       for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
           const i = y * width + x;
           const tile = state.tiles[i];
-          if (tile.terrain !== 'urban' && tile.terrain !== 'reclaimed') continue;
-          const { x: wx, z: wz } = tileWorld(x, y, width, height);
-          const h = hash(x, y, seed + 601);
+          if (tile.terrain === 'water') continue;
+          const density = tile.density ?? 0;
+          const bh = tile.buildingHeight ?? 0;
+          if (density < 28 || bh < 4) continue;
+          if (tile.road || tile.buildingId >= 0) continue;
           const designX = (x + 0.5) / kx - 0.5;
           const designY = (y + 0.5) / ky - 0.5;
-          const cheb = Math.max(Math.abs(designX - spawnDx), Math.abs(designY - spawnDy));
-          if (cheb <= SPAWN_CLEAR) continue;
-          const euclid = Math.hypot(designX - spawnDx, designY - spawnDy);
-          const taper = clamp01((euclid - SPAWN_CLEAR) / TAPER_LEN);
-          const inRegion = skylineRegions.some(
+          const r1 = hash(x, y, seed + 601);
+          const p = Math.min(1, (density - 28) / 180);
+          // 覆蓋率／樓高越高，出現機會越大（仍保留公園、空地、後巷）
+          const gate = 0.1 + p * 0.38 + Math.min(1, bh / 180) * 0.12;
+          if (r1 > gate) continue;
+          const { x: wx, z: wz } = tileWorld(x, y, width, height);
+          const top = topY[i];
+          const inSkyline = skylineRegions.some(
             (r) => designX >= r.x0 && designX <= r.x1 && designY >= r.y0 && designY <= r.y1,
           );
-          const distToHarbour = Math.abs(designY - 55);
-          let kind: 'tower' | 'block' | 'office' = 'block';
-          let heightUnits = 0;
-          if (inRegion) {
-            // 維港兩岸／新市鎮天際線：機率 × deco（總數同 96 地圖相若）
-            const gate = (0.06 + 0.82 * taper) * deco;
-            if (h > gate) continue;
-            kind = h < 0.45 ? 'tower' : h < 0.72 ? 'office' : 'block';
-            heightUnits = (2.6 + h * h * 14 + clamp01((14 - distToHarbour) / 10) * 3) * (0.55 + 0.45 * taper);
-            if (h < 0.1) heightUnits += 8 * taper;
-            if (h > 0.95 && taper < 0.5) heightUnits *= 0.6;
-          } else {
-            // 一般可建市區：少量低層舊樓，大部分是等待發展的空地
-            if (h > 0.18 * taper * deco) continue;
-            kind = h < 0.06 ? 'tower' : h < 0.16 ? 'office' : 'block';
-            heightUnits = (1.0 + h * 2.0) * (0.6 + 0.4 * taper);
-          }
+          const hUnits = Math.min(27, Math.max(1.1, 1.1 + bh * 0.072)) * (0.9 + hash(x, y, seed + 607) * 0.22);
+          let kind: 'tower' | 'block' | 'office';
+          if ((inSkyline && bh >= 95 && density >= 140) || bh >= 190) kind = 'office';
+          else if (bh >= 42 || density >= 110) kind = 'tower';
+          else kind = 'block';
+          const wBase = 0.85 + (density / 255) * 1.0;
+          const rot = Math.floor(hash(x, y, seed + 604) * 4) * (Math.PI / 2);
           buildingPlacements[kind].push({
             tile: i,
-            x: wx + (hash(x, y, seed + 602) - 0.5) * 0.5,
-            y: topY[i] + 0.006,
-            z: wz + (hash(x, y, seed + 603) - 0.5) * 0.5,
-            h: heightUnits,
-            w: (1.15 + hash(x, y, seed + 606) * 0.5) * (kx > 1.5 ? 1.55 : 1),
-            rot: Math.floor(hash(x, y, seed + 604) * 4) * (Math.PI / 2),
-            shade: 0.9 + hash(x, y, seed + 605) * 0.3,
+            x: wx + (hash(x, y, seed + 602) - 0.5) * 0.42,
+            y: top + 0.006,
+            z: wz + (hash(x, y, seed + 603) - 0.5) * 0.42,
+            h: hUnits,
+            w: wBase * (0.9 + hash(x, y, seed + 606) * 0.3),
+            rot,
+            shade: 0.86 + hash(x, y, seed + 605) * 0.3,
           });
+          // 高密度市區：再加一幢矮一些的鄰樓，令街區更有質感
+          if (density >= 190 && hash(x, y, seed + 608) < 0.42) {
+            const kind2: 'block' | 'tower' = bh >= 55 ? 'tower' : 'block';
+            buildingPlacements[kind2].push({
+              tile: i,
+              x: wx + 0.58 + (hash(x, y, seed + 610) - 0.5) * 0.3,
+              y: top + 0.006,
+              z: wz - 0.6 + (hash(x, y, seed + 611) - 0.5) * 0.3,
+              h: Math.max(1.4, hUnits * (0.45 + hash(x, y, seed + 612) * 0.2)),
+              w: Math.max(0.8, wBase * 0.65),
+              rot: (rot + Math.PI / 2) % (Math.PI * 2),
+              shade: 0.84 + hash(x, y, seed + 613) * 0.28,
+            });
+          }
         }
       }
     }
@@ -1240,8 +1292,9 @@ export function createTerrainView(state: GameState): TerrainView {
   // 「由零開始」empty 模式：完全唔生成人造地標（大佛／摩天輪／鐘樓／會展／青馬大橋等），
   // 只保留自然地形；starter 模式照舊保留。
   const landmarks: { mesh: THREE.Mesh; spin?: number }[] = [];
-  // 304 地圖：地理尺度 ×kx，地標亦相應放大（96 地圖時 = 1）
-  const landmarkScale = Math.sqrt(kx * ky);
+  // 真實地理 480 地圖：地標圖示只需略為放大（貼合 tiles／玩家建築尺度），
+  // 唔可以照 design 倍率 ×5，否則凌霄閣／摩天輪會變巨人。
+  const landmarkScale = Math.min(1.9, 1 + (Math.sqrt(kx * ky) - 1) * 0.18);
   const addLandmark = (geo: THREE.BufferGeometry, mat: THREE.Material, dx: number, dy: number, yOff: number, rotY = 0, scale = 1, castShadow = true): THREE.Mesh => {
     const mesh = new THREE.Mesh(track(geo), mat);
     const { x: wx, z: wz } = designToWorld(dx, dy);
@@ -1357,12 +1410,15 @@ export function createTerrainView(state: GameState): TerrainView {
         const alongX = tx1 - tx0 >= ty1 - ty0;
         const centerX = Math.round((tx0 + tx1) / 2);
         const centerY = Math.round((ty0 + ty1) / 2);
-        const halfW = 1; // 3 格闊
+        // 真實赤鱲角機場有兩條平行跑道；沿垂直方向各偏移約 4 格
+        const halfW = 1; // 每條跑道 3 格闊
+        const strips = [-2, 2];
+        for (const strip of strips) {
         for (let ty = ty0; ty <= ty1; ty++) {
           for (let tx = tx0; tx <= tx1; tx++) {
             if (alongX) {
-              if (Math.abs(ty - centerY) > halfW) continue;
-            } else if (Math.abs(tx - centerX) > halfW) continue;
+              if (Math.abs(ty - centerY - strip) > halfW) continue;
+            } else if (Math.abs(tx - centerX - strip) > halfW) continue;
             const i = ty * width + tx;
             if (state.tiles[i].terrain === 'water') continue;
             const { x: wx, z: wz } = tileWorld(tx, ty, width, height);
@@ -1379,11 +1435,13 @@ export function createTerrainView(state: GameState): TerrainView {
             }
           }
         }
+        }
       } else {
         // 機場客運大樓（世界尺度，跟隨地圖放大）
-        const term = kx;
-        terminalBlocks.push({ x: cxm, z: czm, y: gy + 0.25 * term, w: 1.9 * term, h: 0.55 * term, d: 1.1 * term, rot: 0.1 });
-        terminalBlocks.push({ x: cxm + 2.2 * kx, z: czm - 1.1 * ky, y: gy + 0.16 * term, w: 1.1 * term, h: 0.36 * term, d: 0.8 * term, rot: -0.2 });
+        // 客運大樓：真實約 1.8km 長、60m 高（1 世界單位 ≈ 50m）→ 唔好按 design 倍率 ×5
+        const termH = 1.15;
+        terminalBlocks.push({ x: cxm, z: czm, y: gy + termH / 2, w: 1.9 * kx, h: termH, d: 1.1 * ky, rot: 0.1 });
+        terminalBlocks.push({ x: cxm + 2.2 * kx, z: czm - 1.1 * ky, y: gy + 0.4, w: 1.1 * kx, h: 0.8, d: 0.8 * ky, rot: -0.2 });
         for (let k = 0; k < 2; k++) {
           const pp = designToWorld(region.x0 + 2.5 + k * 2.4, region.y0 + 2.1 + (k % 2) * 1.2);
           planes.push({ x: pp.x, z: pp.z, y: gy + 0.12, rot: 0.4 + k * 0.6 });
@@ -1455,7 +1513,7 @@ export function createTerrainView(state: GameState): TerrainView {
       planes.forEach((p, i) => {
         dummy.position.set(p.x, p.y, p.z);
         dummy.rotation.set(0, p.rot, 0);
-        dummy.scale.setScalar(1.15 * Math.min(2, landmarkScale));
+        dummy.scale.setScalar(1.0);
         dummy.updateMatrix();
         planeMesh.setMatrixAt(i, dummy.matrix);
       });
@@ -1999,6 +2057,7 @@ export function createTerrainView(state: GameState): TerrainView {
       const storm = clock.weather === 'storm' ? clamp01(0.35 + clock.weatherIntensity * 0.65) : 0;
       const rain = clock.weather === 'rain' ? 0.4 + clock.weatherIntensity * 0.6 : storm;
 
+      waterUniforms.uDetailScale.value = mapViewScale(width, height);
       waterUniforms.uTime.value = time;
       waterUniforms.uWave.value = 0.008 + wind * 0.008;
       waterUniforms.uStorm.value = storm;
@@ -2033,7 +2092,7 @@ export function createTerrainView(state: GameState): TerrainView {
         if (!mats) continue;
         for (const m of mats) {
           const lm = m as THREE.MeshLambertMaterial;
-          if (lm.emissiveIntensity !== undefined) lm.emissiveIntensity = emissive * (kind === 'tower' ? 0.9 : kind === 'block' ? 0.65 : 0.55);
+          if (lm.emissiveIntensity !== undefined) lm.emissiveIntensity = emissive * (kind === 'tower' ? 1.45 : kind === 'block' ? 1.0 : 0.85);
         }
       }
       // 地標摩天輪轉動

@@ -1,190 +1,171 @@
-# 《維港之城》304×304 大地圖改版筆記（LARGE_MAP_NOTES.md）
+# 《維港之城》大地圖改版筆記（LARGE_MAP_NOTES.md，Round 4）
 
-> 文件版本：1.0（2026-10-22）｜撰寫：game-designer
-> 專案：`hk-city/`｜用途：記錄第三輪改版（304×304 大地圖、完全空地 empty、minimap 導航、save v4、AUTO_DEVELOP 放大）的設計與實作對照；供 Lead／world-dev／ui-dev／systems-dev／QA 查閱。
-> 相關文件：`GAME_DESIGN_HK.md`（§2 地圖、§12 存檔、§13 平衡）、`UI_SPEC_HK.md`（§5／§6 minimap、§附錄 A 快捷鍵）、`ZONING_GAMEPLAY.md`（§3–§7 分區開發與開局）。
-> 標記：**✅ 已實作（依 `src/` 核對）**｜**⚠️ 文件規格（待實作／待確認）**｜**📌 已知限制／不一致**。
-
----
-
-## 1. 改版摘要（Round 2 96×96 → Round 3 304×304）
-
-| 項目 | Round 2（96×96） | Round 3（304×304） |
-|---|---|---|
-| 地圖 | 96×96＝9,216 格 | **304×304＝92,416 格**（面積約 10 倍，線性 ×3.1667） |
-| 世界尺寸 | 192×192 世界單位 | **608×608**（`WORLD_SPAN=GRID_WIDTH×TILE_SIZE`） |
-| 地理特徵 | 以 96 設計座標繪製 | 同一設計座標**線性 ×3.17** 縮放；河流／維港在格數上約闊 3.17 倍 |
-| empty 模式 | 有預置 spawn 小街區／隧道 | **完全空地**：零道路、零建築、零分區、無人造地標／機場／貨櫃碼頭；只有自然地形、樹木、海面船隻 |
-| 導航 | 滑鼠平移／縮放 | 新增 **minimap（右下 304×304）＋快捷 O 全圖／P 市中心**；相機 zoom out 範圍 ×3.17 |
-| 存檔 | v2 完整 `GameState` JSON | **v4 精簡格式**：seed＋稀疏道路／分區變更，約 80–140KB；96×96 舊檔不兼容 |
-| 自動開發 | 每日 5 棟、每區 2、上限 420 | **每日 15 棟、每區 6、上限 1,200**（面積 ×10 同步放大） |
-| 效能 | 96 地形 | terrain tris 3.43M→**588k**；empty overview 495k tris／37 calls；starter ≈705k tris／444–454 calls；sim 正常幀平均 **≈0.23ms**（304 starter 573 人）；首次 worldgen **1.5–2 秒**（載入畫面） |
+> 文件版本：2.0（2026-10-24）｜撰寫：game-designer
+> 專案：`hk-city/`｜用途：記錄 Round 3（304 程序化）→ **Round 4（480×480 真實地理）** 的實作對照、效能、導航、存檔與已知限制；供 Lead／world-dev／ui-dev／systems-dev／QA 查閱。
+> 相關文件：`REAL_GEO_DATA.md`（數據來源與生成流程）、`GAME_DESIGN_HK.md`（§2 地圖／§12 存檔）、`UI_SPEC_HK.md`（§5 minimap）、`ZONING_GAMEPLAY.md`（真實地形與分區）。
+> 標記：**✅ 已實作（依 `src/` 核對）**｜**⚠️ 文件規格**｜**📌 已知限制／不一致**。
 
 ---
 
-## 2. 地圖尺度與座標系（✅ 已實作）
+## 1. 三輪地圖演進（摘要）
+
+| 項目 | Round 2（96×96） | Round 3（304×304） | **Round 4（480×480）** |
+|---|---|---|---|
+| 地圖 | 96×96＝9,216 格 | 304×304＝92,416 格 | **480×480＝230,400 格**（約 96 版 25 倍面積） |
+| 地理來源 | 程序化香港輪廓 | 96 設計座標 ×3.17 程序化 | **CSDI／地政總署真實數據**：DTM 5m＋342,233 個建築輪廓 |
+| 每格實際距離 | — | — | **140m**（涵蓋 67.2km×67.2km） |
+| 可建面積 | ≥45% | ≥52% | **22.4%**（山多平地少，香港真實比例） |
+| 世界尺寸 | 192 | 608 | **960 世界單位**（`WORLD_SPAN=960`） |
+| 樓群 | 假樓群 backdrop | 假樓群 | **真實密度樓群 ~4,089 座**（3 InstancedMesh） |
+| 開局 | 中環空地 | starter 棋盤／empty 小街區 | starter **連通優先道路網**＋均衡四區；empty **完全 0/0/0** |
+| 導航 | 滑鼠 | minimap＋O/P | minimap **480 canvas**＋真實地形；O/P 不變 |
+| 存檔 | v2 | v4 compact | **v5 compact**（格式同 v4，版本／尺寸更新） |
+| 地形 render | — | terrain 588k tris | **starter overview 1.327M tris／402 calls**；empty 1.032M／37 calls |
+
+---
+
+## 2. 480 地圖尺度與座標（✅ 已實作）
 
 | 常數／概念 | 值 | 說明 |
 |---|---|---|
-| `GRID_WIDTH`／`GRID_HEIGHT` | **304／304** | `config.ts` |
-| 總格數 | **92,416** | 約 96×96 的 10 倍面積 |
+| `GRID_WIDTH`／`GRID_HEIGHT` | **480／480** | 230,400 格 |
+| `GAME_VERSION` | **5** | save v5 |
 | `TILE_SIZE` | 2 | 每格 2 世界單位 |
-| `WORLD_SPAN` | **608** | 304×2；渲染、相機、霧、天空以此換算 |
-| `MAP_SCALE` | **304/96 ≈ 3.1667** | 渲染模組用它換算霧、天空、相機距離、裝飾密度 |
-| `HK_DESIGN_SIZE` | **96** | worldgen 仍以 96×96 設計座標繪製香港地理，再線性縮放至 304 |
-| 設計座標 → 格座標 | `tile = design × (304/96)` | 地名、山脈、隧道、填海區、spawn 全部沿用設計座標 |
-| spawn | 設計 **(44, 63)**（中環） | 換算格座標約 **(139, 199)**；由 `HK_SPAWN_DESIGN` 提供 |
-| 過海隧道 | 設計 x≈33／52／70 | 換算格座標約 x≈104／164／221；只存在於 starter 模式 |
+| `WORLD_SPAN` | **960** | 480×2 |
+| `MAP_SCALE` | **5**（480/96） | 渲染霧、天空、相機距離、裝飾密度換算 |
+| `HK_DESIGN_SIZE` | 96 | worldgen 設計座標基準（真實數據也先轉 96 設計座標） |
+| 每格實際距離 | **140m** | `tileMeters=140.0` |
+| 地圖範圍 | HK1980 E 798,275–865,475、N 790,400–857,600 | EPSG:2326 |
+| spawn | **(259, 299)**（中環） | `DATA.spawn`；`HK_SPAWN_DESIGN` 由 `state.width/96` 反算 |
+| 過海隧道 | 西隧／紅隧／東隧（設計 x 49.4／54.4／59.8） | 只限 starter；empty 完全冇道路 |
 
-> 📌 **地圖「拉伸」**：地理特徵是按 96 設計座標**等比例放大**（不是重新繪製 304 版本），所以維港、河流會比 96 版闊約 3.17 倍；這是刻意選擇（保留香港輪廓、節省 worldgen 重寫成本），不是 bug。設計文件中的座標（例如山脈 y 範圍、地名錨點）預設都是**設計座標**，實作時要乘 `MAP_SCALE`。
+**世界生成（✅）**
 
----
-
-## 3. 世界生成與 empty 模式（✅ 已實作）
-
-### 3.1 worldgen 縮放
-
-- `generateWorld(seed, width, height, options)` 仍以 `HK_DESIGN_SIZE=96` 的設計座標畫海岸線、山脈、填海、地名；輸出時按 `width/96`、`height/96` 縮放。
-- 渲染裝飾密度歸一：樹木／花草／貨櫃／菜田等「逐格機率」裝飾乘 `1/(kx×ky)`（`deco = min(1, 1/(kx*ky))`），令全圖裝飾總數與 96 地圖相若，避免 304 地圖爆 draw call。
-- 地名標籤、隧道、填海區、機場、貨櫃碼頭都用同一套設計座標資料（`HK_PLACES`／`HK_TUNNELS`／`HK_REGIONS`／`HK_LANDMARKS`）。
-
-### 3.2 empty 模式（由零開始）
-
-- `createGameState(seed, mode='empty')` → `generateWorld(..., { starterRoads: mode === 'starter' })`。
-- `starterRoads:false` 時**不預置**：spawn 小街區、行人路、3 條過海隧道、隧道引道。
-- 渲染層 `showcaseCity = state.gameMode === 'starter'` 控制以下人造物**只在 starter 顯示**（empty 全部隱藏）：
-  - 市區遠景假樓群（backdrop skyline）；
-  - 貨櫃碼頭貨櫃堆；
-  - 機場／跑道／客運大樓／飛機；
-  - 山頂凌霄閣、天壇大佛、鐘樓、會展等 `HK_LANDMARKS`；
-  - 「市區農田」裝飾。
-- empty 保留：自然地形、山脈、海岸、樹林、海面船隻（漁船／貨輪／天星小輪式裝飾，純視覺）。
-- empty 起始：**5 名市民（設計要求）＋ $8,000,000**；畫面提示「先鋪路再劃分區」。
-- 📌 **注意（與程式碼不一致，見 §9）**：目前 `createGameState('empty')` 的 `citizens = []`，`population.ts` 亦只在有住宅空位時才遷入，**未見「5 名市民」初始寫入**；UI 文案（start-screen／help-panel／save-panel）已寫 5 名，需補 seeding 或改文案。
-
-### 3.3 starter 模式（已有城鎮）
-
-- 仍然預建：棋盤道路＋四色分區＋公共設施＋自動建築；`STARTER_TOWN` 數值不變（$6,500,000、warm-up 10 日、目標人口 120）。
-- Round 3 rebalance（✅ 已實作於 `starter-town.ts`）：
-  - 公共設施 **9 項**（新增醫院）：發電廠、水務、警署、消防局、學校、公園、巴士總站、港鐵站、醫院；
-  - 自動建築 **30 棟**：公共屋邨×2、唐樓×4、劏房×2、便利店×3、茶餐廳×3、街市、超市、商廈、貨倉×2、進口商行、食品廠、工廈×2、**農田×7**；
-  - 倉庫起始庫存：**食品 520、日用品 180**；街市／超市／便利店起始 食品 80、日用品 50；
-  - 商業／工業分區加大、農田分區目標 ≥48 格（避免新手缺糧、失業）。
+- `generateRealWorld(seed, options)` 解碼 `hk-map-data.generated.ts`：
+  - `terrainRle` → 10 種地形；`elevation`（water=0，陸地 0.3 + byte/255×0.62）；
+  - `density` → `Tile.density`（0..255，0 時 undefined）；
+  - `buildingHeight` → `Tile.buildingHeight`（byte → 0..500m，>2m 才寫入）；
+  - `labels`／`landmarks`／`tunnels`／`regions` 轉設計座標 export（`HK_PLACES`／`HK_LANDMARKS`／`HK_TUNNELS`／`HK_REGIONS`）。
+- starter 才加 3 條過海隧道＋入口引道；empty 模式**零道路**。
+- 可建地 22.4%（grass／urban／reclaimed／fertile／forest／hill），真正平坦地（grass／urban／reclaimed／fertile）更少；**唔可以再寫「可建 ≥45%／52%」**。
 
 ---
 
-## 4. 相機與渲染（✅ 已實作）
+## 3. 真實地形分類與限制（🔗 詳見 `REAL_GEO_DATA.md`）
 
-| 項目 | 值／行為 |
+- DTM 5m（35m 取樣、4×4/tile）→ 水域／山／林地／平地；建築輪廓 → density／height。
+- 水塘水面 DTM 不含，腳本用 9 個水塘橢圓＋2 條河流（城門河等）補回 water。
+- 實際分佈：water **75.6%**、hill 7.5%、urban 5.2%、grass 4.5%、forest 3.8%、mountain 1.7%、reclaimed／fertile 各 0.7%。
+- density >0 的格 21,146（9.2%）；render 門檻 `density ≥ 28 且 bh ≥ 4m`。
+- **只作視覺／統計**：density／buildingHeight 不影響人口、稅收、地價或分區開發；玩家仍然要自己劃區。
+
+---
+
+## 4. starter／empty（✅ 已實作）
+
+### 4.1 starter：連通優先道路網
+
+Round 4 真實海岸線＋山地令「隨機鋪街」易斷開（QA 修好之前 9 個路網分量嘅 P0）。`starter-town.ts` 改為：
+
+1. spawn 若不可建（貼海）→ 找最近可建格作城鎮中心。
+2. `connectedComponent(spawn, ROAD_RADIUS=14)`：先取 spawn 所屬可建地**連通分量**。
+3. `buildConnectedRoads()`：以 **GRID_STEP=3** 的節點格網生長道路，只鋪在同一分量內；再用 BFS 連接孤立節點 → **保證全鎮同一路網**。
+4. `fillZones()`：只在道路可達（BFS 路距 ≤2）的格劃區；按方位分住宅／商業／工業；農田只可 grass／fertile，並最少補到 24 格。
+5. 公共設施 **10 項**（全部貼近市中心／住宅、連通路網）：發電廠、水務設施、警署、消防局、**學校×2**、公園、巴士總站、港鐵站、**醫院**。
+6. 自動建築 **34 棟**：公共屋邨×3、唐樓×5、劏房×3、便利店×3、茶餐廳×3、街市×2、超市、商廈、貨倉×2、進口商行、食品廠、工廈×2、**農田×7**。
+7. 倉庫起始庫存：**食品 520、日用品 180**；店舖食品 80、日用品 50。
+8. 庫房 **$6,500,000**；warm-up **10 日**；config `targetPopulation=120`，**QA 實測開局約 146 人**（健康增長，非 bug）。
+
+> 驗收重點：全鎮道路同一分量、公共設施覆蓋住宅、市民可通勤、農田有工人；不再出現「斷開街網」或「服務覆蓋 0%」。
+
+### 4.2 empty：完全 0/0/0
+
+- `generateRealWorld({starterRoads:false})` → **零道路、零建築、零分區、零隧道**；**唔會**顯示真實樓群／地標／機場／貨櫃碼頭（render `showcaseCity=false`）。
+- 保留：真實地形、山脈、海岸、樹木、海面船隻；5 名市民（設計要求；📌 seeding 仍未見於 `createGameState`，見 §8）。
+- 庫房 **$8,000,000**；玩法提示「沿平地發展、先鋪路再劃區」；大地圖靠 minimap O/P 導航。
+
+---
+
+## 5. Render：真實樓群、雪線、海面、地名 LOD（✅ 已實作）
+
+| 項目 | 行為 |
 |---|---|
-| 相機 FOV | 46° |
-| 最近距離 `MIN_DISTANCE` | 16 |
-| 最遠距離 `MAX_DISTANCE` | **260 × MAP_SCALE ≈ 823**（96 版約 260） |
-| far plane | 600 × MAP_SCALE ≈ **1,900** |
-| 初始距離 | 桌面 90；手機 110（俯角 0.9） |
-| `fitMap()`（O） | 目標置中、距離 = MAX×0.92≈**757**、pitch 1.12–1.32、yaw −45° |
-| `focusTile(x,y)` | minimap 點擊／P 市中心；距離夾到 ≤90、pitch ≥0.78 |
-| 霧／天空 | `world-utils.fogRange()` 用 `scale=MAP_SCALE` 換算，保持視覺密度 |
-| 陰影 | `sunLight.shadow.camera.far` 已加大至 420；lit 模式仍受效能限制 |
-| 裝飾密度 | 逐格機率 ×`deco`（≈1/(kx·ky)），全圖總數與 96 版相若 |
+| 真實密度樓群 | `showcaseCity`（starter）才生成；用 `tile.density`＋`tile.buildingHeight`；門檻 density≥28／bh≥4；分 **3 個 InstancedMesh**：`tower` 住宅塔樓／`block` 低層／`office` 玻璃商廈；約 **4,089 座**（總 3 draw calls） |
+| 樓宇高度 | `bh` 0..500m → hUnits（1.1–27），skyline 區＋高樓 → office；高密度市區再加一幢矮鄰樓 |
+| **白色階梯修正** | 雪線改為 **elevation ≥ 0.8**（0.8–0.92 漸變）；只在 `weather='snow'` 或冬季 `tempC ≤ 6°C` 上雪；低地另有霜 `snowCover()`（12°C 以下）；不再出現全圖白色階梯 |
+| 無邊海面 | 地圖外圍加 `terrain-outer-sea`（aOuter=1、aDeep=0），與地圖邊緣水面同色，隱藏 480 地圖邊界 |
+| 地名 LOD | TOP 16（中環、尖沙咀、旺角、觀塘、荃灣、沙田、屯門、元朗、大埔、將軍澳、東涌、維多利亞港、大帽山、太平山、獅子山、赤鱲角）任何距離顯示；major 34 個中景；其餘近景；`aMajor` attribute＋smoothstep |
+| 機場／貨櫃碼頭 | 真實 position（赤鱲角雙跑道、葵涌貨櫃碼頭）只在 starter 顯示；empty 隱藏 |
+| minimap 地形 | 480 canvas、用 `Tile.terrain` 真地形底色＋道路／分區／建築點／視野框；250ms 節流、地形 offscreen 快取 |
 
-**效能（Lead 實測，供 QA 對照）**
+**效能（Lead 實測）**
 
 | 場景 | 三角形 | Draw calls | 備註 |
 |---|---|---|---|
-| terrain（304） | **588k**（優化前 3.43M） | — | 地形合併＋LOD／密度歸一 |
-| empty overview（O 全圖） | **495k** | **37** | 完全空地圖拉遠 |
-| starter（正常遊玩） | **≈705k** | **444–454** | 預建城市＋道路＋建築 |
-| sim 正常幀 | — | — | 平均 **≈0.23ms**（304 starter、573 人） |
-| 首次 worldgen | — | — | **1.5–2 秒**（index.html boot screen「正在生成 304×304 香港地圖…」） |
+| starter overview（O 全圖） | **1.327M** | **402** | 真實樓群＋地形＋道路 |
+| empty overview（O 全圖） | **1.032M** | **37** | 完全空地圖、無樓群 |
+| sim 正常幀 | — | — | 304 舊版約 0.23ms；480 版以 QA 實測為準 |
+| 首次 worldgen | — | — | 480×480 解碼＋生成，**約 1.5–2 秒**（boot screen「正在生成 480×480 香港地圖」） |
 
 ---
 
-## 5. Minimap 導航（✅ 已實作）
+## 6. Minimap（480 版）
 
-| 項目 | 規格 |
-|---|---|
-| 位置 | 桌面：畫布**右下角**浮動；手機：**132px** 小地圖，預設**收起** |
-| 畫布 | 304×304（canvas 內部解析度 = 地圖格數），顯示水域／陸地、道路、四色分區、建築點、spawn（粉紅點）、鏡頭視野框（青色） |
-| 快取 | 地形底色用 offscreen canvas，只在 seed／尺寸變更時重建；每 **250ms** 或狀態變更才重畫（避免每幀掃 92,416 格） |
-| 點擊／拖曳 | 轉算格座標 → `actions.focusTile(tx, ty)`；拖曳節流 80ms |
-| 按鈕 | **全圖**（`actions.fitMap()`，快捷 O）、**市中心**（`focusTile(spawn)`，快捷 P）、**分區**（`actions.toggleZones()`，快捷 L） |
-| 摺疊 | 標題列 chevron；收起後只留標題／比例；`hud.is-interior` 與開局畫面時隱藏 |
-| 視野框 | 由 `city-view.getCameraInfo()`（cx/cy/radius/aspect）計算；無資料時只畫地圖內容 |
-| 比例字 | 顯示「304×304」，title 顯示「92,416 格」 |
-
-> 快捷鍵以實作為準：**O = 全圖、P = 市中心、L = 分區色塊開關**（見 §9 不一致清單）。
+- 位置：桌面畫布右下；手機 132px 預設收起；canvas 內部解析度 = `state.width×state.height`（480×480）。
+- 地形底色 offscreen 快取（seed／尺寸不變就唔重畫）；每 250ms 或狀態變更重畫；道路淺灰、四色分區半透明、建築點（auto 分區色／ploppable 分類色＋白點）、spawn 粉紅點、鏡頭視野框青色。
+- 點擊／拖曳 → `actions.focusTile(tx, ty)`；按鈕：全圖 `fitMap()`（O）、市中心 `focusTile(spawn)`（P）、分區 `toggleZones()`（L）。
+- 室內模式／開局畫面隱藏；地圖 480 下 minimap 是唯一可靠 overview。
 
 ---
 
-## 6. 存檔 v4：精簡格式（✅ 已實作）
+## 7. 存檔 v5（✅ `core/save.ts`）
 
-- `GAME_VERSION=4`；localStorage key 前綴 `victoria-harbour.save.`；slot 0 自動＋slot 1–3 手動。
-- **格式**：`{ format:'hk-city-compact', version:4, seed, width:304, height:304, gameMode, tileEdits:number[], info:{slot,cityName,population,treasury,dateLabel,savedAt}, state: Omit<GameState,'tiles'> }`
-- **稀疏格編碼**：只序列化有道路／行人路／分區的格；`packed = road|sidewalk<<1|zoneCode<<2`（zone 0=null／1 住／2 商／3 工／4 農），`tileEdits = [tileIndex, packed, ...]` 成對。
-- **還原**：用 `seed` 重新 `generateWorld(seed, 304, 304, { starterRoads: gameMode==='starter' })` → 套用 sparse edits → 重建所有 `tile.buildingId`（由 buildings 反推）→ 補回 `spawn`／`gameMode`。
-- **大小**：約 **80–140KB**（視道路／分區數量）；完整 92,416 格 JSON 會超過 localStorage 配額，故不可行。
-- **兼容性**：只接受 304×304；96×96 舊存檔／匯入會拒絕（提示重新開局）。`version > GAME_VERSION` 只警告並嘗試載入。
-- **存檔列表**：用 `info` 快照（城市名／人口／庫房／日期），**不重新生成 304×304 地形**，避免開面板時卡 1–2 秒。
-- 📌 注意：`tileEdits` 只記 road／sidewalk／zone；**地形不會被玩家改變**（v3 未有填海工具），所以重新生成安全；日後若加地形改造，需要把地形變更也納入 sparse diff。
+- `GAME_VERSION=5`；格式沿用 v4 compact：`hk-city-compact`、seed＋`tileEdits`（road｜sidewalk<<1｜zone<<2）＋`state:Omit<GameState,'tiles'>`＋info 快照；大小約 80–140KB。
+- 還原：用 seed 重新 `generateWorld(seed,480,480,{starterRoads: gameMode==='starter'})` → 套 sparse edits → 重建 `buildingId` → 補 spawn／gameMode。
+- 只接受 **480×480、version 5**；96×96（v2）／304×304（v4）舊存檔拒絕（提示重新開局）。
+- 存檔列表用 `info` 快照，不重新解碼 480 地圖（避免 1–2 秒卡）。
+- 📌 `save.ts` 檔頭註解仍寫「v4（304×304）」——純註解，實際用 config 5／480；已列入 §8。
 
 ---
 
-## 7. AUTO_DEVELOP 與分區 pipeline 縮放（✅ config；⚠️ 部分註解未同步）
-
-| 常數 | Round 2（96） | Round 3（304） |
-|---|---|---|
-| `maxBuildingsPerZonePerDay` | 2 | **6** |
-| `maxBuildingsPerDay` | 5 | **15** |
-| `maxAutoBuildings` | 420 | **1,200** |
-| `minDemand`／`overSupplyDemand` | 0.12／−0.35 | 不變 |
-| `abandonDays` | 8 | 不變 |
-| devScore 權重 | 不變 | 不變 |
-
-- 分區需求 pipeline 以 **`AREA_SCALE = MAP_SCALE² ≈ 10.03`** 放大（`sim/zoning.ts`）：已劃未開發格數的「過度供應」門檻乘 10，避免 304 地圖正常大小的分區被誤判為過度劃區。
-- 實際開發用**內部較低門檻 0.05**＋「某區 0 棟而需求為正」bootstrap；`AUTO_DEVELOP.minDemand=0.12` 主要作 UI 提示／顯示。
-- 需求平滑：每日向目標值收斂 45%；需求下限 −0.6（避免死鎖）。
-- 每區候選地塊上限 4,000、每建築最多試 50 個 anchor（避免 304 地圖一次掃幾萬格）。
-- 📌 `sim/zoning.ts` 的檔頭註解仍寫「每日每區 2、全城 5、上限 420」及「需求 >0.45 每區 2 座」——與 config 新值不符；以 config 為準，建議 systems-dev 更新註解。
-
----
-
-## 8. 載入、效能與已知限制
-
-| 項目 | 內容 |
-|---|---|
-| 首次載入 | index.html boot screen：「正在生成 304×304 香港地圖（約 92,000 格）……」；worldgen **1.5–2 秒**，完成後 fade out |
-| 存檔面板 | 用 `info` 快照，不重建地形（避免 1–2 秒卡頓） |
-| 地圖拉伸 | 地理特徵按 96 設計座標等比例放大，維港／河流比真實比例闊；視覺可接受，但玩家會覺得「海很闊」 |
-| empty 無隧道 | empty 模式沒有預置過海隧道（屬人造構築物），初期不能駕車過海；市民可搭渡輪／港鐵（站點需玩家建） |
-| 舊存檔 | 96×96 v2 存檔不兼容，載入／匯入會明確提示 |
-| 手機效能 | minimap 132px 預設收起；pixelRatio 上限 1.75；liteMode 自動降質 |
-| 自動建築上限 1,200 | 實測高密度城市約 152 棟；上限預留擴充，不會即時觸頂 |
-
----
-
-## 9. 文件 vs 程式碼不一致／待辦（給 Lead）
+## 8. 文件 vs 程式碼不一致／待辦（給 Lead）
 
 | # | 項目 | 文件現況 | 程式碼現況 | 建議 |
 |---|---|---|---|---|
-| 1 | **empty 5 名市民** | 文件／UI 文案寫 5 名 | `createGameState('empty')` 的 `citizens=[]`，未見初始 seeding | new-game 補 5 名初始市民（或改文案） |
-| 2 | **分區快捷鍵** | 舊文件寫 Z/X/C/V、G overlay、B dezone | 實作：**Z 住、C 商、V 工、N 農、M dezone、X 拆除、L overlay、O 全圖、P 市中心、B 建造面板、G/J 統計** | UI_SPEC／GDD 已按實作更新（見 §10） |
-| 3 | **zoning.ts 檔頭註解** | — | 仍寫 2／5／420、0.45 門檻 | systems-dev 更新註解（config 已是 6／15／1,200） |
-| 4 | **需求公式** | `ZONING_GAMEPLAY.md` §3.2 為設計建議公式 | `sim/zoning.ts` 有另一套實作（職位／存糧／pipeline、內部 0.05 門檻、平滑 45%） | 文件已標「建議公式」；實作以 `zoning.ts` 為準，必要時同步文件 |
-| 5 | **minimap 狀態** | UI_SPEC 說「跟 `ui.showZones`」 | minimap 無自己的 UIState flag；用 runtime + `showZones` | 文件已按實作寫（不需要新 state） |
-| 6 | **相機 far/zoom** | GDD 舊版寫距離 14–170 | `MIN_DISTANCE=16`、`MAX_DISTANCE=260×MAP_SCALE≈823`、far≈1,900 | 文件已更新 |
+| 1 | **empty 5 名市民** | 文件／UI 文案寫 5 名 | `createGameState('empty')` 的 `citizens=[]`，未見初始 seeding | new-game 補 5 名，或改文案 |
+| 2 | **save.ts 檔頭** | doc 用 v5／480 | 檔頭註解仍寫 v4／304×304、compact 描述 | 更新註解（實際 GAME_VERSION=5、GRID=480） |
+| 3 | **worldgen 舊註解** | — | 仍保留 legacy 96 設計 path／LEGACY_TUNNELS 與部分舊註解（真實分支已用 `generateRealWorld`） | 清理或標明 legacy |
+| 4 | **zoning.ts 檔頭** | doc 用 15／6／1,200 | 檔頭仍寫 2／5／420、0.45 門檻（Round 3 遺留） | systems-dev 更新註解 |
+| 5 | **starter 人數** | config `targetPopulation=120` | QA 實測約 **146 人**（warm-up 自然遷入） | 文件寫「目標 120、實測約 146」；如要精準可調 immigration cap |
+| 6 | **可建比例** | 舊文件曾寫 ≥45%／52% | 真實數據 **22.4%**；worldgen 真實分支唔會再補到 52% | 文件已改 22.4%；舊驗收條件要下調 |
+| 7 | **density/height** | 文件寫「只作 visual」 | `Tile.density/buildingHeight` 只被 render 讀，sim 未使用 | 正確；UI 不應把 density 當人口／稅收 |
+| 8 | **minimap 狀態** | UI_SPEC 寫 runtime＋showZones | 無 `ui.showMinimap` flag | 文件已按實作寫，不需新 state |
 
 ---
 
-## 10. 文件更新索引（第三輪）
+## 9. 已知限制（Round 4）
+
+| 限制 | 影響 | 對策 |
+|---|---|---|
+| 140m 解析度 | 街道／單棟樓不可見 | 以分區＋道路呈現城市紋理 |
+| 可建地 22.4% | 玩家可發展空間少、山邊／海邊限制多 | starter 連通分量保證平地；empty 教學沿平地發展 |
+| 地圖 75.6% 水域 | 視覺「海很多」、跨島交通需求大 | 無邊海面 render；渡輪／港鐵／隧道 |
+| 真實數據版本 | 重建時可能與 2026-10 版本有差異 | 生成檔 commit；記錄版本 |
+| 首次載入 1.5–2s | 480 解碼＋生成 | boot screen；存檔列表不重建地形 |
+| 舊存檔不兼容 | v5 只接受 480×480 | 明確提示重新開局 |
+
+---
+
+## 10. 文件更新索引（Round 4）
 
 | 文件 | 已更新章節 |
 |---|---|
-| `GAME_DESIGN_HK.md` | §0.2 地圖／開局摘要；§1.3–1.5 完全空地 empty；§2.1 304 尺度；§2.2 設計座標註記；§2.4 隧道／spawn 換算；§3.4 開發速率；§10.2 minimap 版面；§12 存檔 v4；§13.2–13.4 AUTO_DEVELOP／預期；§15 契約；§16 分工；§17 DoD；附錄 A/C/D |
-| `UI_SPEC_HK.md` | §5 版面（minimap）；§5.1 minimap 元件；§5.2 相機 zoom out；§7.6 開局畫面 304 badge／empty 文案；§13 存檔 v4；§16 手機 minimap；§21 驗收；附錄 A 快捷鍵（O/P/L/Z/C/V/N/M/X） |
-| `ZONING_GAMEPLAY.md` | §0 摘要；§1.3 完全空地；§3 需求 pipeline ×AREA_SCALE；§5.2 每日 15／每區 6／1,200；§7 starter rebalance；§8 10 分鐘流程加 minimap；§9 分工（minimap／save v4／empty seeding）；§11 DoD |
-| 本文件 | 以上全部技術對照 |
+| `REAL_GEO_DATA.md`（新） | 資料來源／URL、生成流程、投影與範圍、terrain 分類、density／height、地名／地標／隧道、授權、限制 |
+| `GAME_DESIGN_HK.md` | §0.2 480×480／CSDI；§2.1 尺度＋140m；§2.2 設計座標 ×5；§2.4 真實 spawn／隧道；§3.1 density 樓群；§10 minimap 480；§12 save v5；§13 平衡（22.4% 可建）；§15 契約；§16 分工；§17 DoD；附錄 A/C/D |
+| `UI_SPEC_HK.md` | §5 版面／§5.1 minimap 480＋真實地形；§7.6 開局 CSDI badge／empty 完全空地；§8 地圖規模；§13 save v5；§16 手機；§21 驗收 |
+| `ZONING_GAMEPLAY.md` | 真實地形對分區影響（22.4% 可建、山多平地少）、starter 連通道路／服務、empty 沿平地教學、density/height 只是 visual、save v5 |
+| 本文件 | Round 4 技術對照、效能、已知限制、不一致清單 |
 
 ---
 
-*文件結束。數值以 `src/core/config.ts` 為最終依據；效能數字為 Lead 於 304 starter（573 人）實測。*
+*文件結束。數據細節見 `REAL_GEO_DATA.md`；數值以 `src/core/config.ts` 為最終依據；效能數字為 Lead 於 480 starter / empty 實測。*

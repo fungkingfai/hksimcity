@@ -39,6 +39,10 @@ import {
   demolishBuildingById,
   isBuildingStreetConnected,
   placeAutoBuilding,
+  tileIndexOf,
+  ZONE_CODE_NAMES,
+  ZONE_CODES,
+  zoneRevisionOf,
 } from './placement';
 
 // ─────────────────────────── 常數 ───────────────────────────
@@ -131,10 +135,16 @@ function zoneWorkerCapacity(state: GameState, zone: ZoneType): number {
 /** 各分區「已劃分但未開發」的格數（建築覆蓋、未起樓）；用於需求公式的規劃供應壓力 */
 function undevelopedZoneTiles(state: GameState): Record<ZoneType, number> {
   const counts: Record<ZoneType, number> = { residential: 0, commercial: 0, industrial: 0, farmland: 0 };
-  for (const tile of state.tiles) {
-    if (!tile.zone) continue;
-    if (tile.buildingId >= 0 || tile.road) continue;
-    counts[tile.zone]++;
+  const index = tileIndexOf(state);
+  const zoneArr = index.zone;
+  const roadArr = index.road;
+  const bldArr = index.building;
+  for (let i = 0; i < zoneArr.length; i++) {
+    const code = zoneArr[i];
+    if (!code) continue;
+    if (bldArr[i] || roadArr[i]) continue;
+    const zone = ZONE_CODE_NAMES[code];
+    if (zone) counts[zone]++;
   }
   return counts;
 }
@@ -289,8 +299,23 @@ export function zoneDemandOf(state: GameState): Record<ZoneType, number> {
 
 // ─────────────────────────── 發展分數 ───────────────────────────
 
-/** 局部景觀加成 0..8：近水／近山／近公園與海濱 */
-function localAmenity(state: GameState, x: number, y: number): number {
+/**
+ * 地形景觀加成快取（每格 0..5：近水 +3／近山 +2）。
+ * 地形喺一局內固定，但 480 地圖 buildings 可達 1200+ 棟，每次 landValue 重算都做
+ * 81 格地形掃描會好貴；呢個 cache 令每格只計一次（Uint8Array，0xFF = 未計算）。
+ */
+const terrainAmenityCache = new WeakMap<GameState, Uint8Array>();
+
+function terrainAmenityOf(state: GameState, x: number, y: number): number {
+  let cache = terrainAmenityCache.get(state);
+  if (!cache) {
+    cache = new Uint8Array(state.tiles.length);
+    cache.fill(0xff);
+    terrainAmenityCache.set(state, cache);
+  }
+  const idx = y * state.width + x;
+  const cached = cache[idx];
+  if (cached !== 0xff) return cached;
   let bonus = 0;
   let water = false;
   let hill = false;
@@ -311,25 +336,53 @@ function localAmenity(state: GameState, x: number, y: number): number {
       }
     }
   }
-  // 公園／海濱長廊（6 格內）
-  for (const building of state.buildings) {
-    if (building.key !== 'park' && building.key !== 'promenade') continue;
-    const cx = building.x + building.w / 2;
-    const cy = building.y + building.h / 2;
-    const dx = cx - (x + 0.5);
-    const dy = cy - (y + 0.5);
-    if (dx * dx + dy * dy <= 36) {
-      bonus += 2;
-      break;
+  cache[idx] = bonus;
+  return bonus;
+}
+
+export interface AmenityPoint {
+  x: number;
+  y: number;
+}
+
+/**
+ * 局部景觀加成 0..8：近水／近山／近公園與海濱。
+ * 傳入 `parks`（公園／海濱中心點清單）可避免逐個建築掃全部 buildings（O(n²)）。
+ */
+function localAmenity(
+  state: GameState,
+  x: number,
+  y: number,
+  parks?: readonly AmenityPoint[],
+): number {
+  let bonus = terrainAmenityOf(state, x, y);
+  const px = x + 0.5;
+  const py = y + 0.5;
+  if (parks) {
+    for (const park of parks) {
+      const dx = park.x - px;
+      const dy = park.y - py;
+      if (dx * dx + dy * dy <= 36) {
+        bonus += 2;
+        break;
+      }
+    }
+  } else {
+    // 未提供清單時自行掃 buildings（UI tooltip 等低頻呼叫）
+    for (const building of state.buildings) {
+      if (building.key !== 'park' && building.key !== 'promenade') continue;
+      const dx = building.x + building.w / 2 - px;
+      const dy = building.y + building.h / 2 - py;
+      if (dx * dx + dy * dy <= 36) {
+        bonus += 2;
+        break;
+      }
     }
   }
   return Math.min(8, bonus);
 }
 
-/**
- * 基礎發展分數 0..100（服務覆蓋＋幸福，不包括地價項，避免 stats.landValue ↔ 發展分數循環）。
- * 同時供 stats.ts 計算 landValue（平均發展分數）用。
- */
+/** 基礎發展分數 0..100（供水電覆蓋／服務／交通／幸福；不含地價） */
 export function baseDevelopmentScore(state: GameState): number {
   const s = state.stats;
   const DS = AUTO_DEVELOP.developmentScore;
@@ -346,11 +399,6 @@ export function baseDevelopmentScore(state: GameState): number {
   return Math.round(clamp(raw, 0, 100));
 }
 
-/** 局部景觀加成 0..8（近水／近山／近公園；UI 與 landValue 用） */
-export function amenityBonus(state: GameState, x: number, y: number): number {
-  return localAmenity(state, x, y);
-}
-
 /** 全城發展分數 0..100（基礎分＋地價；tickZoning 揀樓用） */
 export function cityDevelopmentScore(state: GameState): number {
   const s = state.stats;
@@ -358,6 +406,16 @@ export function cityDevelopmentScore(state: GameState): number {
   const landValue = s.landValue > 0 ? Math.min(100, s.landValue) : 40;
   const raw = baseDevelopmentScore(state) + (landValue / 100) * DS.landValueWeight;
   return Math.round(clamp(raw, 0, 100));
+}
+
+/** 局部景觀加成 0..8（近水／近山／近公園；UI 與 landValue 用） */
+export function amenityBonus(
+  state: GameState,
+  x: number,
+  y: number,
+  parks?: readonly AmenityPoint[],
+): number {
+  return localAmenity(state, x, y, parks);
 }
 
 /** 地塊發展分數 0..100（全城分數＋局部景觀加成；UI 用） */
@@ -380,6 +438,18 @@ interface ZoningRuntime {
   /** 某區有需求但連續多日搵唔到合適地塊 → 提示玩家地塊太窄 */
   stallDays: Record<ZoneType, number>;
   lastStallHintDay: Record<ZoneType, number>;
+  /** 開發候選地塊掃描快取（重用陣列，避免每日重新配置） */
+  survey: ZoneSurvey | null;
+  /** survey 簽章（分區版本＋建築結構）；無變化可重用 */
+  surveySig: string;
+  /** survey 用 scratch：可建置格標記（重用 230k Uint8Array） */
+  usable: Uint8Array | null;
+  /** 本次 tickZoning 剩餘嘅 placeAutoBuilding 嘗試次數（防大地圖大量 zone 時一次過嘗試太多次） */
+  devAttemptsLeft: number;
+  /** 農業區「近住宅優先」排序快取（同一日只排一次，避免每次建農田都 sort 上萬個地塊） */
+  farmFocusDay: number;
+  farmFocusSig: string;
+  farmFocusList: number[];
 }
 
 const runtimes = new WeakMap<GameState, ZoningRuntime>();
@@ -395,6 +465,13 @@ function runtimeOf(state: GameState): ZoningRuntime {
       lastOverSupplyLogDay: -999,
       stallDays: { residential: 0, commercial: 0, industrial: 0, farmland: 0 },
       lastStallHintDay: { residential: -999, commercial: -999, industrial: -999, farmland: -999 },
+      survey: null,
+      surveySig: '',
+      usable: null,
+      devAttemptsLeft: 0,
+      farmFocusDay: -1,
+      farmFocusSig: '',
+      farmFocusList: [],
     };
     runtimes.set(state, rt);
   }
@@ -450,86 +527,119 @@ const SITE_SIZES: SiteSize[] = ['1x1', '2x2', '3x2'];
 interface ZoneSurvey {
   empty: Record<ZoneType, number>;
   sites: Record<ZoneType, Record<SiteSize, number[]>>;
+  /** 掃描時暫存「基本合格」地塊（重用陣列避免每日重新配置大量記憶體） */
+  base: Record<ZoneType, number[]>;
 }
 
 function newSiteMap(): Record<SiteSize, number[]> {
   return { '1x1': [], '2x2': [], '3x2': [] };
 }
 
-function surveyZoneSites(state: GameState): ZoneSurvey {
-  const empty: Record<ZoneType, number> = { residential: 0, commercial: 0, industrial: 0, farmland: 0 };
-  const sites: Record<ZoneType, Record<SiteSize, number[]>> = {
-    residential: newSiteMap(),
-    commercial: newSiteMap(),
-    industrial: newSiteMap(),
-    farmland: newSiteMap(),
+function newSurvey(): ZoneSurvey {
+  return {
+    empty: { residential: 0, commercial: 0, industrial: 0, farmland: 0 },
+    sites: {
+      residential: newSiteMap(),
+      commercial: newSiteMap(),
+      industrial: newSiteMap(),
+      farmland: newSiteMap(),
+    },
+    base: { residential: [], commercial: [], industrial: [], farmland: [] },
   };
+}
+
+function surveyZoneSites(state: GameState, rt: ZoningRuntime): ZoneSurvey {
+  const sig = `${zoneRevisionOf()}:${state.buildings.length}:${state.nextBuildingId}`;
+  if (rt.survey && rt.surveySig === sig) return rt.survey;
+  const survey = rt.survey ?? (rt.survey = newSurvey());
+  const { empty, sites, base } = survey;
+  for (const zone of ZONE_ORDER) {
+    empty[zone] = 0;
+    base[zone].length = 0;
+    for (const size of SITE_SIZES) sites[zone][size].length = 0;
+  }
   const width = state.width;
   const height = state.height;
   const tiles = state.tiles;
+  const n = tiles.length;
+  const terrainInfo = TERRAIN_INFO;
+  const index = tileIndexOf(state);
+  const zoneArr = index.zone;
+  const roadArr = index.road;
+  const bldArr = index.building;
+  // 可建置格標記：zone code（0=不可作 footprint 錨點）；重用 buffer
+  const usable = rt.usable && rt.usable.length === n ? rt.usable : (rt.usable = new Uint8Array(n));
+  usable.fill(0);
 
-  const footprintOk = (idx: number, w: number, h: number, zone: ZoneType): boolean => {
+  // ── Pass 1（typed Uint8Array 掃描，230k 約 0.2–0.5ms）：
+  //    分區格數＋可建置格標記（地形可建、無樓無路、農地地形合適）
+  for (let i = 0; i < n; i++) {
+    const code = zoneArr[i];
+    if (!code) continue;
+    const zone = ZONE_CODE_NAMES[code];
+    if (!zone) continue;
+    if (bldArr[i] || roadArr[i]) continue;
+    empty[zone]++;
+    const terrain = tiles[i].terrain;
+    if (!terrainInfo[terrain]?.buildable) continue;
+    if (zone === 'farmland' && terrain !== 'fertile' && terrain !== 'grass') continue;
+    usable[i] = code;
+  }
+
+  // ── Pass 2：由可建置格收集基本地塊（非農田需臨路；農田免路）──
+  for (let i = 0; i < n; i++) {
+    const code = usable[i];
+    if (!code) continue;
+    const zone = ZONE_CODE_NAMES[code];
+    if (!zone) continue;
+    if (zone !== 'farmland') {
+      const x = i % width;
+      const y = (i / width) | 0;
+      if (
+        !(x > 0 && roadArr[i - 1]) &&
+        !(x + 1 < width && roadArr[i + 1]) &&
+        !(y > 0 && roadArr[i - width]) &&
+        !(y + 1 < height && roadArr[i + width])
+      ) {
+        continue;
+      }
+    }
+    base[zone].push(i);
+  }
+
+  // ── Pass 3：由基本地塊推導 1×1／2×2／3×2 footprint 候選（usable 已含所有條件，只需比對 code）──
+  const footprintOk = (idx: number, w: number, h: number, code: number): boolean => {
     const x = idx % width;
     const y = (idx / width) | 0;
     if (x + w > width || y + h > height) return false;
     for (let dy = 0; dy < h; dy++) {
+      const row = (y + dy) * width + x;
       for (let dx = 0; dx < w; dx++) {
-        const tile = tiles[(y + dy) * width + x + dx];
-        if (tile.zone !== zone || tile.buildingId >= 0 || tile.road || !TERRAIN_INFO[tile.terrain]?.buildable) {
-          return false;
-        }
+        if (usable[row + dx] !== code) return false;
       }
     }
-    if (zone === 'farmland') return true;
-    // 非農田需 4 鄰接馬路／行人路（道路已整合行人路）
-    for (let dx = 0; dx < w; dx++) {
-      const left = tiles[(y) * width + x + dx - 1];
-      if (left && left.road) return true;
-      const rightX = x + dx + 1;
-      if (rightX < width) {
-        const right = tiles[y * width + rightX];
-        if (right && right.road) return true;
-      }
-    }
-    for (let dy = 0; dy < h; dy++) {
-      const up = tiles[(y + dy - 1) * width + x];
-      if (up && up.road) return true;
-      const downY = y + dy + 1;
-      if (downY < height) {
-        const down = tiles[downY * width + x];
-        if (down && down.road) return true;
-      }
-    }
-    return false;
+    return true;
   };
-
-  for (let idx = 0; idx < tiles.length; idx++) {
-    const tile = tiles[idx];
-    const zone = tile.zone;
-    if (!zone) continue;
-    if (tile.buildingId >= 0 || tile.road) {
-      continue;
+  const pushCapped = (list: number[], idx: number): void => {
+    if (list.length < MAX_SITES_PER_ZONE) list.push(idx);
+    else {
+      const slot = ((idx * 2654435761) >>> 0) % list.length;
+      if (((idx * 7 + state.clock.totalDays) & 127) === 0) list[slot] = idx;
     }
-    // demand pipeline 用：所有已劃未開發格（唔計地形）
-    empty[zone]++;
-    if (!TERRAIN_INFO[tile.terrain]?.buildable) continue;
-    if (zone === 'farmland') {
-      if (tile.terrain !== 'fertile' && tile.terrain !== 'grass') continue;
-    }
-    const lists = sites[zone];
-    for (const size of SITE_SIZES) {
-      const [w, h] = size === '1x1' ? [1, 1] : size === '2x2' ? [2, 2] : [3, 2];
-      if (!footprintOk(idx, w, h, zone)) continue;
-      const list = lists[size];
-      if (list.length < MAX_SITES_PER_ZONE) list.push(idx);
-      else {
-        const slot = ((idx * 2654435761) >>> 0) % list.length;
-        if (((idx * 7 + state.clock.totalDays) & 127) === 0) list[slot] = idx;
-      }
+  };
+  for (const zone of ZONE_ORDER) {
+    const zoneSites = sites[zone];
+    const code = ZONE_CODES[zone];
+    for (const idx of base[zone]) {
+      pushCapped(zoneSites['1x1'], idx);
+      if (footprintOk(idx, 2, 2, code)) pushCapped(zoneSites['2x2'], idx);
+      if (footprintOk(idx, 3, 2, code)) pushCapped(zoneSites['3x2'], idx);
     }
   }
-  return { empty, sites };
+  rt.surveySig = sig;
+  return survey;
 }
+
 
 /** 建築 key 對應 site 尺寸分組 */
 function siteSizeOf(def: { size: readonly number[] }): SiteSize {
@@ -581,22 +691,32 @@ function tryDevelopOne(
   const attempt = (state.nextBuildingId + sites['1x1'].length + sites['2x2'].length) % 997;
   const ordered = weightedOrder(defs, zoneIndex, day, attempt, state.seed, preferFood);
   const width = state.width;
-  // 農業區：候選地塊按「距離住宅重心」排序（農田工人要通勤，太遠請唔到人）；
-  // 只排一次、最多處理 focus 附近 800 個（其餘靠 offset 輪換）。
+  // 農業區：候選地塊按「距離住宅重心」排序（農田工人要通勤，太遠請唔到人）。
+  // 排序結果按日快取（同一日多個 slot 重用），並用取樣控制成本（最多 800 個）。
   let farmSorted: number[] | null = null;
   if (focus && zone === 'farmland') {
-    const all: number[] = [];
-    for (const size of SITE_SIZES) for (const idx of sites[size]) all.push(idx);
-    all.sort((a, b) => {
-      const ax = a % width;
-      const ay = (a / width) | 0;
-      const bx = b % width;
-      const by = (b / width) | 0;
-      const da = (ax - focus.x) ** 2 + (ay - focus.y) ** 2;
-      const db = (bx - focus.x) ** 2 + (by - focus.y) ** 2;
-      return da - db;
-    });
-    farmSorted = all.slice(0, 800);
+    const focusSig = `${day}:${Math.round(focus.x)}:${Math.round(focus.y)}:${sites['2x2'].length + sites['1x1'].length}`;
+    if (rt.farmFocusDay !== day || rt.farmFocusSig !== focusSig) {
+      const all: number[] = [];
+      for (const size of SITE_SIZES) for (const idx of sites[size]) all.push(idx);
+      // 只取樣最多 1200 個再排序（避免對上萬個地塊做 full sort）
+      const step = Math.max(1, Math.floor(all.length / 1200));
+      const sample: number[] = [];
+      for (let i = 0; i < all.length && sample.length < 1200; i += step) sample.push(all[i]);
+      sample.sort((a, b) => {
+        const ax = a % width;
+        const ay = (a / width) | 0;
+        const bx = b % width;
+        const by = (b / width) | 0;
+        const da = (ax - focus.x) ** 2 + (ay - focus.y) ** 2;
+        const db = (bx - focus.x) ** 2 + (by - focus.y) ** 2;
+        return da - db;
+      });
+      rt.farmFocusDay = day;
+      rt.farmFocusSig = focusSig;
+      rt.farmFocusList = sample.slice(0, 800);
+    }
+    farmSorted = rt.farmFocusList;
   }
 
   let defAttempts = 0;
@@ -617,6 +737,9 @@ function tryDevelopOne(
       const idx = candidates[(offset + k) % candidates.length];
       const x = idx % width;
       const y = (idx / width) | 0;
+      // 每次嘗試扣 budget；用完即停（其餘留待下一日／下個 tick）
+      if (rt.devAttemptsLeft <= 0) return false;
+      rt.devAttemptsLeft--;
       // placeAutoBuilding 內部已做齊 canAutoPlaceBuilding 檢查（唔重複驗證，省一半成本）
       const building = placeAutoBuilding(state, def.key, x, y);
       if (building) {
@@ -674,7 +797,7 @@ export function tickZoning(state: GameState, ctx: SimContext): void {
 
   // 0) 一次過掃描（92k tiles，每日一次）：同時得出未開發格數（demand 用）
   //    同各尺寸候選開發地塊，避免 tryDevelopOne 對每個定義重複掃描。
-  const survey = surveyZoneSites(state);
+  const survey = surveyZoneSites(state, rt);
 
   // 1) 需求：計算目標值並平滑寫入 state.zoneDemand
   const target = computeZoneDemand(state, survey.empty);
@@ -699,6 +822,8 @@ export function tickZoning(state: GameState, ctx: SimContext): void {
   }
 
   // 5) 自動開發：先 bootstrap（某區 0 棟而需求為正），再按需求由高至低
+  //    每次 tick 最多嘗試 120 次 placeAutoBuilding（大地圖大量分區時避免一次過爆 frame）
+  rt.devAttemptsLeft = 120;
   const zoneSites = survey.sites;
   const autoByZone: Record<ZoneType, number> = {
     residential: 0,

@@ -290,3 +290,42 @@ createVehiclesView(state): VehiclesView
 - 地圖中文地名任何鏡頭角度皆正向（修正 CanvasTexture flipY 與 billboard UV 對應）。
 - 32 種建築仍全部可進入室內；存檔跨頁面保留分區與自動建築。
 - 1600 人壓力測試：simulation 平均 <1ms/幀（logistics 由 22.25ms 優化至 ~0.02ms）。
+
+## 9. 第四輪改版：真實香港地理數據 480×480（Round 4）
+
+玩家要求參考 CSDI／香港地理空間數據修正地形與建築設計（尤其杏花邨、柴灣）並再加大地圖。
+
+### 9.1 真實地理數據
+
+- `tools/build-hk-data.py`（離線）讀取：
+  - LandsD **DTM 5m**（`Whole_HK_DTM_5m.zip`）：真實海岸線、高程；
+  - CSDI／LandsD **Building Outlines**（CSDI metadataInfoPanel 下載 zip 內 `Building_Outline_Public_*_Building_converted.geojson`）：342,233 個建築輪廓、`Shape_Area`／`TopHeight`／`Storeys`。
+- 經 HK1980 Grid（EPSG:2326 Transverse Mercator）換算成 480×480 ×140m 地圖，輸出：
+  - `src/world/hk-map-data.generated.ts`（約 0.97MB）：terrain RLE、elevation、density、buildingHeight（base64）、69 真實地名、6 地標、15 個市區／機場／貨櫃／新市鎮區塊、3 過海隧道、spawn。
+  - 型別：`src/world/hk-map-data-types.ts`。
+- 資料授權：香港特別行政區政府（地政總署／CSDI）開放數據，使用須遵守 data.gov.hk／CSDI 條款；原始 300MB 數據不入 repo，只 commit 生成檔。
+
+### 9.2 世界生成／資料模型
+
+- `worldgen.ts`：`generateWorld()` 在 480×480 走 `generateRealWorld()`；其他尺寸保留程序化 fallback（測試用）。
+- `Tile` 新增 `density?: number`（0..255，真實建築覆蓋率）與 `buildingHeight?: number`（米）；**只供 render 使用**，不參與 sim。
+- Empty 模式 `starterRoads:false`：0 道路／建築／分區／隧道；starter 由 `core/starter-town.ts` 以 **連通優先 BFS 道路網** 建立（中環 spawn 259,299）。
+- 存檔 v5：`seed + gameMode + 稀疏 tileEdits + state（不含 tiles）`；hydrate 時由生成檔重新建地形；舊 96／304 存檔不相容。
+
+### 9.3 渲染
+
+- 真實 density／height 驅動 starter 現有樓群（約 4,089 座、3 InstancedMesh；杏花邨／柴灣／小西灣高樓群）；empty 完全隱藏假樓群與所有人造地標。
+- 雪線修正（elevation ≥0.8，只 snow／冬季 ≤6°C）；無邊海面 4 巨型外框 quads；地名 billboard 螢幕空間尺寸＋3 層 LOD；赤鱲角雙跑道；葵涌貨櫃碼頭按真實區塊；道路電車走廊／紅白磚用真實座標。
+
+### 9.4 480 地圖契約／限制
+
+| 項目 | 數值 |
+|---|---|
+| `GRID_WIDTH/HEIGHT` | 480×480（230,400 格） |
+| 每格 | 140m（HK1980 範圍 E 798,275–865,475、N 790,400–857,600） |
+| `MAP_SCALE` / `WORLD_SPAN` | 5 / 960 |
+| 相機 | MIN 16、MAX 1,300、far 3,000、fitMap ≈1,196 |
+| 可建土地 | 22.4%（真實香港山多平地少） |
+| 存檔 | v5 compact，約 80–140KB（視建築/市民數） |
+| 效能 | starter overview 1.33M tris／402 calls；empty 1.03M／37；sim normal <3ms（1000 人 <8ms） |
+| 已知限制 | 140m 解析度（小型海灣/街道以格簡化）；DTM 水塘水面高程>0，水塘用曲線補；舊存檔不相容 |
