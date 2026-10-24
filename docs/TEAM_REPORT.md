@@ -256,5 +256,6 @@ interiors-dev 共用材質庫而不互相覆寫）。Lead 在開發中途同步�
 - [x] Playwright 全流程 `scripts/verify-hk.mjs`：**28 / 28 checks**（480 真實地圖、兩種開局、empty 0 路 0 樓、四區自動建屋、道路整合行人路、需求平衡、公共設施、颱風／雪、32 種室內、compact 存檔跨頁面、渲染負載 ~1.19M tris / 568 calls）
 - [x] 真實 UI 點擊 `scripts/ui-click-test.mjs`：**21 / 21 checks**（empty 開局真實地形鋪路／劃區、開發商建屋、公共設施、室內、面板、存檔）
 - [x] 手機版 `scripts/mobile-test.mjs`：**17 / 17 checks**（iPhone 13、真實地圖、minimap、觸控劃區＋自動建屋、室內、手勢）
-- [x] 線上部署（GitHub push 後 Cloudflare Workers Builds 自動部署；HTTP 200）
+- [x] 線上部署（GitHub push 後 Cloudflare Workers Builds 自動部署）：<https://hksimcity.fungkingfai.workers.dev/> HTTP 200；線上實測 starter **480×480、45 棟、145 人、minimap、CSDI badge**；empty **0 路／0 樓／0 分區**；無 console error
+- [x] 截圖：`docs/screenshots/` 已更新 21 張（start／empty／zoning／map／east 杏花邨柴灣／hero／city／night／rain／snow／typhoon／interior／finance／transit／save／mobile-*）
 - [x] 截圖：real480 系列（overview／central／east 杏花邨柴灣／airport／container／night／empty）＋遊戲內 showcase 更新
