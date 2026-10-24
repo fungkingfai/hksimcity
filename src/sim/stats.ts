@@ -31,7 +31,7 @@
 
 import { BUILDINGS, TRANSIT_SPEED } from '../core/config';
 import type { Building, GameState, ResourceKey, ZoneType } from '../core/types';
-import { utilityStatus } from './production';
+import { computeUtilitySnapshot } from './utilities';
 import { amenityBonus, baseDevelopmentScore, zoneDemandOf } from './zoning';
 import { tileIndexOf, worldRevisionOf, ZONE_CODE_NAMES, zoneRevisionOf } from './placement';
 
@@ -120,39 +120,10 @@ interface ZoneCountBuildingsEntry {
 const zoneTilesCache = new WeakMap<GameState, ZoneCountTilesEntry>();
 const zoneBuildingsCache = new WeakMap<GameState, ZoneCountBuildingsEntry>();
 
-/** 公用設施人口加權覆蓋率 0..1（kind = 'power' | 'water'；經快取） */
+/** 公用設施管網覆蓋率 0..1（Round 5：由 utilities snapshot 提供） */
 export function utilityCoverage(state: GameState, kind: 'power' | 'water'): number {
-  ensureCoverageCache(state);
-  const cached = coverageCache.get(state);
-  if (!cached) return 0;
-  return kind === 'power' ? cached.power : cached.water;
-}
-
-/** 實際計算公用設施覆蓋率（每簽章一次） */
-function computeUtilityCoverage(state: GameState, kind: 'power' | 'water'): number {
-  const info = utilityStatus(state, kind);
-  const population = state.citizens.length;
-  if (population <= 0 || !info.buildings.length) return 0;
-
-  const utilities: { building: Building; radius: number }[] = [];
-  for (const building of info.buildings) {
-    const radius = BUILDINGS[building.key]?.utility?.radius ?? 0;
-    if (radius > 0) utilities.push({ building, radius });
-  }
-
-  let covered = 0;
-  for (const home of state.buildings) {
-    const def = BUILDINGS[home.key];
-    if (!def || def.housing <= 0 || home.residents.length === 0) continue;
-    for (const utility of utilities) {
-      if (distanceSq(home, utility.building) <= utility.radius * utility.radius) {
-        covered += home.residents.length;
-        break;
-      }
-    }
-  }
-  // GDD §4.3：覆蓋率 = 半徑內住宅人口 / 總人口（容量不足另由生產效率／UI 警示處理）
-  return round2(covered / population);
+  const snapshot = computeUtilitySnapshot(state);
+  return kind === 'power' ? snapshot.power.coverage : snapshot.water.coverage;
 }
 
 /** 公共交通可達率 0..1（就業人口加權：家或工作地點在車站半徑內） */
@@ -262,8 +233,8 @@ function ensureCoverageCache(state: GameState): void {
   if (cached && cached.signature === signature) return;
   const entry: CoverageCacheEntry = {
     signature,
-    power: computeUtilityCoverage(state, 'power'),
-    water: computeUtilityCoverage(state, 'water'),
+    power: 0,
+    water: 0,
     police: computeServiceCoverage(state, 'police'),
     fire: computeServiceCoverage(state, 'fire'),
     school: computeServiceCoverage(state, 'school'),
@@ -419,9 +390,12 @@ export function updateStats(state: GameState): void {
   stats.goodsInTransit = round1(goodsInTransit);
   stats.netIncome = round2(finance.lastMonthIncome - finance.lastMonthExpense);
 
-  // 公用設施覆蓋率（人口加權）
-  stats.powerCoverage = utilityCoverage(state, 'power');
-  stats.waterCoverage = utilityCoverage(state, 'water');
+  // 公用設施管網覆蓋率（Round 5：水／污水／電；水管網 BFS snapshot）
+  const utilities = computeUtilitySnapshot(state);
+  stats.powerCoverage = utilities.power.coverage;
+  stats.waterCoverage = utilities.water.coverage;
+  stats.sewageCoverage = utilities.sewage.coverage;
+  stats.waterQuality = utilities.waterQuality;
 
   // 交通統計：ridership 直接讀 transit 每日結算；coverage／avgCommute 有 transport-dev 值就保留
   stats.ridership = Math.max(0, Math.round(state.transit.dailyRidership));

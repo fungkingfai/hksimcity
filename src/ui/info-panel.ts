@@ -46,6 +46,7 @@ import {
 } from './dom';
 import { formatShortDateHK, formatMinutes, seasonNameHK, displayYear } from './format';
 import { ico, personPill, resourceChips, sealHtml } from './icons';
+import { toggleTradePanel, toggleUnderground, toggleUtilityPanel } from './round5-helpers';
 
 export interface InfoPanelView {
   update(state: GameState): void;
@@ -280,6 +281,11 @@ export function createInfoPanel(container: HTMLElement, store: GameStore, action
             <b class="hero-city" data-k="cityName">維港之城</b>
             <span class="hero-date" data-k="date"></span>
             <span class="hero-map" data-k="mapSize"></span>
+            <div class="hero-quick">
+              <button type="button" data-act="hero-utility" title="公用設施面板">${ico('gauge')}公用</button>
+              <button type="button" data-act="hero-trade" title="機場／碼頭貿易（Y）">${ico('plane')}貿易</button>
+              <button type="button" data-act="hero-underground" title="地下管網（U）">${ico('pipe')}管網</button>
+            </div>
           </div>
           <div class="happy-dial tone-ok" data-k="dial" role="img" aria-label="幸福度">
             <div class="dial-face"><b data-k="happyBig">70</b><span>幸福度</span></div>
@@ -396,6 +402,18 @@ export function createInfoPanel(container: HTMLElement, store: GameStore, action
   };
 
   const offClick = delegate(root, 'click', '[data-act]', (node) => {
+    if (node.dataset.act === 'hero-utility') {
+      toggleUtilityPanel(store, actions);
+      return;
+    }
+    if (node.dataset.act === 'hero-trade') {
+      toggleTradePanel(store, actions);
+      return;
+    }
+    if (node.dataset.act === 'hero-underground') {
+      toggleUnderground(store, actions);
+      return;
+    }
     switch (node.dataset.act) {
       case 'enter': {
         const id = Number(node.dataset.id);

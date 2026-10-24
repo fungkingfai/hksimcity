@@ -118,6 +118,12 @@ export const ICON = {
   sprout: wrap('<path d="M8 14V7.2"/><path d="M8 8.8C6.1 8.8 4.8 7.5 4.8 5.6 6.7 5.6 8 6.9 8 8.8Z"/><path d="M8 8.8c1.9 0 3.2-1.3 3.2-3.2C9.3 5.6 8 6.9 8 8.8Z"/><path d="M2.6 14h10.8"/>'),
   eye: wrap('<path d="M1.6 8S4 3.8 8 3.8 14.4 8 14.4 8 12 12.2 8 12.2 1.6 8 1.6 8Z"/><circle cx="8" cy="8" r="2.1"/>'),
   map: wrap('<path d="M2.2 4.2 6 2.6l4 1.6 3.8-1.6v9.2L10 13.4 6 11.8l-3.8 1.6Z"/><path d="M6 2.6v9.2M10 4.2v9.2"/>'),
+  pipe: wrap('<path d="M2.4 13.2V6.6h5.2V3.2h6v4.2"/><path d="M2.4 9.8h3.4M9.8 7.6h2.6"/><rect x="1.4" y="12.1" width="2.4" height="2.1" rx="0.3"/><rect x="12.2" y="6.9" width="2.4" height="2.1" rx="0.3"/>'),
+  gauge: wrap('<circle cx="8" cy="8" r="6.1"/><path d="M8 8 10.9 5.1"/><path d="M4.4 11.6a4.6 4.6 0 0 1 7.2 0"/>'),
+  route: wrap('<circle cx="3.6" cy="4.2" r="1.6"/><circle cx="12.4" cy="11.8" r="1.6"/><path d="M5.2 4.2h4.2a2 2 0 0 1 1.7 3L9 11.8"/><path d="M6 11.8h4.8"/>'),
+  plane: wrap('<path d="M2.2 9.2 8 7.2V3.4L9.2 2v5L14 8.4v1.8l-4.8-1v2.6l1.6 1v1.2L8 12.8l-2.8 1.2V12.8l1.6-1V9.2Z"/>'),
+  ship: wrap('<path d="M2.4 9.8h11.2l-1.4 3.4H3.8Z"/><path d="M4.6 9.8V6.6h6.8v3.2"/><path d="M8 6.6V3.2M6.2 3.2h3.6"/><path d="M2.4 14.2c1 .6 2 .6 3 0s2-.6 3 0 2 .6 3 0 1.4-.5 2-.2"/>'),
+  valve: wrap('<circle cx="8" cy="8" r="5.6"/><path d="M8 2.4v11.2M2.4 8h11.2"/><circle cx="8" cy="8" r="1.8"/>'),
   food: wrap('<path d="M2.6 7h10.8a5.4 5.4 0 0 1-10.8 0Z"/><path d="M4.6 7c0-2 1.4-3.6 3.4-3.6S11.4 5 11.4 7"/><path d="M2.2 13.4h11.6"/>'),
   goods: wrap('<path d="M3.2 5.2h9.6l-.9 8.4H4.1Z"/><path d="M5.6 5.2V4a2.4 2.4 0 0 1 4.8 0v1.2"/>'),
 } as const;
@@ -247,6 +253,17 @@ export const BUILDING_GLYPHS: Record<string, string> = {
   ferryPier: '⛴',
   park: '🌳',
   promenade: '🌊',
+  waterTower: '🗼',
+  desalPlant: '🌊',
+  sewagePlant: '♻',
+  sewageOutfall: '🚿',
+  busStop: '🚏',
+  minibusStop: '🚐',
+  minibusDepot: '🅿',
+  airportTerminal: '✈',
+  airCargoTerminal: '📦',
+  portGate: '🚧',
+  portYard: '🧱',
 };
 
 /** 建築卡圖示；未知 key 用首字 */

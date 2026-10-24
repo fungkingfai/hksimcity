@@ -29,6 +29,8 @@ import { tickZoning } from './zoning';
 import { monthlyFinance, tickDailyFinance } from './finance';
 import { updateStats } from './stats';
 import { updateConnectedBuildings } from './placement';
+import { computeUtilitySnapshot } from './utilities';
+import { tickTrade } from './trade';
 
 export class Simulation {
   update(state: GameState, realDt: number, ctx: SimContext): void {
@@ -53,10 +55,14 @@ export class Simulation {
     // 5) 跨日：連通性 → 生產 → 人口 → 交通 →（若同時跨月先月結）→ 服務收入 → 統計 → 提示
     if (flags.newDay) {
       updateConnectedBuildings(state);
+      // Round 5：地下管網每日結算（water／sewage／power），供生產效率與 UI 使用
+      computeUtilitySnapshot(state, true);
       tickZoning(state, ctx);
       tickProduction(state, ctx);
       tickPopulation(state, ctx);
       tickTransit(state, ctx);
+      // 機場／貨櫃碼頭貿易結算（收入即時入帳）
+      tickTrade(state, ctx);
       if (flags.newMonth) monthlyFinance(state, ctx);
       tickDailyFinance(state, ctx);
       updateStats(state);
@@ -88,10 +94,25 @@ function runDailyEvents(state: GameState, ctx: SimContext): void {
     }
   }
 
-  // 公用設施覆蓋
-  if (stats.population >= 40 && clock.totalDays % 5 === 0) {
-    if (stats.powerCoverage < 0.6) ctx.log('供電不足，部分地區停電，市民怨聲載道。', 'warn');
-    else if (stats.waterCoverage < 0.6) ctx.log('食水供應緊張，水務署呼籲節約用水。', 'warn');
+  // 公用設施（Round 5：地下管網接駁／容量）
+  const utilities = state.utilities;
+  if (stats.population >= 40 && clock.totalDays % 5 === 0 && utilities) {
+    if (utilities.power.shortage > 0.15) {
+      ctx.log('電力供應不足（請加建發電廠／變電站並鋪設電纜接駁）。', 'warn');
+    } else if (utilities.power.unconnectedBuildings > 0) {
+      ctx.log('有建築未接駁電纜，請由發電廠鋪設電纜到各區。', 'info');
+    } else if (utilities.water.shortage > 0.15) {
+      ctx.log('食水供應緊張，水務署呼籲節約用水（請加建水務設施／水塔並接駁水管）。', 'warn');
+    } else if (utilities.water.unconnectedBuildings > 0) {
+      ctx.log('有建築未接駁食水管，請鋪設水管接駁水務設施。', 'info');
+    } else if (utilities.sewage.overflow > 0.05) {
+      ctx.log('污水處理量不足，未處理污水排出海；請加建污水處理廠。', 'warn');
+    } else if (utilities.sewage.unconnectedBuildings > 0) {
+      ctx.log('有建築未接駁污水管，請接駁污水處理廠或排污口。', 'info');
+    }
+    if (utilities.waterQuality < 0.7) {
+      ctx.log('食水水質欠佳（排污口影響），市民關注健康；可改以污水處理廠處理污水。', 'warn');
+    }
   }
 
   // 交通

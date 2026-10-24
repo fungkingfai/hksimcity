@@ -35,6 +35,7 @@ import {
 import { hash2d } from '../core/rng';
 import type { Building, GameState, ResourceKey, SimContext, TerrainType } from '../core/types';
 import { addCargo, removeCargo, stockOf } from './logistics-inventory';
+import { ensureUtilitySnapshot, utilityFactorFor } from './utilities';
 
 /** 生產建築本地暫存上限（與 logistics-inventory.PRODUCER_LOCAL_CAP 一致；物流前來搬走前上限） */
 export const PRODUCTION_LOCAL_CAP = 60;
@@ -106,8 +107,12 @@ function weatherMultiplier(state: GameState, building: Building, output: Resourc
   return 1 + (farmEffect - 1) * 0.25;
 }
 
-// ─────────────────────────── 公用設施（電力／食水） ───────────────────────────
+// ─────────────────────────── 公用設施（Round 5：地下管網） ───────────────────────────
 
+/**
+ * 舊版公用設施摘要（保留 export 供 UI／舊程式相容；Round 5 起實際供應由
+ * sim/utilities.ts 的地下管網 snapshot 決定）。
+ */
 interface UtilityInfo {
   buildings: Building[];
   radius: number;
@@ -118,67 +123,25 @@ interface UtilityInfo {
   supplyRatio: number;
 }
 
-function centerOf(building: Building): { x: number; y: number } {
-  return { x: building.x + building.w / 2, y: building.y + building.h / 2 };
-}
-
-function withinRadius(a: Building, b: Building, radius: number): boolean {
-  const ca = centerOf(a);
-  const cb = centerOf(b);
-  const dx = ca.x - cb.x;
-  const dy = ca.y - cb.y;
-  return dx * dx + dy * dy <= radius * radius;
-}
-
-/** 全城公用設施供應情況（電力需求以人口＋工業用電估算） */
 export function utilityStatus(state: GameState, kind: 'power' | 'water'): UtilityInfo {
+  const snapshot = ensureUtilitySnapshot(state);
+  const stat = kind === 'power' ? snapshot.power : snapshot.water;
   const buildings: Building[] = [];
-  let capacity = 0;
   let radius = 0;
   for (const building of state.buildings) {
     const utility = BUILDINGS[building.key]?.utility;
     if (!utility || utility.kind !== kind) continue;
     if (!building.active) continue;
     buildings.push(building);
-    capacity += utility.capacity;
     radius = Math.max(radius, utility.radius);
   }
-  // 需求：人口 + 工業／物流建築工人（用電較多）
-  let demand = state.citizens.length;
-  for (const building of state.buildings) {
-    const def = BUILDINGS[building.key];
-    if (!def) continue;
-    if (def.category === 'industrial' || def.category === 'logistics') {
-      demand += def.workers * 0.6;
-    } else if (def.category === 'commercial') {
-      demand += def.workers * 0.3;
-    }
-  }
-  demand = Math.max(1, demand);
-  const supplyRatio = capacity > 0 ? Math.min(1, capacity / demand) : 0;
-  return { buildings, radius, capacity, demand: round2(demand), supplyRatio };
-}
-
-/**
- * 某建築的公用設施服務係數 0..1：
- *   - 全城未建同類設施 → 0.55（小店自備發電機／水缸，只夠半力生產；開局不至於停擺）
- *   - 不在任何設施半徑內 → 0.45（舊區電網／水壓不足）
- *   - 在覆蓋內但全城容量不足 → 0.6 + 0.4 × supplyRatio
- *   - 正常 → 1
- */
-function utilityFactor(info: UtilityInfo, building: Building): number {
-  if (!info.buildings.length) return 0.55;
-  let inside = false;
-  for (const utility of info.buildings) {
-    const radius = BUILDINGS[utility.key]?.utility?.radius ?? info.radius;
-    if (withinRadius(utility, building, radius)) {
-      inside = true;
-      break;
-    }
-  }
-  if (!inside) return 0.45;
-  if (info.supplyRatio >= 0.999) return 1;
-  return 0.6 + 0.4 * info.supplyRatio;
+  return {
+    buildings,
+    radius,
+    capacity: stat.capacity,
+    demand: stat.demand,
+    supplyRatio: stat.demand > 0 ? Math.min(1, stat.capacity / stat.demand) : stat.capacity > 0 ? 1 : 0,
+  };
 }
 
 // ─────────────────────────── 每日生產 ───────────────────────────
@@ -195,8 +158,7 @@ function allowedTerrainBonus(state: GameState, building: Building): number {
 export function tickProduction(state: GameState, ctx: SimContext): void {
   const clock = state.clock;
   const stalled: string[] = [];
-  const power = utilityStatus(state, 'power');
-  const water = utilityStatus(state, 'water');
+  const utilities = ensureUtilitySnapshot(state);
 
   for (const building of state.buildings) {
     const def = BUILDINGS[building.key];
@@ -241,8 +203,8 @@ export function tickProduction(state: GameState, ctx: SimContext): void {
     const weatherMult = weatherMultiplier(state, building, production.output);
     const terrainMult = terrainMultiplier(state, building, production.output);
     // 公用設施：電子廠吃電、食品廠／農田吃水（兩者都略受影響）
-    const powerFactor = utilityFactor(power, building);
-    const waterFactor = utilityFactor(water, building);
+    const powerFactor = utilityFactorFor(state, building, 'power');
+    const waterFactor = utilityFactorFor(state, building, 'water');
     const utilityMult =
       production.output === 'electronics'
         ? powerFactor * (0.9 + 0.1 * waterFactor)
@@ -277,15 +239,21 @@ export function tickProduction(state: GameState, ctx: SimContext): void {
 
   // 電力／食水不足提示（每 5 日一次）
   if (clock.totalDays % 5 === 0) {
-    if (state.citizens.length > 0 && power.supplyRatio < 0.85) {
+    if (state.citizens.length > 0 && utilities.power.shortage > 0.15) {
       ctx.log(
-        `全城電力供應緊張（供應 ${Math.round(power.supplyRatio * 100)}%），工廠與商廈減產；請加建發電廠。`,
+        `全城電力供應緊張（供應 ${Math.round((1 - utilities.power.shortage) * 100)}%），工廠與商廈減產；請加建發電廠並鋪設電纜。`,
         'warn',
       );
     }
-    if (state.citizens.length > 0 && water.supplyRatio < 0.85) {
+    if (state.citizens.length > 0 && utilities.water.shortage > 0.15) {
       ctx.log(
-        `全城食水供應緊張（供應 ${Math.round(water.supplyRatio * 100)}%），食品生產受影響；請加建水務設施。`,
+        `全城食水供應緊張（供應 ${Math.round((1 - utilities.water.shortage) * 100)}%），食品生產受影響；請加建水務設施並鋪設水管。`,
+        'warn',
+      );
+    }
+    if (state.citizens.length > 0 && utilities.sewage.overflow > 0.05) {
+      ctx.log(
+        `污水處理量不足（溢出 ${Math.round(utilities.sewage.overflow * 100)}%），請加建污水處理廠並接駁污水管。`,
         'warn',
       );
     }

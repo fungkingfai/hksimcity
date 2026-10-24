@@ -409,6 +409,16 @@ function addBuilding(
   return building;
 }
 
+/** 建築附近有冇水域（建築自身 needsWater 用；與 addBuilding 的判定一致） */
+function waterNear(state: GameState, x: number, y: number, w: number, h: number): boolean {
+  for (let dy = -2; dy <= h + 1; dy++) {
+    for (let dx = -2; dx <= w + 1; dx++) {
+      if (inBounds(state, x + dx, y + dy) && tileAt(state, x + dx, y + dy).terrain === 'water') return true;
+    }
+  }
+  return false;
+}
+
 /** 在中心附近找可放 w×h 建築、緊貼街道的位置（可選只放某分區） */
 function findSpot(
   state: GameState,
@@ -419,6 +429,7 @@ function findSpot(
   radius: number,
   zone?: ZoneType,
   requireRoad = true,
+  needWater = false,
 ): { x: number; y: number } | null {
   for (let r = 1; r <= radius; r++) {
     for (let dy = -r; dy <= r; dy++) {
@@ -427,6 +438,7 @@ function findSpot(
         const y = cy + dy;
         if (!freeFootprint(state, x, y, w, h)) continue;
         if (requireRoad && !touchesStreet(state, x, y, w, h)) continue;
+        if (needWater && !waterNear(state, x, y, w, h)) continue;
         if (zone) {
           let ok = true;
           for (let yy = 0; yy < h && ok; yy++) {
@@ -542,6 +554,8 @@ export function buildStarterTown(state: GameState): {
   const services: [string, number, number][] = [
     ['powerPlant', 3, 3],
     ['waterworks', 2, 2],
+    ['sewagePlant', 3, 2],
+    ['sewageOutfall', 1, 1],
     ['policeStation', 2, 2],
     ['fireStation', 2, 2],
     ['school', 2, 2],
@@ -553,13 +567,48 @@ export function buildStarterTown(state: GameState): {
   ];
   let servicePlaced = 0;
   for (const [key, w, h] of services) {
-    const spot = findSpot(state, cx, cy, w, h, 7, undefined, true);
+    const needWater = BUILDINGS[key]?.needsWater === true;
+    let spot = findSpot(state, cx, cy, w, h, 12, undefined, true, needWater);
+    if (!spot) spot = findSpot(state, cx, cy, w, h, 22, undefined, true, needWater);
     if (!spot) continue;
     const built = addBuilding(state, key, spot.x, spot.y, { auto: false });
     if (!built) continue;
     servicePlaced++;
     for (let dy = 0; dy < h; dy++) {
       for (let dx = 0; dx < w; dx++) tileAt(state, spot.x + dx, spot.y + dy).zone = null;
+    }
+  }
+
+  // 地下管網（Round 5）：starter 預先在道路下鋪齊水／污水／電力，並確保公用設施接駁
+  {
+    const markPipe = (x: number, y: number): void => {
+      if (!inBounds(state, x, y)) return;
+      const t = tileAt(state, x, y);
+      if (t.terrain === 'water' || t.terrain === 'mountain' || t.terrain === 'sand') return;
+      t.waterPipe = true;
+      t.sewerPipe = true;
+      t.powerCable = true;
+    };
+    for (let y = 0; y < state.height; y++) {
+      for (let x = 0; x < state.width; x++) {
+        const t = tileAt(state, x, y);
+        if (!t.road) continue;
+        markPipe(x, y);
+        markPipe(x + 1, y);
+        markPipe(x - 1, y);
+        markPipe(x, y + 1);
+        markPipe(x, y - 1);
+      }
+    }
+    // 每座公用設施（發電／水務／污水）周邊及腳下都要有管，確保 BFS 起點
+    for (const b of state.buildings) {
+      const utility = BUILDINGS[b.key]?.utility;
+      if (!utility?.source) continue;
+      for (let dy = -1; dy <= b.h; dy++) {
+        for (let dx = -1; dx <= b.w; dx++) {
+          markPipe(b.x + dx, b.y + dy);
+        }
+      }
     }
   }
 

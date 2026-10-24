@@ -22,11 +22,11 @@ import type {
 
 // ─────────────────────────── 世界常數 ───────────────────────────
 
-export const GAME_VERSION = 5;
+export const GAME_VERSION = 6;
 
-/** 香港地圖：480×480 格（由 CSDI／地政總署真實地理數據生成；約舊版 96×96 的 25 倍面積） */
-export const GRID_WIDTH = 480;
-export const GRID_HEIGHT = 480;
+/** 香港地圖：600×600 格（由 CSDI／地政總署真實地理數據生成；每格 112m，約舊版 96×96 的 39 倍面積） */
+export const GRID_WIDTH = 600;
+export const GRID_HEIGHT = 600;
 /** 相對 Round 2（96×96）的地圖線性放大倍率；渲染模組用嚟換算霧、天空、相機距離 */
 export const MAP_SCALE = GRID_WIDTH / 96;
 /** 地圖世界尺寸（格 × TILE_SIZE；TILE_SIZE=2） */
@@ -433,7 +433,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
     color: 0x5f6b78,
     needsRoad: true,
     interior: 'powerPlant',
-    utility: { kind: 'power', radius: 22, capacity: 1600 },
+    utility: { kind: 'power', radius: 22, capacity: 1600, source: true },
     ploppable: true,
   }),
   waterworks: B({
@@ -450,7 +450,79 @@ export const BUILDINGS: Record<string, BuildingDef> = {
     color: 0x6f9aa6,
     needsRoad: true,
     interior: 'waterworks',
-    utility: { kind: 'water', radius: 18, capacity: 2000 },
+    utility: { kind: 'water', radius: 18, capacity: 2000, source: true },
+    ploppable: true,
+  }),
+
+  waterTower: B({
+    key: 'waterTower',
+    name: '水塔',
+    desc: '小型食水加壓設施，為偏遠地區提供額外 800 人口當量供水。可鋪食水管接駁。',
+    category: 'industrial',
+    size: [1, 1],
+    cost: 420_000,
+    upkeep: 6_000,
+    workers: 0,
+    housing: 0,
+    unlockPop: 120,
+    color: 0x7fa9b5,
+    needsRoad: true,
+    interior: 'waterTower',
+    utility: { kind: 'water', radius: 10, capacity: 800, source: true },
+    ploppable: true,
+  }),
+  desalPlant: B({
+    key: 'desalPlant',
+    name: '海水化淡廠',
+    desc: '臨海大型海水化淡廠，供應 5,000 人口當量食水，旱季不減產；維護費極高。',
+    category: 'industrial',
+    size: [3, 3],
+    cost: 9_500_000,
+    upkeep: 165_000,
+    workers: 30,
+    housing: 0,
+    unlockPop: 800,
+    color: 0x5f8f9f,
+    needsWater: true,
+    needsRoad: true,
+    interior: 'desalPlant',
+    utility: { kind: 'water', radius: 16, capacity: 5000, source: true },
+    ploppable: true,
+  }),
+  sewagePlant: B({
+    key: 'sewagePlant',
+    name: '污水處理廠',
+    desc: '處理 2,200 人口當量污水。接駁污水管後可避免污水溢出污染；超載會排放未處理污水。',
+    category: 'industrial',
+    size: [3, 2],
+    cost: 3_400_000,
+    upkeep: 42_000,
+    workers: 18,
+    housing: 0,
+    unlockPop: 200,
+    color: 0x5d7f6d,
+    needsWater: true,
+    needsRoad: true,
+    interior: 'sewagePlant',
+    utility: { kind: 'sewage', radius: 18, capacity: 2200, source: true },
+    ploppable: true,
+  }),
+  sewageOutfall: B({
+    key: 'sewageOutfall',
+    name: '排污口',
+    desc: '將未處理污水直接排海，造價便宜但污染食水水質；污水處理廠是較潔淨的升級。',
+    category: 'industrial',
+    size: [1, 1],
+    cost: 520_000,
+    upkeep: 5_000,
+    workers: 0,
+    housing: 0,
+    unlockPop: 80,
+    color: 0x6b6f58,
+    needsWater: true,
+    needsRoad: true,
+    interior: 'sewageOutfall',
+    utility: { kind: 'sewage', radius: 14, capacity: 1400, source: true },
     ploppable: true,
   }),
 
@@ -493,6 +565,8 @@ export const BUILDINGS: Record<string, BuildingDef> = {
     needsWater: true,
     needsRoad: true,
     interior: 'containerPort',
+    tradeRole: 'portTerminal',
+    requiredRegion: 'containerPort',
     production: {
       output: 'goods',
       amountPerDay: 45,
@@ -500,6 +574,80 @@ export const BUILDINGS: Record<string, BuildingDef> = {
     },
     ploppable: true,
   }),
+
+  portGate: B({
+    key: 'portGate',
+    name: '碼頭閘口',
+    desc: '貨櫃碼頭車輛閘口，提升卡車進出效率與港口吞吐量；必須建於葵涌貨櫃碼頭區。',
+    category: 'logistics',
+    size: [2, 2],
+    cost: 900_000,
+    upkeep: 8_000,
+    workers: 12,
+    housing: 0,
+    unlockPop: 150,
+    color: 0x8a9670,
+    needsRoad: true,
+    interior: 'portGate',
+    requiredRegion: 'containerPort',
+    tradeRole: 'portGate',
+    ploppable: true,
+  }),
+  portYard: B({
+    key: 'portYard',
+    name: '貨櫃堆場',
+    desc: '貨櫃堆場增加 100 TEU 吞吐容量；必須建於葵涌貨櫃碼頭區。',
+    category: 'logistics',
+    size: [3, 2],
+    cost: 1_400_000,
+    upkeep: 12_000,
+    workers: 10,
+    housing: 0,
+    unlockPop: 200,
+    color: 0x7f8c7a,
+    needsRoad: true,
+    interior: 'portYard',
+    requiredRegion: 'containerPort',
+    tradeRole: 'portYard',
+    ploppable: true,
+  }),
+  airportTerminal: B({
+    key: 'airportTerminal',
+    name: '機場客運大樓',
+    desc: '赤鱲角機場客運大樓，帶來旅客、旅遊收入與航空業職位；必須建於機場區。',
+    category: 'transport',
+    size: [4, 3],
+    cost: 12_000_000,
+    upkeep: 120_000,
+    workers: 180,
+    housing: 0,
+    unlockPop: 500,
+    color: 0x7f9bb5,
+    needsRoad: true,
+    interior: 'airportTerminal',
+    requiredRegion: 'airport',
+    tradeRole: 'airportPassenger',
+    ploppable: true,
+  }),
+  airCargoTerminal: B({
+    key: 'airCargoTerminal',
+    name: '空運貨運站',
+    desc: '空運貨運站，處理高價值電子產品出口與進口貨物；必須建於機場區。',
+    category: 'logistics',
+    size: [3, 2],
+    cost: 4_500_000,
+    upkeep: 40_000,
+    workers: 90,
+    housing: 0,
+    unlockPop: 350,
+    color: 0x8f9d8a,
+    needsRoad: true,
+    interior: 'airCargoTerminal',
+    requiredRegion: 'airport',
+    tradeRole: 'airportCargo',
+    ploppable: true,
+  }),
+
   warehouse: B({
     key: 'warehouse',
     name: '貨倉',
@@ -785,9 +933,63 @@ export const BUILDINGS: Record<string, BuildingDef> = {
     color: 0xd9b23f,
     needsRoad: true,
     interior: 'busTerminus',
+    stopMode: 'bus',
     transit: { mode: 'bus', radius: 10, capacity: 500, fare: 5 },
     ploppable: true,
   }),
+
+  busStop: B({
+    key: 'busStop',
+    name: '巴士站',
+    desc: '路邊巴士站；玩家可把巴士站串成路線，服務沿線居民。',
+    category: 'transport',
+    size: [1, 1],
+    cost: 60_000,
+    upkeep: 800,
+    workers: 0,
+    housing: 0,
+    unlockPop: 20,
+    color: 0xd9b23f,
+    needsRoad: true,
+    interior: 'busStop',
+    stopMode: 'bus',
+    ploppable: true,
+  }),
+  minibusStop: B({
+    key: 'minibusStop',
+    name: '小巴站',
+    desc: '綠色專線小巴站；可串成小巴路線，班次密、票價平。',
+    category: 'transport',
+    size: [1, 1],
+    cost: 40_000,
+    upkeep: 600,
+    workers: 0,
+    housing: 0,
+    unlockPop: 20,
+    color: 0x5f9f6a,
+    needsRoad: true,
+    interior: 'minibusStop',
+    stopMode: 'minibus',
+    ploppable: true,
+  }),
+  minibusDepot: B({
+    key: 'minibusDepot',
+    name: '小巴車廠',
+    desc: '小巴車廠；開設小巴路線前必須先興建車廠。',
+    category: 'transport',
+    size: [2, 2],
+    cost: 800_000,
+    upkeep: 8_000,
+    workers: 8,
+    housing: 0,
+    unlockPop: 80,
+    color: 0x4f8f5f,
+    needsRoad: true,
+    interior: 'minibusDepot',
+    stopMode: 'minibus',
+    ploppable: true,
+  }),
+
   tramStop: B({
     key: 'tramStop',
     name: '電車站',
@@ -1011,6 +1213,111 @@ export const STARTER_TOWN = {
   /** 道路／分區布局半徑（格） */
   layoutRadius: 9,
 };
+
+// ─────────────────────────── Round 5：地下管網 ───────────────────────────
+
+export interface PipeInfo {
+  kind: 'water' | 'sewer' | 'power';
+  name: string;
+  color: string;
+  colorHex: number;
+  /** 每格造價 */
+  cost: number;
+  /** 每格每月維護費 */
+  upkeep: number;
+  /** 拆卸退還比率 */
+  refund: number;
+}
+
+export const PIPE_INFO: Record<'water' | 'sewer' | 'power', PipeInfo> = {
+  water: { kind: 'water', name: '食水管', color: '#5fb4d6', colorHex: 0x5fb4d6, cost: 900, upkeep: 1.4, refund: 0.25 },
+  sewer: { kind: 'sewer', name: '污水管', color: '#8a9f66', colorHex: 0x8a9f66, cost: 1_200, upkeep: 1.8, refund: 0.25 },
+  power: { kind: 'power', name: '電力電纜', color: '#e6c35a', colorHex: 0xe6c35a, cost: 800, upkeep: 1.1, refund: 0.25 },
+};
+
+/** 公用設施需求係數（每單位） */
+export const UTILITY_DEMAND = {
+  residential: { water: 1.0, sewage: 0.9, power: 0.35 },
+  commercial: { water: 0.6, sewage: 0.5, power: 0.5 },
+  industrial: { water: 1.5, sewage: 1.8, power: 1.2 },
+  logistics: { water: 2.0, sewage: 1.2, power: 0.8 },
+  civic: { water: 0.5, sewage: 0.5, power: 0.6 },
+  transport: { water: 0.5, sewage: 0.5, power: 0.8 },
+  decoration: { water: 0.2, sewage: 0.0, power: 0.2 },
+} as const;
+
+/** 各種公用設施未接駁時的服務係數 */
+export const UTILITY_FALLBACK = {
+  /** 全城完全未有同類供應源（self-supply bootstrap） */
+  noSource: 0.55,
+  /** 有供應源但建築未接駁管道 */
+  unconnected: 0.25,
+  /** 有接駁但容量不足時的最低係數（supplyRatio 線性夾在中間） */
+  capacityFloor: 0.5,
+};
+
+/** 地下管網維護費（每月，按管道長度） */
+export function pipeMonthlyUpkeep(counts: { water: number; sewer: number; power: number }): number {
+  return Math.round(
+    counts.water * PIPE_INFO.water.upkeep +
+      counts.sewer * PIPE_INFO.sewer.upkeep +
+      counts.power * PIPE_INFO.power.upkeep,
+  );
+}
+
+// ─────────────────────────── Round 5：巴士／小巴路線 ───────────────────────────
+
+export const TRANSIT_LINE_CONFIG = {
+  stopCost: { bus: 60_000, minibus: 40_000 },
+  vehicleCost: { bus: 1_200_000, minibus: 350_000 },
+  /** 每車每日營運成本 */
+  dailyCostPerVehicle: { bus: 1_050, minibus: 620 },
+  /** 每車載客量 */
+  capacityPerVehicle: { bus: 130, minibus: 19 },
+  /** 每日每車班次 */
+  tripsPerVehiclePerDay: { bus: 6, minibus: 10 },
+  /** 開線一次性成本 */
+  openFee: 50_000,
+  /** 票價範圍 */
+  fareMin: 3,
+  fareMax: 20,
+  vehicleMin: 1,
+  vehicleMax: 12,
+  maxStops: 20,
+  /** 路線每日營運補貼（每名乘客，港府對公共交通補貼概念） */
+  subsidyPerPassenger: 0,
+  colors: ['#d9b23f', '#5f9f6a', '#d66a3f', '#4f8fd6', '#b45fb4', '#d64f7a', '#5fbfbf'],
+} as const;
+
+// ─────────────────────────── Round 5：機場／貨櫃碼頭 ───────────────────────────
+
+export const TRADE_CONFIG = {
+  airport: {
+    passengerBase: 800,
+    passengerPerPopulation: 0.25,
+    passengerPerCommercialJob: 0.6,
+    terminalCapacity: 9000,
+    cargoCapacityPerTerminal: 400,
+    passengerFare: 120,
+    cargoRevenuePerTonne: 250,
+    weatherFactor: { clear: 1, cloudy: 0.97, rain: 0.9, storm: 0.25, fog: 0.6, snow: 0.5 },
+    /** 機場交通不足時的客流折扣 */
+    noTransitDiscount: 0.7,
+    transitRadius: 8,
+    upgradeCosts: [0, 6_000_000, 12_000_000],
+    maxLevel: 3,
+  },
+  port: {
+    terminalCapacity: 45,
+    gateCapacity: 30,
+    yardCapacity: 100,
+    revenuePerTeu: 280,
+    /** 貨櫃碼頭區範圍外建 containerPort 的吞吐折扣 */
+    offRegionPenalty: 0.7,
+    upgradeCosts: [0, 4_000_000, 8_000_000],
+    maxLevel: 3,
+  },
+} as const;
 
 /** 建築總維護費（每月） */
 export function totalUpkeep(buildings: { key: string }[]): number {

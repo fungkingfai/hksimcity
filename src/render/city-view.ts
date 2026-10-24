@@ -18,6 +18,8 @@ import { createCitizensView, type CitizensView } from './citizens';
 import { createVehiclesView, type VehiclesView } from './vehicles';
 import { createEnvironmentView, type EnvironmentView } from './environment';
 import { createZonesView, type ZonesView } from './zones';
+import { createUndergroundView, type UndergroundView } from './underground';
+import { createTransitOverlayView, type TransitOverlayView } from './transit-overlay';
 import { createInteriorView, type InteriorView } from './interior';
 import { canPlaceBuilding } from '../sim/placement';
 
@@ -69,6 +71,8 @@ export class CityView {
   private vehicles!: VehiclesView;
   private environment!: EnvironmentView;
   private zones!: ZonesView;
+  private underground!: UndergroundView;
+  private transitOverlay!: TransitOverlayView;
 
   private target = new THREE.Vector3(0, 0, 0);
   private yaw = -Math.PI / 4;
@@ -118,7 +122,7 @@ export class CityView {
     // 關閉陰影、降低渲染解析度，讓無 GPU 環境仍可流暢操作／截圖。
     // 可用 ?lite=1 / ?lite=0 強制開關。
     this.liteMode = detectLiteMode(this.renderer);
-    this.renderer.setPixelRatio(this.liteMode ? 0.55 : Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(this.liteMode ? 0.4 : Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = !this.liteMode;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -192,6 +196,8 @@ export class CityView {
     if (this.vehicles) this.vehicles.dispose();
     if (this.environment) this.environment.dispose();
     if (this.zones) this.zones.dispose();
+    if (this.underground) this.underground.dispose();
+    if (this.transitOverlay) this.transitOverlay.dispose();
     if (this.interior) {
       this.interior.dispose();
       this.interior = null;
@@ -205,6 +211,8 @@ export class CityView {
     this.citizens = createCitizensView(state);
     this.vehicles = createVehiclesView(state);
     this.zones = createZonesView(state);
+    this.underground = createUndergroundView(state);
+    this.transitOverlay = createTransitOverlayView(state);
     this.cityScene.add(
       this.terrain.group,
       this.roads.group,
@@ -212,6 +220,8 @@ export class CityView {
       this.vehicles.group,
       this.zones.group,
       this.citizens.group,
+      this.underground.group,
+      this.transitOverlay.group,
     );
 
     // 輕量模式：隱藏細小花草／碎石等裝飾 InstancedMesh，降低 fill-rate 負擔
@@ -281,6 +291,8 @@ export class CityView {
     this.buildings.update(state, dt);
     this.vehicles.update(state, dt);
     this.zones.update(state, dt);
+    this.underground.update(state, dt);
+    this.transitOverlay.update(state, dt);
     this.citizens.update(state, dt);
     this.updateGhostAndHighlights(state);
 
@@ -803,6 +815,8 @@ export class CityView {
     this.citizens?.dispose();
     this.vehicles?.dispose();
     this.zones?.dispose();
+    this.underground?.dispose();
+    this.transitOverlay?.dispose();
     this.environment?.dispose();
     this.interior?.dispose();
     this.renderer.dispose();

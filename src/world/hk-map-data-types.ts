@@ -1,7 +1,7 @@
 /**
  * 真實地理數據（CSDI／地政總署）生成的地圖資料型別。
  * 由 `tools/build-hk-data.py` 離線生成 `hk-map-data.generated.ts`；
- * 資料包含 480×480 格地形、高程、建築密度／高度、真實地名、地標、隧道與市區區塊。
+ * 資料包含 600×600 格（112m/tile）地形、高程、建築密度／高度、真實地名、地標、隧道與市區區塊。
  */
 
 export type MapLabelKind = 'district' | 'mountain' | 'water' | 'island' | 'landmark' | 'reservoir';

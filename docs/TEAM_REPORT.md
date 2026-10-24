@@ -259,3 +259,51 @@ interiors-dev 共用材質庫而不互相覆寫）。Lead 在開發中途同步�
 - [x] 線上部署（GitHub push 後 Cloudflare Workers Builds 自動部署）：<https://hksimcity.fungkingfai.workers.dev/> HTTP 200；線上實測 starter **480×480、45 棟、145 人、minimap、CSDI badge**；empty **0 路／0 樓／0 分區**；無 console error
 - [x] 截圖：`docs/screenshots/` 已更新 21 張（start／empty／zoning／map／east 杏花邨柴灣／hero／city／night／rain／snow／typhoon／interior／finance／transit／save／mobile-*）
 - [x] 截圖：real480 系列（overview／central／east 杏花邨柴灣／airport／container／night／empty）＋遊戲內 showcase 更新
+
+---
+
+# 第五輪改版：600×600 真實地圖、水塘／土地利用、地下管網、巴士路線、機場碼頭（Round 5）
+
+> 玩家第六輪要求：1) 加大至 600×600（更精細海岸線）2) 用水塘／土地利用數據補水面 3) 加入機場／貨櫃碼頭玩法 4) 加入電線及水管／水及污水系統建設（SimCity 式地下層管理）5) 加入巴士小巴路線管理。日期：2026-10-24。
+
+## R5.1 600×600 真實地圖＋水塘／土地利用
+
+- `tools/build-hk-data.py` 由 480×480／140m 升級 **600×600／112m**（範圍不變，HK1980 E 798,275–865,475、N 790,400–857,600）；DTM 5m 以 stride=5（≈4–5×4–5 子取樣）算 mean/min/max/land fraction，海岸線以 land fraction 細化。
+- **規劃署 2020 LUHK 10m raster**（data.gov.hk／CSDI）4×4 samples/tile refine 林地、農地、濕地、市區、機場、碼頭；**DTM 山勢優先**（hmax≥400m／mean≥380m→mountain；mean≥120m／hmax≥180m→hill），避免 landuse 蓋過山勢（修正過一次 hill 28,442／mountain 5,866）。
+- **水務署 17 個官方水塘 GeoJSON polygon**（CSDI file-api）rasterize：2,386 water tiles（765 由陸轉水），包括船灣淡水湖 1,061、萬宜 655、大欖涌 221、石壁 102、城門 83、大潭、香港仔、薄扶林、九龍水塘群等；黃泥涌／流水響／鶴藪以近似橢圓補底。
+- 最終 terrain（360,000 格）：water 75.3%、hill 7.9%、mountain 1.6%、urban 4.6%、forest 3.3%、grass 4.4%、fertile 1.0%、wetland 0.6%、reclaimed 0.5%、sand 0.7%；**可建 21.7%**；density>0 30,447 格；labels 69、landmarks 6、regions 15、tunnels 3、spawn (324,373) 中環；generated data 1.45MB。
+- Render 600：修正 waterDepth BFS bug、深海改單一大平面＋近岸 per-tile 水 shader（水 tris 542k→~90k）；starter overview **1.22M tris／438 calls**、empty **839k／37**；水塘、海岸線、赤鱲角、葵涌視覺正常；Playwright SwiftShader 1400×860 穩定無 crash。
+
+## R5.2 地下公用設施管網（SimCity 式）
+
+- `Tile.waterPipe/sewerPipe/powerCable`；玩家用地下層工具（`U`）逐格鋪設食水管 $900／污水管 $1,200／電力電纜 $800，月維護 $1.4／$1.8／$1.1／格，拆退 25%；不可鋪水域／山／沙／濕地，可鋪道路及建築腳下。
+- 新設施：水塔（$420k／800 PE）、海水化淡廠（$9.5M／5,000 PE）、污水處理廠（$3.4M／2,200 PE）、排污口（$520k／1,400 PE）；原有發電廠（1,600）、水務設施（2,000）改為管網供應源，`utility.source=true`。
+- `sim/utilities.ts`：BFS 由 active＋相鄰管道 source 出發；建築 footprint／四鄰接駁；容量池＋缺口比例；服務係數：冇 source 0.55 / 未接駁 0.25 / 容量不足 0.5+0.5×ratio；污水溢出、水質（排污口 -0.15／個）；`state.utilities` snapshot 每日 force 重算（BFS ~0.6ms、cached 0.001ms）。
+- `stats` 水／電 coverage 改讀管網、新增 sewageCoverage／waterQuality；production 生產效率用 utilityFactor；finance 月結加管線維護（人口<300 新系統維護 50% 折）；simulation 每日計算＋警告；placement 加機場／碼頭 region 限制。
+- Starter 預建道路三管＋公用設施接駁（實測 water/sewage/power coverage 1.0）；empty 由零開始。UI：U 地下工具列＋公用設施面板（容量／需求／覆蓋／短缺／水質／管道長度／維護）、建造「公用」6 卡、手機導覽。
+- 存檔 v6：tileEdits pipe bits（bit5–7）＋新 state 欄位；hydrate 重算 utilities。舊 96／304／480 存檔拒絕。
+
+## R5.3 巴士／小巴路線管理
+
+- 新建築：`busStop` 1×1 $60k、`minibusStop` 1×1 $40k、`minibusDepot` 2×2 $800k；`busTerminus` 可作巴士站；小巴線需車廠。
+- `TransitLine`：mode bus/minibus、stopIds（站點建築 id）、loop、vehicleCount 1–12、fare $3–20、顏色／名稱、每日 ridership／faresThisMonth。
+- 開線流程：交通面板「路線管理」→ 新增巴士／小巴線 → 地圖／站點清單點站 → 完成（`createTransitLine`；主線成本＝車數×車價＋$50k，巴士 $1.2M/車、小巴 $350k/車）；改車數／票價／暫停／刪線（退 50% 車輛）。
+- 每日結算 `tickTransitLines`（tickTransit 內 idempotent）：站 3 格住宅×0.55＋就業×0.75、票價／班距／天氣／假日吸引力、容量、收入/成本入帳（70/30 split 與舊巴士半徑避免 double count）；路線 overlay 沿道路彩色 ribbon＋站點環，只在交通面板／建線模式顯示；每線按車數 spawn 巴士／小巴（lineId、颱風停駛）。
+- UI：路線列表（載客／淨收入紅綠）、建線編輯器（草稿 chips／Undo／車數／票價／循環）、線詳情；測試 24 個。
+
+## R5.4 機場／貨櫃碼頭貿易
+
+- 新建築：`airportTerminal` 4×3 $12M（赤鱲角機場區）、`airCargoTerminal` 3×2 $4.5M（機場區）、`portGate` 2×2 $900k、`portYard` 3×2 $1.4M（葵涌貨櫃碼頭區）；`containerPort` 限碼頭區。Region 限制由 `placement.regionKindAt` 檢查。
+- `sim/trade.ts` 每日結算：機場客流 = 800 + 0.25×人口 + 0.6×商業就業（cap 9,000/客運大樓；天氣；8 格無公共交通 ×0.7），客流×$120＋貨運噸×$250；碼頭 TEU capacity=45×碼頭 level + 30×閘口 + 100×堆場（區外 ×0.7），TEU×$280；收入入 finance other，jobs/噪音；facility level 1–3 升級（機場 $6M/$12M、碼頭 $4M/$8M）。
+- Render：機場跑道／客運大樓／貨櫃碼頭 decorative 改為 starter 或場內有對應建築才顯示（empty 玩家建成後出現）；機場雙跑道、葵涌貨櫃堆場視覺。
+- UI：Y／城事／手機開貿易面板（機場客流／貨運、碼頭 TEU、收入、就業、噪音、使用率、逐座升級）；建造面板新增機場／碼頭卡及地區限制提示。
+
+## R5.5 驗收（Round 5）
+
+- `npx tsc --noEmit`：**0 error**
+- `npm test`：**61 / 61**（4 files；新增 utilities 10、transit-lines 24、core pipe save roundtrip）
+- `npm run build`：成功
+- Playwright `scripts/verify-hk.mjs`：**34 / 34 checks**（600×600、水塘/山、starter 管網覆蓋、empty 0/0/0、分區、管網工具鋪設/拆除、地下/公用/貿易面板 toggle、starter 巴士路線開通、貿易狀態、天氣、室內 32、存檔 v6 跨頁面）
+- 手機 `mobile-test.mjs`：**17 / 17**；桌面 UI `ui-click-test.mjs`：**21 / 21**
+- 線上部署：GitHub push 後 Cloudflare Workers Builds 自動部署（詳見 README 網址）
+- 截圖：`docs/screenshots/`（600 overview、東區、水塘、機場、碼頭、地下管網、路線、公用面板、貿易面板、mobile）

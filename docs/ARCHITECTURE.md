@@ -329,3 +329,24 @@ createVehiclesView(state): VehiclesView
 | 存檔 | v5 compact，約 80–140KB（視建築/市民數） |
 | 效能 | starter overview 1.33M tris／402 calls；empty 1.03M／37；sim normal <3ms（1000 人 <8ms） |
 | 已知限制 | 140m 解析度（小型海灣/街道以格簡化）；DTM 水塘水面高程>0，水塘用曲線補；舊存檔不相容 |
+
+## 10. 第五輪改版：600×600、水塘／土地利用、地下管網、巴士路線、機場碼頭（Round 5）
+
+### 10.1 地圖與數據
+- 600×600（360,000 格）、每格 112m、範圍不變（HK1980 E 798,275–865,475、N 790,400–857,600）、`MAP_SCALE=6.25`、`WORLD_SPAN=1200`、`GAME_VERSION=6`。
+- `tools/build-hk-data.py`：DTM 5m stride=5 取樣（mean/min/max/landf）、PlanD 2020 LUHK 10m raster refine 低地、WSD 17 個官方水塘 GeoJSON rasterize。新增輸入放 `tools/data/`（`impounding-reservoirs.geojson`、`landuse2020-10m.raw.z`）。
+- 可建 21.7%；terrain hill/mountain 以 DTM 優先（landuse 唔可降級山勢）。
+
+### 10.2 地下公用設施
+- `Tile.waterPipe/sewerPipe/powerCable`；工具 `pipe:water|sewer|power|remove`（main applyToolAt）；`sim/utilities.ts` BFS 管網、容量池、服務係數、污水／水質、`UtilitySnapshot`；`state.utilities` 每日 force 重算；pipe cost/upkeep config；starter 預建；save v6 tileEdits bits5–7。
+- 新設施：waterTower／desalPlant／sewagePlant／sewageOutfall（`utility.source=true`）；stats 水電 coverage 改讀 snapshot＋sewageCoverage/waterQuality；production 用 utilityFactor；finance 月結管線維護。
+
+### 10.3 巴士／小巴路線
+- `TransitLine`（mode/stopIds/loop/vehicleCount/fare/color）；`busStop`／`minibusStop`／`minibusDepot`；`sim/transit.ts` create/update/delete/tickTransitLines/getTransitLineStats/lineRoadPath/resetTransitLineMonthly；`sim/vehicles.ts` 路線車輛（`Vehicle.lineId`）；70/30 split 與舊半徑；render `transit-overlay.ts`（route ribbon）；UI 路線管理／建線器。
+
+### 10.4 機場／貨櫃碼頭
+- `airportTerminal`／`airCargoTerminal`／`portGate`／`portYard`／`containerPort`；`requiredRegion`（airport／containerPort）由 `placement.regionKindAt` 檢查；`sim/trade.ts` 每日客流／貨運／TEU／收入／就業／噪音＋`upgradeTradeBuilding`；`state.trade`；render decorative gate 改由 starter 或場內建築決定；UI 貿易面板（Y）。
+
+### 10.5 契約與 QA
+- 詳細契約：`docs/ROUND5_CONTRACTS.md`；規格：`docs/ROUND5_UTILITIES.md`／`ROUND5_TRANSIT_LINES.md`／`ROUND5_AIRPORT_PORT.md`。
+- 驗收：tsc 0、vitest **61/61**、build OK、Playwright verify **34/34**、桌面 UI **21/21**、手機 **17/17**；線上部署 Cloudflare。

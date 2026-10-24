@@ -20,6 +20,7 @@ import './css/responsive.css';
 import './css/mobile.css';
 import './css/start-screen.css';
 import './css/minimap.css';
+import './css/round5.css';
 
 import { BUILDINGS, ROAD_COST, ZONES, formatMoney } from '../core/config';
 import { applyUiMode, getUiMode } from '../core/device';
@@ -39,6 +40,10 @@ import { createToasts } from './toasts';
 import { createMobileBar } from './mobile-bar';
 import { createStartScreen } from './start-screen';
 import { createMinimap } from './minimap';
+import { createUndergroundBar } from './underground-bar';
+import { createUtilityPanel } from './utility-panel';
+import { createTradePanel } from './trade-panel';
+import { toggleTradePanel, toggleUnderground } from './round5-helpers';
 
 export interface GameUI {
   update(state: GameState): void;
@@ -89,6 +94,9 @@ export function createUI(root: HTMLElement, store: GameStore, actions: GameActio
   const mobileBar = mobileUi ? createMobileBar(hud, store, actions) : null;
   const startScreen = createStartScreen(hud, store, actions);
   const minimap = createMinimap(hud, store, actions);
+  const undergroundBar = createUndergroundBar(hud, store, actions);
+  const utilityPanel = createUtilityPanel(hud, store, actions);
+  const tradePanel = createTradePanel(hud, store, actions);
 
   const modeHint = qs<HTMLElement>(hud, '[data-k="modeHint"]')!;
   const hintText = qs<HTMLElement>(hud, '[data-k="hintText"]')!;
@@ -172,6 +180,12 @@ export function createUI(root: HTMLElement, store: GameStore, actions: GameActio
       case 'KeyL':
         actions.toggleZones();
         break;
+      case 'KeyU':
+        toggleUnderground(store, actions);
+        break;
+      case 'KeyY':
+        toggleTradePanel(store, actions);
+        break;
       case 'KeyO':
         actions.fitMap();
         break;
@@ -232,7 +246,8 @@ export function createUI(root: HTMLElement, store: GameStore, actions: GameActio
     }
 
     setClass(modeHint, 'interior', false);
-    if (!tool) {
+    if (!tool || tool.startsWith('pipe:')) {
+      // pipe 工具由地下管網工具列顯示提示
       setClass(modeHint, 'show', false);
       return;
     }
@@ -276,6 +291,9 @@ export function createUI(root: HTMLElement, store: GameStore, actions: GameActio
     setClass(hud, 'is-start-screen', Boolean(state.ui.showStartScreen));
     startScreen.update(state);
     minimap.update(state);
+    undergroundBar.update(state);
+    utilityPanel.update(state);
+    tradePanel.update(state);
     topbar.update(state);
     buildPanel.update(state);
     infoPanel.update(state);
@@ -315,6 +333,9 @@ export function createUI(root: HTMLElement, store: GameStore, actions: GameActio
       mobileBar?.destroy();
       startScreen.destroy();
       minimap.destroy();
+      undergroundBar.destroy();
+      utilityPanel.destroy();
+      tradePanel.destroy();
       root.innerHTML = '';
     },
   };

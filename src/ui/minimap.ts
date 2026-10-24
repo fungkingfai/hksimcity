@@ -1,10 +1,10 @@
 /**
- * 大地圖 Minimap（480×480 真實香港地理）。
+ * 大地圖 Minimap（600×600 真實香港地理）。
  *
  * - Canvas 2D 概覽：真實海岸線／地形底色（CSDI／地政總署數據，含建築密度陰影）、
  *   道路、四色分區（半透明）、建築點、城市（spawn）位置、目前鏡頭視野框。
  * - 效能：
- *   1) 地形底圖用 ImageData + Uint32Array 一次畫好（480²=230k 像素），只在 seed／尺寸變更時重建；
+ *   1) 地形底圖用 ImageData + Uint32Array 一次畫好（600²=360k 像素），只在 seed／尺寸變更時重建；
  *   2) 道路／分區 overlay 合併成「內容層 canvas」，只在 `ui.revision`／showZones 變更時重建（230k 單次掃描）；
  *   3) 每 ~250ms 只做 drawImage(內容層) + 建築點 + 視野框，唔會每幀全畫 230k 格；
  *   4) 摺疊／室內／開局畫面時完全停止重繪。
@@ -133,11 +133,11 @@ export function createMinimap(container: HTMLElement, store: GameStore, actions:
   root.innerHTML = `
     <header class="mm-head">
       <span class="mm-title">${ico('map')}<b>地圖</b></span>
-      <span class="mm-scale" data-k="mmScale">480×480</span>
+      <span class="mm-scale" data-k="mmScale">600×600</span>
       <button type="button" class="mm-collapse" data-act="mm-toggle" title="展開／收起小地圖" aria-label="展開或收起小地圖">${ico('chevronRight')}</button>
     </header>
     <div class="mm-body">
-      <canvas class="mm-canvas" data-k="mmCanvas" width="480" height="480" aria-label="大地圖概覽"></canvas>
+      <canvas class="mm-canvas" data-k="mmCanvas" width="600" height="600" aria-label="大地圖概覽"></canvas>
       <span class="mm-hint" data-k="mmHint">點擊／拖曳跳轉</span>
     </div>
     <div class="mm-tools">
@@ -242,7 +242,7 @@ export function createMinimap(container: HTMLElement, store: GameStore, actions:
     for (let i = 0; i < tiles.length; i++) {
       const tile = tiles[i];
       if (tile.road) {
-        // 2×2 backing pixels：480 大地圖縮到 172px 顯示時仍可見
+        // 2×2 backing pixels：600 大地圖縮到 172px 顯示時仍可見
         const x = i % w;
         const y = (i / w) | 0;
         out[i] = ROAD_ABGR;
@@ -436,9 +436,9 @@ export function createMinimap(container: HTMLElement, store: GameStore, actions:
       contentRevision !== state.ui.revision ||
       zonesChanged ||
       contentKey !== baseKey;
-    // 230k overlay 重建約 3–5ms：revision 連續變更（劃區）時最多 2 次/秒；
+    // 360k overlay 重建約 5–8ms（600×600）：revision 連續變更（劃區）時最多 1 次/秒；
     // 分區色塊 toggle 則即時重建。
-    if (contentStale && (zonesChanged || now - lastContentRebuild >= 500)) {
+    if (contentStale && (zonesChanged || now - lastContentRebuild >= 1000)) {
       rebuildContent(state);
     }
     draw(state);

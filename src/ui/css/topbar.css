@@ -635,12 +635,22 @@
 }
 
 /* 窄螢幕時隱藏較次要的資訊 */
-@media (max-width: 1420px) {
+@media (max-width: 1500px) {
   .brand-tag {
     display: none;
   }
   .top-btn {
     width: 43px;
+  }
+}
+
+@media (max-width: 1320px) {
+  .top-btn {
+    width: 34px;
+    height: 34px;
+  }
+  .top-btn span {
+    display: none;
   }
 }
 

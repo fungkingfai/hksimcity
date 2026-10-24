@@ -152,6 +152,7 @@ export function createTopbar(container: HTMLElement, store: GameStore, actions: 
           <button type="button" data-act="speed" data-speed="2" title="二倍速（2）">${ico('play2')}</button>
           <button type="button" data-act="speed" data-speed="3" title="三倍速（3）">${ico('play3')}</button>
         </div>
+        <button type="button" class="zone-view-btn" data-act="toggle-underground" title="地下管網（U）" aria-label="地下管網">${ico('pipe')}</button>
         <button type="button" class="zone-view-btn" data-act="toggle-zones" title="顯示／隱藏分區色塊（L）" aria-label="顯示分區色塊">${ico('layers')}</button>
         <span class="pause-flag" data-k="pauseFlag" aria-live="polite">暫停</span>
       </div>
@@ -161,6 +162,7 @@ export function createTopbar(container: HTMLElement, store: GameStore, actions: 
         <button type="button" class="top-btn" data-act="stats" title="城事（J）">${ico('stats')}<span>城事</span></button>
         <button type="button" class="top-btn" data-act="finance" title="財政（F）">${ico('chart')}<span>財政</span></button>
         <button type="button" class="top-btn" data-act="transit" title="交通（T）">${ico('mtr')}<span>交通</span></button>
+        <button type="button" class="top-btn" data-act="utility" title="公用設施（管網）">${ico('gauge')}<span>公用</span></button>
         <button type="button" class="top-btn" data-act="save" title="存檔">${ico('scroll')}<span>存檔</span></button>
         <button type="button" class="top-btn" data-act="help" title="說明（H）">${ico('book')}<span>說明</span></button>
       </nav>
@@ -215,6 +217,8 @@ export function createTopbar(container: HTMLElement, store: GameStore, actions: 
   const happyBar = $('[data-k="happyBar"]');
   const pauseFlag = $('[data-k="pauseFlag"]');
   const zoneViewBtn = $('[data-act="toggle-zones"]');
+  const undergroundBtn = $('[data-act="toggle-underground"]');
+  const utilityBtn = $('[data-act="utility"]');
   const speedButtons = Array.from(root.querySelectorAll<HTMLElement>('[data-act="speed"]'));
   const panelButtons: { act: string; node: HTMLElement }[] = [
     { act: 'stats', node: $('[data-act="stats"]') },
@@ -256,6 +260,20 @@ export function createTopbar(container: HTMLElement, store: GameStore, actions: 
         break;
       case 'toggle-zones':
         actions.toggleZones();
+        break;
+      case 'toggle-underground':
+        actions.toggleUnderground?.();
+        if (!actions.toggleUnderground) {
+          store.state.ui.showUnderground = !store.state.ui.showUnderground;
+          store.bumpUI();
+        }
+        break;
+      case 'utility':
+        actions.toggleUtilityPanel?.();
+        if (!actions.toggleUtilityPanel) {
+          store.state.ui.showUtilityPanel = !store.state.ui.showUtilityPanel;
+          store.bumpUI();
+        }
         break;
       case 'warning-open':
         dismissedKey = '';
@@ -442,6 +460,8 @@ export function createTopbar(container: HTMLElement, store: GameStore, actions: 
       }
     }
     setClass(zoneViewBtn, 'active', ui.showZones);
+    setClass(undergroundBtn, 'active', Boolean(ui.showUnderground));
+    setClass(utilityBtn, 'active', Boolean(ui.showUtilityPanel));
   };
 
   return {

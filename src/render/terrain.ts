@@ -262,7 +262,9 @@ export function createTerrainView(state: GameState): TerrainView {
     for (let head = 0; head < queue.length; head++) {
       const i = queue[head];
       const d = waterDepth[i];
-      if (d >= 4) continue;
+      // 注意：水深 clamp 到 4，但唔可以喺 d>=4 時停止擴散，否則大片深海會永遠
+      // 停留 depth=0（被當成淺水/近岸），令深海渲染錯誤＋水面 tris 暴增。
+      const nd = Math.min(4, d + 1);
       const x = i % width;
       const y = (i - x) / width;
       for (let dy = -1; dy <= 1; dy++) {
@@ -272,10 +274,33 @@ export function createTerrainView(state: GameState): TerrainView {
           if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
           const ni = ny * width + nx;
           if (!isWaterArr[ni] || waterDepth[ni] !== 0) continue;
-          waterDepth[ni] = d + 1;
+          waterDepth[ni] = nd;
           queue.push(ni);
         }
       }
+    }
+  }
+
+  // 渲染用水深（3×3 平滑）：避免相鄰格 aDeep 差異造成水面「格仔紋」。
+  const renderDeep = new Float32Array(count);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = y * width + x;
+      if (!isWaterArr[i]) continue;
+      let sum = 0;
+      let n = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+          const ni = ny * width + nx;
+          if (!isWaterArr[ni]) continue;
+          sum += Math.min(4, waterDepth[ni]);
+          n++;
+        }
+      }
+      renderDeep[i] = clamp01((sum / Math.max(1, n)) / 3);
     }
   }
 
@@ -475,6 +500,7 @@ export function createTerrainView(state: GameState): TerrainView {
 
   const waterPositions: number[] = [];
   const waterDeepAttr: number[] = [];
+  const waterFlatAttr: number[] = [];
   const waterIndices: number[] = [];
   const waterTiles: number[] = [];
   const WATER_SUB = width * height > 96 * 96 * 3 ? 1 : 2;
@@ -483,50 +509,76 @@ export function createTerrainView(state: GameState): TerrainView {
     const ti = ty * width + tx;
     return isWaterArr[ti] ? clamp01(waterDepth[ti] / 3) : 0;
   };
+  const deepAtCenter = (tx: number, ty: number): number => {
+    if (tx < 0 || ty < 0 || tx >= width || ty >= height) return 0;
+    const ti = ty * width + tx;
+    return isWaterArr[ti] ? renderDeep[ti] : 0;
+  };
+  // fx/fy 為 tile 座標（浮點）；以 tile 中心雙線性 interpolate，令水面顏色平滑過渡。
   const sampleDepth = (fx: number, fy: number): number => {
-    const x0 = Math.floor(fx);
-    const y0 = Math.floor(fy);
-    const u = fx - x0;
-    const v = fy - y0;
-    const d00 = depthAt(x0, y0);
-    const d10 = depthAt(x0 + 1, y0);
-    const d01 = depthAt(x0, y0 + 1);
-    const d11 = depthAt(x0 + 1, y0 + 1);
+    const cx = fx - 0.5;
+    const cy = fy - 0.5;
+    const x0 = Math.floor(cx);
+    const y0 = Math.floor(cy);
+    const u = clamp01(cx - x0);
+    const v = clamp01(cy - y0);
+    const d00 = deepAtCenter(x0, y0);
+    const d10 = deepAtCenter(x0 + 1, y0);
+    const d01 = deepAtCenter(x0, y0 + 1);
+    const d11 = deepAtCenter(x0 + 1, y0 + 1);
     return clamp01((d00 * (1 - u) + d10 * u) * (1 - v) + (d01 * (1 - u) + d11 * u) * v);
   };
+  // 600 地圖水面：近岸（水深 < 3）逐格細分；深海按「每行連續水面」合併成長 quad，
+  // 大幅減少水面頂點／三角形（542k → ~30k tris），減低軟件 WebGL 記憶體同頂點負荷。
   for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
+    let x = 0;
+    while (x < width) {
       const i = y * width + x;
-      if (!isWaterArr[i]) continue;
+      if (!isWaterArr[i]) {
+        x++;
+        continue;
+      }
+      const depth = waterDepth[i];
+      if (depth < 3) {
+        // 近岸：逐格（WATER_SUB=1 → 2 tris）
+        waterTiles.push(i);
+        const { x: wx, z: wz } = tileWorld(x, y, width, height);
+        const base = waterPositions.length / 3;
+        for (let gy = 0; gy <= WATER_SUB; gy++) {
+          for (let gx = 0; gx <= WATER_SUB; gx++) {
+            waterPositions.push(
+              wx - TILE / 2 + (gx / WATER_SUB) * TILE,
+              WATER_SURFACE_Y,
+              wz - TILE / 2 + (gy / WATER_SUB) * TILE,
+            );
+            waterDeepAttr.push(sampleDepth(x + gx / WATER_SUB, y + gy / WATER_SUB));
+            waterFlatAttr.push(0);
+          }
+        }
+        const row = WATER_SUB + 1;
+        for (let gy = 0; gy < WATER_SUB; gy++) {
+          for (let gx = 0; gx < WATER_SUB; gx++) {
+            const a = base + gy * row + gx;
+            const b = a + 1;
+            const c = a + row;
+            const d = c + 1;
+            waterIndices.push(a, c, b, b, c, d);
+          }
+        }
+        x++;
+        continue;
+      }
+      // 深海（depth>=3）：唔建 geometry，交由下面單一大平面（避免巨大三角形造成
+      // overview 摩爾紋／放射條紋），同時大幅減 tris。
       waterTiles.push(i);
-      const { x: wx, z: wz } = tileWorld(x, y, width, height);
-      const base = waterPositions.length / 3;
-      for (let gy = 0; gy <= WATER_SUB; gy++) {
-        for (let gx = 0; gx <= WATER_SUB; gx++) {
-          waterPositions.push(
-            wx - TILE / 2 + (gx / WATER_SUB) * TILE,
-            WATER_SURFACE_Y,
-            wz - TILE / 2 + (gy / WATER_SUB) * TILE,
-          );
-          waterDeepAttr.push(sampleDepth(x + gx / WATER_SUB, y + gy / WATER_SUB));
-        }
-      }
-      const row = WATER_SUB + 1;
-      for (let gy = 0; gy < WATER_SUB; gy++) {
-        for (let gx = 0; gx < WATER_SUB; gx++) {
-          const a = base + gy * row + gx;
-          const b = a + 1;
-          const c = a + row;
-          const d = c + 1;
-          waterIndices.push(a, c, b, b, c, d);
-        }
-      }
+      x++;
     }
   }
 
   const waterGeo = track(new THREE.BufferGeometry());
   waterGeo.setAttribute('position', new THREE.Float32BufferAttribute(waterPositions, 3));
   waterGeo.setAttribute('aDeep', new THREE.Float32BufferAttribute(waterDeepAttr, 1));
+  waterGeo.setAttribute('aOuter', new THREE.Float32BufferAttribute(waterFlatAttr, 1));
   waterGeo.setIndex(waterIndices);
   waterGeo.computeBoundingSphere();
 
@@ -567,18 +619,21 @@ export function createTerrainView(state: GameState): TerrainView {
         void main() {
           vec3 p = position;
           float t = uTime;
+          // 遠景淡出波形：overview 時避免大量小 quad 的波形產生摩爾紋／放射條紋
+          float camDist = length(cameraPosition - (modelMatrix * vec4(p, 1.0)).xyz);
+          float waveK = (1.0 - smoothstep(90.0, 260.0, camDist)) * (1.0 - aOuter);
           // 近岸細浪 + 颱風大浪
           float w1 = sin(p.x * 1.6 + t * 1.3) * cos(p.z * 1.2 - t * 0.9);
           float w2 = sin((p.x + p.z) * 2.9 + t * 2.1);
           float w3 = sin(p.z * 0.7 - t * 0.55) * 0.6;
-          float h = (w1 * 0.6 + w2 * 0.3 + w3 * 0.25) * uWave * (1.0 + uStorm * 2.4);
-          p.y += h * (1.0 - aOuter);
+          float h = (w1 * 0.6 + w2 * 0.3 + w3 * 0.25) * uWave * (1.0 + uStorm * 2.4) * waveK;
+          p.y += h;
           float dx1 = 1.6 * cos(p.x * 1.6 + t * 1.3) * cos(p.z * 1.2 - t * 0.9);
           float dz1 = -1.2 * sin(p.x * 1.6 + t * 1.3) * sin(p.z * 1.2 - t * 0.9);
           float dx2 = 2.9 * cos((p.x + p.z) * 2.9 + t * 2.1);
-          float dhx = (dx1 * 0.6 + dx2 * 0.3) * uWave * (1.0 + uStorm * 2.4);
-          float dhz = (dz1 * 0.6 + dx2 * 0.3) * uWave * (1.0 + uStorm * 2.4);
-          vNormalW = aOuter > 0.5 ? vec3(0.0, 1.0, 0.0) : normalize(vec3(-dhx, 1.0, -dhz));
+          float dhx = (dx1 * 0.6 + dx2 * 0.3) * uWave * (1.0 + uStorm * 2.4) * waveK;
+          float dhz = (dz1 * 0.6 + dx2 * 0.3) * uWave * (1.0 + uStorm * 2.4) * waveK;
+          vNormalW = normalize(vec3(-dhx, 1.0, -dhz));
           vec4 wp = modelMatrix * vec4(p, 1.0);
           vWorldPos = wp.xyz;
           vDeep = aDeep;
@@ -627,10 +682,10 @@ export function createTerrainView(state: GameState): TerrainView {
           float glint = pow(max(dot(N, H), 0.0), 16.0) * 0.07 * uDaylight * detail;
           col += uSunColor * glint;
           // 岸邊白沫（近岸淺水 + 雨天／颱風）
-          float foam = smoothstep(0.55, 0.95, 1.0 - vDeep) * (0.15 + uRain * 0.5 + uStorm * 0.5);
-          foam *= 0.5 + 0.5 * sin(vWorldPos.x * 3.0 + vWorldPos.z * 2.0 + uTime * 2.5);
+          float foam = smoothstep(0.62, 0.98, 1.0 - vDeep) * (0.1 + uRain * 0.4 + uStorm * 0.4);
+          foam *= 0.55 + 0.45 * sin(vWorldPos.x * 0.9 + vWorldPos.z * 0.7 + uTime * 1.6);
           // 遠處 damp foam，避免近岸白沫在 overview 變成摩爾紋
-          foam *= 0.3 + 0.7 * detail;
+          foam *= detail * detail;
           col += vec3(0.82, 0.9, 0.92) * foam * (0.25 + uDaylight * 0.5);
           // 雨天的水面灰暗
           col *= 1.0 - uRain * 0.1 - uStorm * 0.12;
@@ -654,46 +709,21 @@ export function createTerrainView(state: GameState): TerrainView {
   track(waterMesh);
   group.add(waterMesh);
 
-  // ───────────── 3b. 無邊海面（地圖外的外框 quads，用水 shader 同一材質） ─────────────
-  // 地圖尺寸 960×960；overview 時地圖外係天空背景會見到方形邊。加四塊大 quads
-  // 圍住地圖外圍（-5000..5000），並用水 shader 同一 deep 顏色 + 霧 → 無邊海面。
-  // 注意：唔可以再放一大塊響地圖下面（同地形深度差太細會 zoom out 時 z-fight）。
-  {
-    const halfW = (width * TILE) / 2;
-    const halfH = (height * TILE) / 2;
-    const ext = Math.max(halfW, halfH) + 4200;
-    const rects: [number, number, number, number][] = [
-      // x0, z0, x1, z1
-      [-ext, -ext, ext, -halfH + 0.01], // 北
-      [-ext, halfH - 0.01, ext, ext], // 南
-      [-ext, -halfH, -halfW + 0.01, halfH], // 西
-      [halfW - 0.01, -halfH, ext, halfH], // 東
-    ];
-    const pos: number[] = [];
-    const deep: number[] = [];
-    const outerAttr: number[] = [];
-    const idx: number[] = [];
-    rects.forEach(([x0, z0, x1, z1]) => {
-      const base = pos.length / 3;
-      pos.push(x0, WATER_SURFACE_Y, z0, x1, WATER_SURFACE_Y, z0, x0, WATER_SURFACE_Y, z1, x1, WATER_SURFACE_Y, z1);
-      for (let k = 0; k < 4; k++) {
-        // aDeep = 0：外框用淺水色，同地圖邊緣水面顏色一致（無邊海面）
-        deep.push(0);
-        outerAttr.push(1);
-      }
-      idx.push(base, base + 2, base + 1, base + 1, base + 2, base + 3);
-    });
-    const outerGeo = track(new THREE.BufferGeometry());
-    outerGeo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    outerGeo.setAttribute('aDeep', new THREE.Float32BufferAttribute(deep, 1));
-    outerGeo.setAttribute('aOuter', new THREE.Float32BufferAttribute(outerAttr, 1));
-    outerGeo.setIndex(idx);
-    const outerMeshes = new THREE.Mesh(outerGeo, waterMat);
-    outerMeshes.name = 'terrain-outer-sea';
-    outerMeshes.frustumCulled = false;
-    track(outerMeshes);
-    group.add(outerMeshes);
-  }
+  // ───────────── 3b. 深海大平面（地圖內深海 + 地圖外無邊海面） ─────────────
+  // 深海用一塊純色大平面（Basic + 霧）避免巨大 shader 三角形喺 overview 出摩爾紋；
+  // 淺水／近岸仍有 per-tile 水 shader mesh（見上），顏色於邊界自然過渡。
+  const outerSeaMat = track(new THREE.MeshBasicMaterial({ color: WATER_DEEP[state.clock.season], fog: true }));
+  const outerSeaGeo = track(new THREE.PlaneGeometry(1, 1));
+  outerSeaGeo.rotateX(-Math.PI / 2);
+  const outerSea = new THREE.Mesh(outerSeaGeo, outerSeaMat);
+  outerSea.name = 'terrain-outer-sea';
+  outerSea.position.y = WATER_SURFACE_Y - 0.02;
+  const deepSpan = Math.max(width, height) * TILE + 8400;
+  outerSea.scale.set(deepSpan, 1, deepSpan);
+  outerSea.frustumCulled = false;
+  outerSea.renderOrder = -1; // 先畫深海平面，淺水 mesh 之後覆蓋
+  track(outerSea);
+  group.add(outerSea);
 
   // ───────────── 4. 植被／道具擺放 ─────────────
 
@@ -886,8 +916,8 @@ export function createTerrainView(state: GameState): TerrainView {
           break;
       }
 
-      // 貨櫃碼頭：貨櫃堆（根據 HK_REGIONS；只限 starter，empty 為完全空地）
-      if (showcaseCity && terrain !== 'water') {
+      // 貨櫃碼頭：貨櫃堆（根據 HK_REGIONS；empty 由 update 按港口建築動態顯示）
+      if (terrain !== 'water') {
         for (const region of HK_REGIONS) {
           if (region.kind !== 'containerPort') continue;
           if (designX < region.x0 || designX > region.x1 || designY < region.y0 || designY > region.y1) continue;
@@ -1374,7 +1404,13 @@ export function createTerrainView(state: GameState): TerrainView {
 
   // ───────────── 8. 機場跑道與飛機（世界尺度；empty 模式完全唔生成人造構築物） ─────────────
 
-  if (showcaseCity) {
+  // 機場裝飾：starter 或有機場建築（airportTerminal／airCargoTerminal）時才顯示；
+  // empty 模式玩家建成機場後會即時出現（由 update 設定 group.visible）。
+  const airportDecor = new THREE.Group();
+  airportDecor.name = 'terrain-airport-decor';
+  airportDecor.visible = false;
+  group.add(airportDecor);
+  {
     const runwayMat = track(new THREE.MeshLambertMaterial({ color: 0x53585c }));
     const slabGeo = track(new THREE.BoxGeometry(1, 0.02, 1));
     const slabList: { x: number; z: number; y: number; w: number; d: number }[] = [];
@@ -1464,7 +1500,7 @@ export function createTerrainView(state: GameState): TerrainView {
       });
       slabs.instanceMatrix.needsUpdate = true;
       track(slabs);
-      group.add(slabs);
+      airportDecor.add(slabs);
     }
     if (dashList.length > 0) {
       const dashes = new THREE.InstancedMesh(dashGeo, dashMat, dashList.length);
@@ -1480,7 +1516,7 @@ export function createTerrainView(state: GameState): TerrainView {
       });
       dashes.instanceMatrix.needsUpdate = true;
       track(dashes);
-      group.add(dashes);
+      airportDecor.add(dashes);
     }
     if (terminalBlocks.length > 0) {
       const termGeo = track(new THREE.BoxGeometry(1, 1, 1));
@@ -1500,7 +1536,7 @@ export function createTerrainView(state: GameState): TerrainView {
       });
       term.instanceMatrix.needsUpdate = true;
       track(term);
-      group.add(term);
+      airportDecor.add(term);
     }
     if (planes.length > 0) {
       const planeGeo = track(createAirplaneGeometry());
@@ -1519,7 +1555,7 @@ export function createTerrainView(state: GameState): TerrainView {
       });
       planeMesh.instanceMatrix.needsUpdate = true;
       track(planeMesh);
-      group.add(planeMesh);
+      airportDecor.add(planeMesh);
     }
   }
 
@@ -2036,6 +2072,7 @@ export function createTerrainView(state: GameState): TerrainView {
     const shallow = waterUniforms.uShallowColor.value as THREE.Color;
     deep.setHex(WATER_DEEP[s.clock.season]);
     shallow.setHex(WATER_SHALLOW[s.clock.season]);
+    outerSeaMat.color.copy(deep);
     lastSeason = s.clock.season;
     lastSnow = snow;
     lastWeather = s.clock.weather;
@@ -2126,6 +2163,15 @@ export function createTerrainView(state: GameState): TerrainView {
       }
 
       checkOccupancy(s);
+
+      // ── 機場／貨櫃碼頭裝飾視覺 gate（Round 5）──
+      // starter 照舊顯示；empty 由玩家建成相關建築後才出現。
+      const hasKeys = (keys: readonly string[]): boolean => s.buildings.some((b) => keys.includes(b.key));
+      airportDecor.visible = s.gameMode === 'starter' || hasKeys(['airportTerminal', 'airCargoTerminal']);
+      const showPortDecor = s.gameMode === 'starter' || hasKeys(['containerPort', 'portGate', 'portYard']);
+      for (const layer of layers) {
+        if (layer.kind === 'container') layer.mesh.visible = showPortDecor && layer.list.length > 0;
+      }
     },
     dispose(): void {
       for (const d of disposables) d.dispose();

@@ -35,6 +35,8 @@ const MAP_W = GRID_WIDTH;
 const MAP_H = GRID_HEIGHT;
 const MAP_CELLS = GRID_WIDTH * GRID_HEIGHT;
 const MAP_LABEL = `${MAP_W}×${MAP_H}`;
+/** 相對 Round 2（96×96）的面積倍數（600² → 39 倍） */
+const MAP_AREA_MULT = Math.max(1, Math.round(MAP_CELLS / (96 * 96)));
 
 const MODES: ModeDef[] = [
   {
@@ -59,11 +61,11 @@ const MODES: ModeDef[] = [
     title: '由零開始',
     badge: '挑戰',
     icon: 'sprout',
-    desc: `完全空地圖：冇道路、冇建築、冇任何預置設施；5 名市民＋${formatMoneyShort(START_TREASURY)}，由第一條路開始。地圖 ${MAP_LABEL}（約舊版 25 倍面積）。`,
+    desc: `完全空地圖：冇道路、冇建築、冇任何預置設施；5 名市民＋${formatMoneyShort(START_TREASURY)}，由第一條路開始。地圖 ${MAP_LABEL}（約舊版 ${MAP_AREA_MULT} 倍面積）。`,
     points: [
       '完全空地：0 道路、0 建築、0 分區',
       '5 名市民、$800 萬起動資金',
-      `地圖 ${MAP_LABEL}（約 ${num(MAP_CELLS)} 格，舊版 25 倍面積）`,
+      `地圖 ${MAP_LABEL}（約 ${num(MAP_CELLS)} 格，舊版 ${MAP_AREA_MULT} 倍面積）`,
     ],
     stats: [
       ['起始庫房', formatMoneyShort(START_TREASURY)],

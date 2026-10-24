@@ -13,6 +13,7 @@
 import type { GameActions, GameState } from '../core/types';
 import type { GameStore } from '../core/store';
 import { ico, type IconName } from './icons';
+import { toggleTradePanel, toggleUnderground } from './round5-helpers';
 
 export interface MobileBarView {
   update(state: GameState): void;
@@ -20,7 +21,7 @@ export interface MobileBarView {
 }
 
 interface NavItem {
-  act: 'build' | 'info' | 'finance' | 'transit' | 'save' | 'help';
+  act: 'build' | 'info' | 'underground' | 'route' | 'trade' | 'finance' | 'transit' | 'save' | 'help';
   label: string;
   icon: IconName;
 }
@@ -28,6 +29,9 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { act: 'build', label: '建造', icon: 'hammer' },
   { act: 'info', label: '城事', icon: 'stats' },
+  { act: 'underground', label: '管網', icon: 'pipe' },
+  { act: 'route', label: '路線', icon: 'route' },
+  { act: 'trade', label: '貿易', icon: 'plane' },
   { act: 'finance', label: '財政', icon: 'chart' },
   { act: 'transit', label: '交通', icon: 'mtr' },
   { act: 'save', label: '存檔', icon: 'scroll' },
@@ -96,6 +100,18 @@ export function createMobileBar(hud: HTMLElement, store: GameStore, actions: Gam
         break;
       case 'info':
         setSheet(hud.classList.contains('is-info-open') ? null : 'info');
+        break;
+      case 'underground':
+        closeSheets();
+        toggleUnderground(store, actions);
+        break;
+      case 'route':
+        closeSheets();
+        actions.toggleTransit();
+        break;
+      case 'trade':
+        closeSheets();
+        toggleTradePanel(store, actions);
         break;
       case 'finance':
         closeSheets();
@@ -176,20 +192,22 @@ export function createMobileBar(hud: HTMLElement, store: GameStore, actions: Gam
     buildBtn.classList.toggle('is-active', ui.tool != null || hud.classList.contains('is-build-open'));
     infoBtn.classList.toggle('is-active', ui.selectedId != null || hud.classList.contains('is-info-open'));
 
-    const overlaySig = `${ui.showFinance}|${ui.showTransit}|${ui.showSave}|${ui.showHelp}|${ui.showTutorial}`;
+    const overlaySig = `${ui.showFinance}|${ui.showTransit}|${ui.showSave}|${ui.showHelp}|${ui.showTutorial}|${ui.showUtilityPanel}|${ui.showTradePanel}|${ui.showUnderground}`;
     if (overlaySig !== lastOverlaySig) {
       lastOverlaySig = overlaySig;
-      for (const item of ['finance', 'transit', 'save', 'help'] as const) {
+      for (const item of ['underground', 'finance', 'transit', 'save', 'help'] as const) {
         const btn = nav.querySelector<HTMLElement>(`[data-m-act="${item}"]`);
         if (!btn) continue;
         const active =
-          item === 'finance'
-            ? ui.showFinance
-            : item === 'transit'
-              ? ui.showTransit
-              : item === 'save'
-                ? ui.showSave
-                : ui.showHelp || ui.showTutorial;
+          item === 'underground'
+            ? Boolean(ui.showUnderground)
+            : item === 'finance'
+              ? ui.showFinance
+              : item === 'transit'
+                ? ui.showTransit
+                : item === 'save'
+                  ? ui.showSave
+                  : ui.showHelp || ui.showTutorial;
         btn.classList.toggle('is-active', active);
       }
     }
