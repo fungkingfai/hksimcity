@@ -99,6 +99,26 @@ npm run preview    # 預覽生產建置：http://127.0.0.1:4273
 
 **新手五步（分區玩法）**：鋪馬路（已含行人路）→ 劃住宅區（Z）→ 劃商業區（C）／工業區（V）／農業區（N）→ 建公共設施（警署、消防局、學校、醫院、發電廠、水務）→ 看 RCI+F 需求條平衡城市、調稅率與擴展交通。
 
+## 截圖
+
+| **真實 600×600 全港 overview** | **東區：杏花邨／柴灣／小西灣** |
+|---|---|
+| ![地圖](docs/screenshots/map.png) | ![東區](docs/screenshots/east.png) |
+| **地下管網（U）** | **公用設施面板** |
+| ![地下管網](docs/screenshots/underground.png) | ![公用設施](docs/screenshots/utility.png) |
+| **巴士／小巴路線 overlay** | **交通／路線管理面板** |
+| ![路線](docs/screenshots/transit-route.png) | ![路線管理](docs/screenshots/transit-lines.png) |
+| **機場／貨櫃碼頭貿易面板** | **水塘（船灣淡水湖）** |
+| ![貿易](docs/screenshots/trade.png) | ![水塘](docs/screenshots/reservoir.png) |
+| **走進建築室內（機場離境大堂）** | **維港夜景** |
+| ![室內](docs/screenshots/interior.png) | ![夜景](docs/screenshots/night.png) |
+| **颱風襲港** | **寒潮雪景** |
+| ![颱風](docs/screenshots/typhoon.png) | ![雪景](docs/screenshots/snow.png) |
+| **由零開始：完全空地圖** | **開局：600×600 真實地理** |
+| ![空地圖](docs/screenshots/empty.png) | ![開局](docs/screenshots/start.png) |
+
+> 更多截圖（市區、分區、財務、暴雨、存檔、手機版）見 [`docs/screenshots/`](docs/screenshots/)。
+
 ## 開發
 
 ```bash
@@ -117,16 +137,13 @@ npm run verify:mobile  # 手機介面與觸控驗收
 ```
 src/
   core/      型別、香港建築／資源資料表（config）、狀態管理、存檔、開新局、格式化
-  world/     香港地圖程序化生成（維港、山脈、離島、填海、隧道、預設市中心）
-  sim/       模擬：時間天氣、市民、人口、物流、生產、交通、財政、統計、尋路、擺放
-  render/    three.js：城市視圖、地形、道路行人路、建築、市民、車輛、環境、室內、模型庫
-  ui/        DOM 介面：頂欄、建造、城事、財政、交通、存檔／教學、室內面板、手機版
   world/     真實地理數據（hk-map-data.generated.ts）＋世界生成
+  sim/       模擬：時間天氣、市民、人口、物流、生產、公用管網（utilities.ts）、
+             巴士小巴路線（transit.ts／vehicles.ts）、機場碼頭貿易（trade.ts）、財政、統計、尋路
+  render/    three.js：城市視圖、地形、道路、建築、市民、車輛、環境、地下管網、路線 overlay、室內、模型庫
+  ui/        DOM 介面：頂欄、建造、城事、財政、交通／路線、公用設施、貿易、存檔／教學、室內、手機版
   main.ts    組裝 actions、主迴圈、存檔排程
-tools/       真實地理數據離線生成腳本（DTM 5m／建築輪廓／水塘／土地利用）
-src/sim/utilities.ts  地下管網（水/污水/電力 BFS、容量、管道成本）
-src/sim/transit.ts／vehicles.ts  巴士小巴路線管理、路線車輛
-src/sim/trade.ts      機場／貨櫃碼頭貿易結算
+tools/       真實地理數據離線生成腳本（DTM 5m／建築輪廓／水塘／土地利用）＋tools/data
 docs/        研究、GDD、技術架構、多 Agent 開發報告、截圖
 tests/       vitest 單元與整合測試
 scripts/     截圖與自動驗收工具
