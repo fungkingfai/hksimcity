@@ -8,7 +8,7 @@
 import * as THREE from 'three';
 import { BUILDINGS, MAP_SCALE, ROAD_COST, TERRAIN_INFO, ZONES, zoneOfTool } from '../core/config';
 import { isMobileUi } from '../core/device';
-import type { GameActions, GameState } from '../core/types';
+import type { GameActions, GameState, RoadGrade } from '../core/types';
 import type { FocusPayload, GameStore as Store } from '../core/store';
 import { buildingAnchor, TILE, tileWorld, worldToTileIndex } from './coords';
 import { createTerrainView, type TerrainView } from './terrain';
@@ -22,7 +22,9 @@ import { createUndergroundView, type UndergroundView } from './underground';
 import { createTransitOverlayView, type TransitOverlayView } from './transit-overlay';
 import { createRailView, type RailView } from './rail';
 import { createInteriorView, type InteriorView } from './interior';
-import { canPlaceBuilding } from '../sim/placement';
+import { canPlaceBuilding, roadPathBetween } from '../sim/placement';
+import { createShenzhenOverlayView, type ShenzhenOverlayView } from './shenzhen-overlay';
+import { isShenzhenSideTile } from '../world/border';
 import { canPlaceRail, railToolGrade } from '../sim/rail';
 
 export interface CityViewOptions {
@@ -76,6 +78,13 @@ export class CityView {
   private underground!: UndergroundView;
   private transitOverlay!: TransitOverlayView;
   private rail!: RailView;
+  private shenzhenOverlay!: ShenzhenOverlayView;
+  /** #11：道路拖曳預覽（L 形路徑） */
+  private roadDrag: { start: number; grade: RoadGrade } | null = null;
+  private lastRoadPreviewSig = '';
+  private roadPreview!: THREE.InstancedMesh;
+  private roadPreviewMat!: THREE.MeshBasicMaterial;
+  private roadPreviewGeo!: THREE.PlaneGeometry;
 
   private target = new THREE.Vector3(0, 0, 0);
   private yaw = -Math.PI / 4;
@@ -202,6 +211,7 @@ export class CityView {
     if (this.underground) this.underground.dispose();
     if (this.transitOverlay) this.transitOverlay.dispose();
     if (this.rail) this.rail.dispose();
+    if (this.shenzhenOverlay) this.shenzhenOverlay.dispose();
     if (this.interior) {
       this.interior.dispose();
       this.interior = null;
@@ -218,6 +228,7 @@ export class CityView {
     this.underground = createUndergroundView(state);
     this.transitOverlay = createTransitOverlayView(state);
     this.rail = createRailView(state);
+    this.shenzhenOverlay = createShenzhenOverlayView(state);
     this.cityScene.add(
       this.terrain.group,
       this.roads.group,
@@ -228,6 +239,7 @@ export class CityView {
       this.underground.group,
       this.transitOverlay.group,
       this.rail.group,
+      this.shenzhenOverlay.group,
     );
 
     // 輕量模式：隱藏細小花草／碎石等裝飾 InstancedMesh，降低 fill-rate 負擔
@@ -264,6 +276,27 @@ export class CityView {
     this.hoverMesh.visible = false;
     this.cityScene.add(this.hoverMesh);
 
+    // #11：道路拉線 L 路徑預覽（單一 InstancedMesh；最多 1 draw）
+    const previewGeo = new THREE.PlaneGeometry(TILE * 0.94, TILE * 0.94);
+    previewGeo.rotateX(-Math.PI / 2);
+    const previewMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.48,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    this.roadPreviewGeo = previewGeo;
+    this.roadPreviewMat = previewMat;
+    this.roadPreview = new THREE.InstancedMesh(previewGeo, previewMat, 1300);
+    this.roadPreview.name = 'road-path-preview';
+    this.roadPreview.count = 0;
+    this.roadPreview.visible = false;
+    this.roadPreview.frustumCulled = false;
+    this.roadPreview.renderOrder = 6;
+    this.cityScene.add(this.roadPreview);
+    this.roadDrag = null;
+
     // 選取建築光環
     const ringGeo = new THREE.RingGeometry(0.82, 1, 40);
     const ringMat = new THREE.MeshBasicMaterial({ color: 0xf3c969, transparent: true, opacity: 0.9, depthWrite: false, side: THREE.DoubleSide });
@@ -281,6 +314,11 @@ export class CityView {
 
   // ───────────────────────── 主迴圈 ─────────────────────────
 
+  /** 即時設定建築圖層可見性（UI toggle 用；唔使等下一 frame） */
+  setBuildingsVisible(visible: boolean): void {
+    this.buildings.group.visible = visible;
+  }
+
   frame(): void {
     if (this.disposed) return;
     const now = performance.now();
@@ -294,7 +332,9 @@ export class CityView {
     this.environment.update(state, dt, this.activeCamera());
     this.terrain.update(state, dt);
     this.roads.update(state, dt);
+    this.buildings.group.visible = state.ui.showBuildings !== false;
     this.buildings.update(state, dt, this.activeCamera(), this.distance);
+    this.shenzhenOverlay.update(state, dt, this.hover);
     this.vehicles.update(state, dt);
     this.zones.update(state, dt);
     this.underground.update(state, dt);
@@ -361,6 +401,16 @@ export class CityView {
       this.selectionRing.position.set(cx, 0.44, cz);
       const scale = Math.max(selected.w, selected.h) * TILE * 0.72;
       this.selectionRing.scale.setScalar(scale);
+    }
+
+    // #11：道路拖曳預覽（M／N 改 grade 或 hover 移動時更新）
+    if (this.roadDrag) {
+      const grade = state.ui.roadGrade ?? this.roadDrag.grade;
+      const sig = `${this.roadDrag.start}|${this.hover}|${grade}`;
+      if (sig !== this.lastRoadPreviewSig) {
+        this.lastRoadPreviewSig = sig;
+        this.updateRoadPreview(state, this.hover);
+      }
     }
 
     // 建造幽靈
@@ -451,6 +501,16 @@ export class CityView {
     this.dragLast.copy(this.dragStart);
     this.dragDistance = 0;
     this.lastPaintTile = -1;
+    // #11：道路工具 = 起點→終點拉線（唔再逐格刷）
+    if (e.button === 0 && !e.shiftKey && this.store.state.ui.tool === 'road') {
+      const tile = this.pickTile(e.clientX, e.clientY);
+      if (tile >= 0) {
+        this.hover = tile;
+        this.roadDrag = { start: tile, grade: this.store.state.ui.roadGrade ?? 'surface' };
+        this.updateRoadPreview(this.store.state, tile);
+      }
+      return;
+    }
     if (e.button === 0 && !e.shiftKey && this.isPaintTool(this.store.state.ui.tool)) {
       this.paintRoadAt(e.clientX, e.clientY);
     }
@@ -465,6 +525,10 @@ export class CityView {
     this.updatePointer(e.clientX, e.clientY);
     this.updateHover();
     if (!this.dragging) return;
+    if (this.roadDrag) {
+      this.updateRoadPreview(this.store.state, this.hover);
+      return;
+    }
     const dx = e.clientX - this.dragLast.x;
     const dy = e.clientY - this.dragLast.y;
     this.dragLast.set(e.clientX, e.clientY);
@@ -495,6 +559,11 @@ export class CityView {
     const wasDragging = this.dragging;
     this.dragging = false;
     this.dragButton = -1;
+    if (this.roadDrag) {
+      if (wasDragging) this.finishRoadDrag(this.store.state);
+      else this.clearRoadPreview();
+      return;
+    }
     if (!wasDragging) return;
     if (this.dragDistance < 7) {
       if (e.button === 0) this.clickAt(e.clientX, e.clientY);
@@ -510,6 +579,7 @@ export class CityView {
     if (this.touchUi) return;
     this.hover = -1;
     this.hoverMesh.visible = false;
+    if (this.roadDrag && !this.dragging) this.clearRoadPreview();
   };
 
   // ───────────────────────── 手機觸控手勢 ─────────────────────────
@@ -605,6 +675,7 @@ export class CityView {
   }
 
   private onPointerCancel = (e: PointerEvent): void => {
+    if (this.roadDrag) this.clearRoadPreview();
     if (!this.touchUi) return;
     this.touchPointers.delete(e.pointerId);
     if (this.touchPointers.size === 0) {
@@ -670,6 +741,8 @@ export class CityView {
     const tag = (e.target as HTMLElement | null)?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA') return;
     this.keys.add(e.code);
+    // #11：M／N 由 UI（ui/round8-helpers cycleRoadGrade）處理，city-view 只跟隨
+    // state.ui.roadGrade 更新預覽；避免雙重 handler 互相 cycle 抵銷。
     if (e.code === 'Space') {
       e.preventDefault();
       this.actions.togglePause();
@@ -678,6 +751,10 @@ export class CityView {
     else if (e.code === 'Digit3') this.actions.setSpeed(3);
     else if (e.code === 'Digit0') this.actions.setSpeed(0);
     else if (e.code === 'Escape') {
+      if (this.roadDrag) {
+        this.clearRoadPreview();
+        return;
+      }
       if (this.store.state.ui.mode === 'interior') this.actions.exitInterior();
       else {
         this.actions.closeOverlays();
@@ -764,9 +841,92 @@ export class CityView {
     }
   }
 
+  // ───────────────────── #11 道路拉線預覽 ─────────────────────
+
+  private roadPreviewColor(grade: RoadGrade, ok: boolean): number {
+    if (!ok) return 0xd46060;
+    if (grade === 'elevated') return 0x7fd6e0;
+    if (grade === 'tunnel') return 0xffc866;
+    return 0x7fd6a0;
+  }
+
+  /** 預覽用簡單合法性（同 sim placeRoad 規則一致；唔扣錢／唔 mutate state）。 */
+  private roadPreviewOk(state: GameState, tx: number, ty: number, grade: RoadGrade): boolean {
+    if (tx < 0 || ty < 0 || tx >= state.width || ty >= state.height) return false;
+    if (isShenzhenSideTile(tx, ty, state.width, state.height)) return false;
+    const tile = state.tiles[ty * state.width + tx];
+    if (tile.buildingId >= 0) return false;
+    if (tile.road) return (tile.roadGrade ?? 'surface') !== grade;
+    if (grade === 'surface') return TERRAIN_INFO[tile.terrain]?.buildable === true;
+    return true; // 高架／隧道可跨水／山／沙
+  }
+
+  private updateRoadPreview(state: GameState, endTile: number): void {
+    if (!this.roadDrag || !this.roadPreview) return;
+    const from = this.roadDrag.start;
+    const to = endTile >= 0 ? endTile : from;
+    const x0 = from % state.width;
+    const y0 = Math.floor(from / state.width);
+    const x1 = to % state.width;
+    const y1 = Math.floor(to / state.width);
+    const grade = state.ui.roadGrade ?? this.roadDrag.grade;
+    const path = roadPathBetween(state, x0, y0, x1, y1);
+    const dummy = new THREE.Object3D();
+    const color = new THREE.Color();
+    const count = Math.min(path.length, 1300);
+    for (let i = 0; i < count; i++) {
+      const p = path[i];
+      const ok = this.roadPreviewOk(state, p.x, p.y, grade);
+      const d = tileWorld(p.x, p.y, state.width, state.height);
+      dummy.position.set(d.x, grade === 'elevated' ? 2.72 : 0.44, d.z);
+      dummy.rotation.set(0, 0, 0);
+      dummy.scale.set(1, 1, 1);
+      dummy.updateMatrix();
+      this.roadPreview.setMatrixAt(i, dummy.matrix);
+      color.setHex(this.roadPreviewColor(grade, ok));
+      this.roadPreview.setColorAt(i, color);
+    }
+    this.roadPreview.count = count;
+    this.roadPreview.visible = count > 0;
+    this.roadPreview.instanceMatrix.needsUpdate = true;
+    if (this.roadPreview.instanceColor) this.roadPreview.instanceColor.needsUpdate = true;
+  }
+
+  private clearRoadPreview(): void {
+    this.roadDrag = null;
+    this.lastRoadPreviewSig = '';
+    if (this.roadPreview) {
+      this.roadPreview.count = 0;
+      this.roadPreview.visible = false;
+    }
+  }
+
+  /** 放開滑鼠：套用 L 形道路（優先用 main.ts applyRoadPath）。 */
+  private finishRoadDrag(state: GameState): void {
+    if (!this.roadDrag) return;
+    const from = this.roadDrag.start;
+    const to = this.hover >= 0 ? this.hover : from;
+    const grade = state.ui.roadGrade ?? this.roadDrag.grade;
+    const apply = this.actions.applyRoadPath;
+    if (typeof apply === 'function') {
+      apply(from, to, grade);
+    } else {
+      // 舊版 fallback：逐格鋪（只支援 surface）
+      const x0 = from % state.width;
+      const y0 = Math.floor(from / state.width);
+      const x1 = to % state.width;
+      const y1 = Math.floor(to / state.width);
+      state.ui.roadGrade = grade;
+      for (const p of roadPathBetween(state, x0, y0, x1, y1)) {
+        this.actions.applyToolAt(p.y * state.width + p.x);
+      }
+    }
+    this.clearRoadPreview();
+  }
+
   /** 可拖曳連續鋪設的工具（道路／行人路） */
   private isPaintTool(tool: string | null): boolean {
-    return tool === 'road' || tool === 'sidewalk' || tool === 'dezone' || zoneOfTool(tool) !== null;
+    return tool === 'sidewalk' || tool === 'dezone' || zoneOfTool(tool) !== null;
   }
 
   private paintRoadAt(clientX: number, clientY: number): void {
@@ -836,6 +996,9 @@ export class CityView {
     this.underground?.dispose();
     this.transitOverlay?.dispose();
     this.rail?.dispose();
+    this.shenzhenOverlay?.dispose();
+    this.roadPreviewGeo?.dispose();
+    this.roadPreviewMat?.dispose();
     this.environment?.dispose();
     this.interior?.dispose();
     this.renderer.dispose();

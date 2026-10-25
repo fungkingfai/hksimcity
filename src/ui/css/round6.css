@@ -431,11 +431,9 @@
 /* 手機：建造 sheet 內容（分區＋鐵路＋公共建築＋列表＋工具列）整體可滾動，
    避免新增鐵路工具後固定區太高、把建築卡／工具列擠出畫面。 */
 .hud.is-mobile-ui .build-panel {
-  display: block;
-  overflow-y: auto;
-  overflow-x: hidden;
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   max-height: min(80vh, 700px);
 }
 

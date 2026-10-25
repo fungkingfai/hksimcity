@@ -93,6 +93,16 @@ try {
   }));
   check('手機顯示開局模式選擇', startInfo.show === true && startInfo.dom === true, startInfo);
 
+  // 如八號風球全屏警示彈出，先按「知道了」（全屏 alert 會 intercept 手機 nav）
+  const dismissTyphoon = async () => {
+    const btn = page.locator('[data-act="dismiss-typhoon-alert"]').first();
+    if (await btn.count()) {
+      const visible = await btn.isVisible().catch(() => false);
+      if (visible) await btn.tap().catch(() => {});
+    }
+  };
+  await dismissTyphoon();
+
   // 固定由零開始、關教學
   await ev(() => {
     const { store, actions } = window.__HK_CITY__;
@@ -295,6 +305,7 @@ try {
     document.querySelector('.hud')?.classList.remove('is-interior');
   });
   await wait(700);
+  await dismissTyphoon();
   await page.locator('[data-m-act="info"]').tap();
   await waitFn(() => document.querySelector('.hud')?.classList.contains('is-info-open'), 25000);
   const infoOpen = await ev(() => ({

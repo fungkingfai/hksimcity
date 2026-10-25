@@ -14,6 +14,7 @@ import { delegate, esc, num, qs, setClass, setText } from './dom';
 import { ico, type IconName } from './icons';
 import { createOverlayHost, modalShell, restoreInfoPanel } from './overlay';
 import { activatePipeTool, toggleUnderground, type PipeToolKind } from './round5-helpers';
+import { pipeFlowOn, pipeLayerOn, setPipeLayer, togglePipeFlow, type PipeLayerKind } from './round8-helpers';
 
 export interface UtilityPanelView {
   update(state: GameState): void;
@@ -226,8 +227,35 @@ export function createUtilityPanel(container: HTMLElement, store: GameStore, act
       `;
     }
 
+    const layerForTab: Record<Tab, { pipe: 'water' | 'sewer' | 'power'; util: UtilityNetworkStat | undefined }> = {
+      water: { pipe: 'water', util: snap?.water },
+      sewage: { pipe: 'sewer', util: snap?.sewage },
+      power: { pipe: 'power', util: snap?.power },
+    };
+    const pipeCountFor = (pipe: 'water' | 'sewer' | 'power'): number =>
+      snap ? (pipe === 'water' ? snap.pipeCounts.water : pipe === 'sewer' ? snap.pipeCounts.sewer : snap.pipeCounts.power) : 0;
+    const layerChips = TABS.map((tab) => {
+      const on = pipeLayerOn(state, tab.key);
+      const info = layerForTab[tab.key];
+      const stats = info.util;
+      return `<button type="button" class="pipe-layer" data-act="pipe-layer" data-kind="${tab.key}"
+        style="--util:${tab.color}" aria-pressed="${on ? 'true' : 'false'}"
+        title="${on ? '隱藏' : '顯示'}${tab.label}圖層">
+        <span class="pl-eye">${ico('eye')}</span>
+        <span class="pipe-layer-text"><b>${tab.label}</b><small>${snap ? `${num(pipeCountFor(info.pipe))} 格 · ${pct(stats?.coverage ?? 0)}` : '計算中'}</small></span>
+      </button>`;
+    }).join('');
+    const flowOn = pipeFlowOn(state);
+    const layerBar = `
+      <div class="pipe-layer-bar">
+        ${layerChips}
+        <button type="button" class="pipe-flow-btn" data-act="pipe-flow" aria-pressed="${flowOn ? 'true' : 'false'}"
+          title="地下管道流水動畫">${ico('water')}<span>流水動畫 ${flowOn ? '開' : '關'}</span></button>
+      </div>`;
+
     const body = `
       <div class="util-tabs">${tabButtons}</div>
+      ${layerBar}
       ${detail}
       <div class="util-actions">
         <button type="button" class="fin-action" data-act="util-pipe" data-kind="${tabDef.pipe}">
@@ -270,11 +298,23 @@ export function createUtilityPanel(container: HTMLElement, store: GameStore, act
       state.buildings.length,
       activeTab,
       state.ui.showUnderground ? 1 : 0,
+      ['water', 'sewage', 'power'].map((kind) => (pipeLayerOn(state, kind as PipeLayerKind) ? 1 : 0)).join(''),
+      pipeFlowOn(state) ? 1 : 0,
     ].join('|');
   };
 
   const offClick = delegate(host.layer, 'click', '[data-act]', (node) => {
     switch (node.dataset.act) {
+      case 'pipe-layer': {
+        const kind = node.dataset.kind as PipeLayerKind | undefined;
+        if (kind === 'water' || kind === 'sewage' || kind === 'power') {
+          setPipeLayer(store, actions, kind, !pipeLayerOn(store.state, kind));
+        }
+        break;
+      }
+      case 'pipe-flow':
+        togglePipeFlow(store, actions);
+        break;
       case 'util-tab': {
         const tab = node.dataset.tab as Tab | undefined;
         if (tab && tab !== activeTab) {

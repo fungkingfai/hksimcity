@@ -18,7 +18,7 @@ import { applyUiMode, isMobileUi } from './core/device';
 import { createGameState, deriveClockFields } from './core/new-game';
 import { GameStore } from './core/store';
 import * as saves from './core/save';
-import type { GameActions, GameState, LogKind, NewGameMode, SimContext, TransitLine, TransitLineInput, TransitLineMode } from './core/types';
+import type { GameActions, GameState, LogKind, NewGameMode, RoadGrade, SimContext, TransitLine, TransitLineInput, TransitLineMode } from './core/types';
 import { CityView } from './render/city-view';
 import { buildingAnchor } from './render/coords';
 import { createUI } from './ui/ui';
@@ -31,11 +31,13 @@ import {
   placeAutoBuilding,
   placeBuilding,
   placeRoad,
+  roadPathBetween,
 } from './sim/placement';
 import { updateStats } from './sim/stats';
 import { computeUtilitySnapshot, layStarterPipes, placePipe, removePipe } from './sim/utilities';
 import { isRailRemoveTool, isRailTool, placeRail, railToolGrade, removeRail } from './sim/rail';
 import { regionKindAt } from './sim/placement';
+import { isShenzhenSideTile } from './world/border';
 import { upgradeTradeBuilding } from './sim/trade';
 import {
   createTransitLine,
@@ -79,10 +81,16 @@ function sanitizeLoadedState(state: GameState): GameState {
   state.ui.lineEditorActive = false;
   state.ui.lineDraft = null;
   state.ui.showZones ??= true;
+  state.ui.showBuildings ??= true;
+  state.ui.pipeLayers ??= { water: true, sewage: true, power: true };
+  state.ui.pipeFlow ??= true;
+  state.ui.roadGrade ??= 'surface';
   state.ui.showStartScreen = false;
   state.clock.paused = state.ui.paused;
   return state;
 }
+
+let activeCityView: CityView | null = null;
 
 function createActions(store: GameStore): GameActions {
   const s = (): GameState => store.state;
@@ -106,6 +114,56 @@ function createActions(store: GameStore): GameActions {
       const state = s();
       state.ui.tool = tool;
       if (tool) state.ui.selectedId = null;
+      store.bumpUI();
+    },
+
+    /** Round 8／issue #11：拖曳起點→終點，一次過鋪 L 形道路（可高架／隧道） */
+    applyRoadPath(fromTile: number, toTile: number, grade: RoadGrade = 'surface'): void {
+      const state = s();
+      const W = state.width;
+      const H = state.height;
+      if (fromTile < 0 || toTile < 0 || fromTile >= W * H || toTile >= W * H) return;
+      const x0 = fromTile % W;
+      const y0 = Math.floor(fromTile / W);
+      const x1 = toTile % W;
+      const y1 = Math.floor(toTile / W);
+      const cells = roadPathBetween(state, x0, y0, x1, y1);
+      const placeRoadAny = placeRoad as unknown as (
+        st: GameState,
+        x: number,
+        y: number,
+        grade?: RoadGrade,
+      ) => { ok: boolean; reason?: string; cost?: number };
+      let placed = 0;
+      let lastReason = '';
+      for (const cell of cells) {
+        const r = placeRoadAny(state, cell.x, cell.y, grade);
+        if (r.ok) placed++;
+        else if (r.reason) lastReason = r.reason;
+      }
+      if (placed > 0) {
+        store.toast(`已鋪設 ${placed} 格道路（${grade === 'surface' ? '地面' : grade === 'elevated' ? '高架' : '隧道'}）`, 'info');
+        refresh();
+      } else if (lastReason) warn(lastReason);
+    },
+
+    toggleBuildings(): void {
+      const state = s();
+      state.ui.showBuildings = state.ui.showBuildings === false;
+      activeCityView?.setBuildingsVisible(state.ui.showBuildings !== false);
+      store.bumpUI();
+    },
+
+    setPipeLayer(kind: 'water' | 'sewage' | 'power', on: boolean): void {
+      const state = s();
+      const cur = state.ui.pipeLayers ?? { water: true, sewage: true, power: true };
+      state.ui.pipeLayers = { ...cur, [kind]: on };
+      store.bumpUI();
+    },
+
+    togglePipeFlow(): void {
+      const state = s();
+      state.ui.pipeFlow = state.ui.pipeFlow === false;
       store.bumpUI();
     },
 
@@ -183,7 +241,14 @@ function createActions(store: GameStore): GameActions {
       }
 
       if (tool === 'road') {
-        const result = placeRoad(state, tx, ty);
+        // Round 8／issue #11：道路等級（city-view 拖曳時 M/N 切換）
+        const placeRoadAny = placeRoad as unknown as (
+          st: GameState,
+          x: number,
+          y: number,
+          grade?: RoadGrade,
+        ) => { ok: boolean; reason?: string; cost?: number };
+        const result = placeRoadAny(state, tx, ty, state.ui.roadGrade ?? 'surface');
         if (result.ok) refresh();
         else if (result.reason) warn(result.reason);
         return;
@@ -675,6 +740,7 @@ function boot(): void {
   const store = new GameStore(initialState);
   const actions = createActions(store);
   const view = new CityView({ container: gameRoot, store, actions });
+  activeCityView = view;
   const ui = createUI(uiRoot, store, actions);
   const simulation = createSimulation();
   const ctx: SimContext = {
@@ -751,6 +817,7 @@ function boot(): void {
       regionKindAt,
       placeRail,
       removeRail,
+      isShenzhenSideTile,
     },
   };
   if (uiMode === 'mobile') {

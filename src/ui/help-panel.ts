@@ -236,8 +236,9 @@ export function createHelpPanel(container: HTMLElement, store: GameStore, action
         <section class="help-block">
           <h3>${ico('road')}道路與工具</h3>
           <ul>
-            <li><b>馬路（R）</b>：$15,000／格，<b>已整合行人路</b>；拖曳連續鋪設。</li>
-            <li><b>取消分區（M）</b>：清除分區色塊，已建成建築不受影響。</li>
+            <li><b>道路（R）</b>：由起點拖到終點<b>自動鋪路</b>；地面道路 <b>$15,000/格</b>、高架橋 <b>$75,000/格</b>、隧道 <b>$60,000/格</b>（已整合行人路）。</li>
+            <li><b>道路等級</b>：拖曳期間按 <b>M</b> 升高架、<b>N</b> 升隧道，再按 M／N 返回地面；高架／隧道可穿山過海。</li>
+            <li><b>取消分區（M，非道路工具時）</b>：清除分區色塊，已建成建築不受影響。</li>
             <li><b>拆卸（X）</b>：拆除建築（退還 30%）、道路或分區。</li>
             <li><b>分區色塊（L）</b>：顯示／隱藏分區顏色，方便規劃。</li>
             <li>住宅／商業／工業建築由開發商自動興建，玩家不能手動放置。</li>
@@ -261,6 +262,7 @@ export function createHelpPanel(container: HTMLElement, store: GameStore, action
           <ul>
             <li><b>U</b> 切換地下管網圖層：地面半透明，顯示食水／污水／電力管道與接駁狀態。</li>
             <li>管線工具：<b>食水管 $900/格</b>、<b>污水管 $1,200/格</b>、<b>電力電纜 $800/格</b>，拆除退還 25%；管道可穿過道路下方。</li>
+            <li><b>管網分層</b>：公用設施面板有食水／污水／電力三個 eye toggle，可單獨顯示某一層；另有「流水動畫」開關顯示管道流向。</li>
             <li>建築需要以同類管道接駁到供應源（發電廠／水務設施／水塔／海水化淡廠／污水處理廠／排污口）才有水電；建築卡會有接駁狀態。</li>
             <li><b>公用設施面板</b>（頂欄「公用」或地下工具列）三個分頁顯示：容量／需求／已供應、覆蓋率、短缺或污水溢出、供應源數、管道長度、每月維護費、食水水質。</li>
             <li>新公用建築：水塔（$420k）、海水化淡廠、污水處理廠、排污口；<b>已有城鎮</b>開局已預建完整管網，<b>由零開始</b>需自行由第一座水務設施／發電廠拉管。</li>
@@ -400,16 +402,16 @@ export function createHelpPanel(container: HTMLElement, store: GameStore, action
             <tbody>
               <tr><td><kbd>空白鍵</kbd></td><td>暫停／繼續</td></tr>
               <tr><td><kbd>0</kbd> <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></td><td>暫停／一倍／二倍／三倍速</td></tr>
-              <tr><td><kbd>R</kbd></td><td>馬路工具（含行人路）</td></tr>
-              <tr><td><kbd>Z</kbd> <kbd>C</kbd> <kbd>V</kbd> <kbd>N</kbd></td><td>住宅區／商業區／工業區／農業區</td></tr>
-              <tr><td><kbd>M</kbd></td><td>取消分區工具</td></tr>
+              <tr><td><kbd>R</kbd></td><td>道路工具（拖曳起點→終點自動鋪路）</td></tr>
+              <tr><td><kbd>Z</kbd> <kbd>C</kbd> <kbd>V</kbd> <kbd>N</kbd></td><td>住宅區／商業區／工業區／農業區（道路拖曳時 N＝隧道）</td></tr>
+              <tr><td><kbd>M</kbd></td><td>取消分區工具（道路拖曳時 M＝高架）</td></tr>
               <tr><td><kbd>X</kbd></td><td>拆卸工具</td></tr>
-              <tr><td><kbd>L</kbd></td><td>顯示／隱藏分區色塊</td></tr>
               <tr><td><kbd>U</kbd></td><td>地下層開關（水／污水／電／鐵路）</td></tr>
               <tr><td><kbd>Y</kbd></td><td>機場／碼頭貿易面板</td></tr>
               <tr><td><kbd>O</kbd></td><td>全圖 overview</td></tr>
               <tr><td><kbd>P</kbd></td><td>返回市中心</td></tr>
-              <tr><td><kbd>B</kbd></td><td>展開／收起建造面板</td></tr>
+              <tr><td><kbd>B</kbd></td><td>顯示／隱藏建築圖層</td></tr>
+              <tr><td><kbd>L</kbd></td><td>顯示／隱藏分區色塊</td></tr>
               <tr><td><kbd>G</kbd> <kbd>J</kbd></td><td>城事／統計面板</td></tr>
               <tr><td><kbd>F</kbd></td><td>財政面板</td></tr>
               <tr><td><kbd>T</kbd></td><td>交通面板</td></tr>

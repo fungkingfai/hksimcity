@@ -112,6 +112,9 @@ export type BuildMode = 'city' | 'interior';
  */
 export type ZoneType = 'residential' | 'commercial' | 'industrial' | 'farmland';
 
+/** Round 8／issue #11：道路等級（地面／高架／隧道） */
+export type RoadGrade = 'surface' | 'elevated' | 'tunnel';
+
 /** 開局模式：starter＝已有一定規模的城鎮；empty＝由零開始 */
 export type NewGameMode = 'starter' | 'empty';
 
@@ -143,6 +146,10 @@ export interface Tile {
   powerCable?: boolean;
   /** 鐵路軌（地面／高架／地下；Round 6 MTR 規劃） */
   rail?: RailGrade;
+  /** Round 8／issue #11：道路等級（undefined = surface） */
+  roadGrade?: RoadGrade;
+  /** Round 8／issue #10：現有城市窄街（render 用；唔需要存檔） */
+  localRoad?: boolean;
 }
 
 // ─────────────────────────── 建築 ───────────────────────────
@@ -744,6 +751,14 @@ export interface UIState {
   lineEditorActive?: boolean;
   /** 建線草稿（UI／main 共用） */
   lineDraft?: { mode: TransitLineMode; stopIds: number[] } | null;
+  /** Round 8／issue #13：顯示建築物圖層 */
+  showBuildings?: boolean;
+  /** Round 8／issue #12：地下管網分層顯示 */
+  pipeLayers?: { water: boolean; sewage: boolean; power: boolean };
+  /** Round 8／issue #12：管網流動動畫 */
+  pipeFlow?: boolean;
+  /** Round 8／issue #11：道路工具目前等級 */
+  roadGrade?: RoadGrade;
 }
 
 export interface GameState {
@@ -811,6 +826,13 @@ export interface GameActions {
   setTool(tool: string | null): void;
   /** 對指定格執行目前工具（道路／行人路／建築／拆除） */
   applyToolAt(tileIndex: number): void;
+  /** Round 8／issue #11：由起點到終點拉起一條 L 形道路 */
+  applyRoadPath?(fromTile: number, toTile: number, grade?: RoadGrade): void;
+  /** Round 8／issue #13：顯示／隱藏建築圖層 */
+  toggleBuildings?(): void;
+  /** Round 8／issue #12：管網分層 */
+  setPipeLayer?(kind: 'water' | 'sewage' | 'power', on: boolean): void;
+  togglePipeFlow?(): void;
   select(tileIndex: number): void;
   selectBuilding(id: number | null): void;
   enterBuilding(id: number): void;

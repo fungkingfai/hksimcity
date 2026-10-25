@@ -64,8 +64,28 @@ export function createUndergroundView(_state: GameState): UndergroundView {
   };
   const meshes: Partial<Record<PipeKind, THREE.InstancedMesh>> = {};
   let lastSignature = '';
+  // #12：流動光點（每 2 格一點；1 draw）
+  const flowGeo = new THREE.BoxGeometry(0.26, 0.04, 0.26);
+  const flowMat = new THREE.MeshBasicMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0.95,
+    depthWrite: false,
+    fog: false,
+    blending: THREE.AdditiveBlending,
+  });
+  let flowMesh: THREE.InstancedMesh | null = null;
+  let flowData: { kind: PipeKind; x: number; z: number; y: number; rot: number; phase: number }[] = [];
+  let elapsed = 0;
+  const PIPES: PipeKind[] = ['water', 'sewer', 'power'];
 
   const clearMeshes = (): void => {
+    if (flowMesh) {
+      group.remove(flowMesh);
+      flowMesh.dispose();
+      flowMesh = null;
+    }
+    flowData = [];
     for (const kind of Object.keys(meshes) as PipeKind[]) {
       const mesh = meshes[kind];
       if (!mesh) continue;
@@ -104,6 +124,10 @@ export function createUndergroundView(_state: GameState): UndergroundView {
         } else {
           lists[kind].push({ x: wx, z: wz, y: baseY, len: TILE * 0.96, rot: Math.PI / 2 });
         }
+        // 每 2 格一個流動光點（phase 用格座標 hash，令同管連續流動）
+        if ((x + y) % 2 === 0) {
+          flowData.push({ kind, x: wx, z: wz, y: baseY + 0.03, rot: horiz || !vert ? 0 : Math.PI / 2, phase: ((x * 7 + y * 13) % 16) / 16 });
+        }
       }
     }
     const dummy = new THREE.Object3D();
@@ -125,11 +149,32 @@ export function createUndergroundView(_state: GameState): UndergroundView {
       group.add(mesh);
       meshes[kind] = mesh;
     }
+    if (flowData.length > 0) {
+      flowMesh = new THREE.InstancedMesh(flowGeo, flowMat, flowData.length);
+      flowMesh.name = 'underground-flow';
+      flowMesh.frustumCulled = false;
+      flowMesh.renderOrder = 22;
+      const c = new THREE.Color();
+      const kindColor: Record<PipeKind, number> = { water: 0x9fe4ff, sewer: 0xd8f0a0, power: 0xffe58a };
+      const dummy = new THREE.Object3D();
+      flowData.forEach((p, i) => {
+        c.setHex(kindColor[p.kind]);
+        flowMesh!.setColorAt(i, c);
+        dummy.position.set(p.x, p.y, p.z);
+        dummy.rotation.set(0, p.rot, 0);
+        dummy.scale.setScalar(1.25);
+        dummy.updateMatrix();
+        flowMesh!.setMatrixAt(i, dummy.matrix);
+      });
+      flowMesh.instanceMatrix.needsUpdate = true;
+      if (flowMesh.instanceColor) flowMesh.instanceColor.needsUpdate = true;
+      group.add(flowMesh);
+    }
   };
 
   return {
     group,
-    update(s: GameState, _dt: number): void {
+    update(s: GameState, dt: number): void {
       const show = Boolean(s.ui.showUnderground);
       if (!show) {
         if (group.visible) group.visible = false;
@@ -137,15 +182,58 @@ export function createUndergroundView(_state: GameState): UndergroundView {
         return;
       }
       group.visible = true;
+      // #12：三種管網可獨立開關（ui.pipeLayers；default 全開）
+      const layers = s.ui.pipeLayers ?? { water: true, sewage: true, power: true };
+      const visible: Record<PipeKind, boolean> = {
+        water: layers.water !== false,
+        sewer: layers.sewage !== false,
+        power: layers.power !== false,
+      };
+      for (const kind of PIPES) {
+        const mesh = meshes[kind];
+        if (mesh) mesh.visible = visible[kind];
+      }
       const counts = s.utilities?.pipeCounts;
-      const signature = `${s.ui.revision}|${s.utilities?.revision ?? -1}|${counts ? `${counts.water},${counts.sewer},${counts.power}` : ''}`;
-      if (signature === lastSignature) return;
-      lastSignature = signature;
-      build(s);
+      const signature = `${s.utilities?.revision ?? -1}|${counts ? `${counts.water},${counts.sewer},${counts.power}` : ''}`;
+      if (signature !== lastSignature) {
+        lastSignature = signature;
+        build(s);
+        for (const kind of PIPES) {
+          const mesh = meshes[kind];
+          if (mesh) mesh.visible = visible[kind];
+        }
+      }
+      // #12：沿管流動光點（任何時間 ≤1 draw）
+      elapsed += dt;
+      const flowOn = s.ui.pipeFlow !== false && (visible.water || visible.sewer || visible.power);
+      if (flowMesh) {
+        flowMesh.visible = flowOn;
+        if (flowOn) {
+          const dummy = new THREE.Object3D();
+          flowData.forEach((p, i) => {
+            if (!visible[p.kind]) {
+              dummy.scale.setScalar(0);
+            } else {
+              const t = (elapsed * 0.55 + p.phase) % 1;
+              const along = (t - 0.5) * TILE * 0.9;
+              const dx = p.rot === 0 ? along : 0;
+              const dz = p.rot === 0 ? 0 : along;
+              dummy.position.set(p.x + dx, p.y, p.z + dz);
+              dummy.rotation.set(0, p.rot, 0);
+              dummy.scale.setScalar(0.9 + Math.sin(elapsed * 4 + p.phase * 6.28) * 0.25);
+            }
+            dummy.updateMatrix();
+            flowMesh!.setMatrixAt(i, dummy.matrix);
+          });
+          flowMesh.instanceMatrix.needsUpdate = true;
+        }
+      }
     },
     dispose(): void {
       clearMeshes();
       geo.dispose();
+      flowGeo.dispose();
+      flowMat.dispose();
       for (const kind of Object.keys(materials) as PipeKind[]) materials[kind].dispose();
       group.clear();
     },

@@ -23,6 +23,7 @@ const CODE_ZONE: (ZoneType | null)[] = [null, 'residential', 'commercial', 'indu
 const PIPE_BITS = { water: 0b00100000, sewer: 0b01000000, power: 0b10000000 } as const;
 const RAIL_CODE: Record<RailGrade, number> = { surface: 0, elevated: 1, underground: 2 };
 const CODE_RAIL: (RailGrade | undefined)[] = ['surface', 'elevated', 'underground'];
+const CODE_ROAD_GRADE = ['surface', 'elevated', 'tunnel'] as const;
 
 interface CompactSaveFile {
   format: 'hk-city-compact';
@@ -35,6 +36,8 @@ interface CompactSaveFile {
   tileEdits: number[];
   /** 鐵路軌變更：[tileIndex, gradeCode] 成對（Round 6；0=surface 1=elevated 2=underground） */
   railEdits?: number[];
+  /** 道路等級變更：[tileIndex, gradeCode] 成對（Round 8；0=surface 1=elevated 2=tunnel） */
+  roadGradeEdits?: number[];
   /** 存檔列表用快照（避免為列表重新生成 304×304 地形） */
   info: {
     slot: number;
@@ -64,12 +67,16 @@ function packTile(tile: Tile): number {
 export function serializeCompact(state: GameState, slot = 0): string {
   const edits: number[] = [];
   const railEdits: number[] = [];
+  const roadGradeEdits: number[] = [];
   for (let i = 0; i < state.tiles.length; i++) {
     const tile = state.tiles[i];
     if (tile.road || tile.sidewalk || tile.zone || tile.waterPipe || tile.sewerPipe || tile.powerCable) {
       edits.push(i, packTile(tile));
     }
     if (tile.rail) railEdits.push(i, RAIL_CODE[tile.rail]);
+    if (tile.road && tile.roadGrade && tile.roadGrade !== 'surface') {
+      roadGradeEdits.push(i, tile.roadGrade === 'elevated' ? 1 : 2);
+    }
   }
   const { tiles: _tiles, ...rest } = state;
   const file: CompactSaveFile = {
@@ -81,6 +88,7 @@ export function serializeCompact(state: GameState, slot = 0): string {
     gameMode: state.gameMode,
     tileEdits: edits,
     railEdits,
+    roadGradeEdits,
     info: {
       slot,
       cityName: state.cityName,
@@ -128,6 +136,13 @@ export function hydrateCompact(raw: unknown): GameState | null {
     const code = railEdits[k + 1];
     const tile = tiles[idx];
     if (tile) tile.rail = CODE_RAIL[code];
+  }
+  const roadGradeEdits = file.roadGradeEdits ?? [];
+  for (let k = 0; k + 1 < roadGradeEdits.length; k += 2) {
+    const idx = roadGradeEdits[k];
+    const code = roadGradeEdits[k + 1];
+    const tile = tiles[idx];
+    if (tile) tile.roadGrade = CODE_ROAD_GRADE[code] ?? 'surface';
   }
   const state = {
     ...(file.state as GameState),

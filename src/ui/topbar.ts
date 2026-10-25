@@ -14,6 +14,7 @@ import { getUiMode } from '../core/device';
 import { delegate, happinessTone, num, qs, setClass, setText } from './dom';
 import { formatClockHK, formatDateCompactHK, formatDateHK } from './format';
 import { ico } from './icons';
+import { showBuildings, toggleBuildings } from './round8-helpers';
 
 export interface TopbarView {
   update(state: GameState): void;
@@ -152,13 +153,14 @@ export function createTopbar(container: HTMLElement, store: GameStore, actions: 
           <button type="button" data-act="speed" data-speed="2" title="二倍速（2）">${ico('play2')}</button>
           <button type="button" data-act="speed" data-speed="3" title="三倍速（3）">${ico('play3')}</button>
         </div>
+        <button type="button" class="zone-view-btn" data-act="toggle-buildings" title="顯示／隱藏建築（B）" aria-label="顯示建築">${ico('city')}</button>
         <button type="button" class="zone-view-btn" data-act="toggle-underground" title="地下管網（U）" aria-label="地下管網">${ico('pipe')}</button>
         <button type="button" class="zone-view-btn" data-act="toggle-zones" title="顯示／隱藏分區色塊（L）" aria-label="顯示分區色塊">${ico('layers')}</button>
         <span class="pause-flag" data-k="pauseFlag" aria-live="polite">暫停</span>
       </div>
 
       <nav class="tb-actions" aria-label="功能面板">
-        <button type="button" class="top-btn" data-act="toggle-build" title="建造面板（B）">${ico('hammer')}<span>建造</span></button>
+        <button type="button" class="top-btn" data-act="toggle-build" title="建造面板">${ico('hammer')}<span>建造</span></button>
         <button type="button" class="top-btn" data-act="stats" title="城事（J）">${ico('stats')}<span>城事</span></button>
         <button type="button" class="top-btn" data-act="finance" title="財政（F）">${ico('chart')}<span>財政</span></button>
         <button type="button" class="top-btn" data-act="transit" title="交通（T）">${ico('mtr')}<span>交通</span></button>
@@ -218,6 +220,7 @@ export function createTopbar(container: HTMLElement, store: GameStore, actions: 
   const pauseFlag = $('[data-k="pauseFlag"]');
   const zoneViewBtn = $('[data-act="toggle-zones"]');
   const undergroundBtn = $('[data-act="toggle-underground"]');
+  const buildingsBtn = $('[data-act="toggle-buildings"]');
   const utilityBtn = $('[data-act="utility"]');
   const speedButtons = Array.from(root.querySelectorAll<HTMLElement>('[data-act="speed"]'));
   const panelButtons: { act: string; node: HTMLElement }[] = [
@@ -260,6 +263,9 @@ export function createTopbar(container: HTMLElement, store: GameStore, actions: 
         break;
       case 'toggle-zones':
         actions.toggleZones();
+        break;
+      case 'toggle-buildings':
+        toggleBuildings(store, actions);
         break;
       case 'toggle-underground':
         actions.toggleUnderground?.();
@@ -460,6 +466,7 @@ export function createTopbar(container: HTMLElement, store: GameStore, actions: 
       }
     }
     setClass(zoneViewBtn, 'active', ui.showZones);
+    setClass(buildingsBtn, 'active', showBuildings(state));
     setClass(undergroundBtn, 'active', Boolean(ui.showUnderground));
     setClass(utilityBtn, 'active', Boolean(ui.showUtilityPanel));
   };
