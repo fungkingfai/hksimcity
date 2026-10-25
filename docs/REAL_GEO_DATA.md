@@ -46,6 +46,7 @@ git add src/world/hk-map-data.generated.ts
 - `buildingHeight`：每格平均建築高度 0..255（≈0..500m）
 - `labels`（69 個）、`landmarks`（6 個）、`tunnels`（3 條）、`regions`（15 個）、`spawn`
 - 全部座標已轉成 **96×96 設計座標**（renderer 再乘 `state.width/96`）
+- **Round 6 擴充（待重生）**：`landuse`（規劃署 LUHK 2020，0..92）、`roadHint`（每格 1 bit，landuse 41/42）、`borderCrossings`（羅湖／落馬洲／文錦渡／深圳灣）、`shenzhenRiver`（深圳河 ring）；600×600 數據需由 `tools/build-hk-data.py` 重新生成，供 issue #4／#6／#7 用。
 
 執行日誌（生成時）：DTM 聚合 → 建築密度 → 地形分類 → 水塘／河流補回 → 輸出＋預覽 PPM。
 

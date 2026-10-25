@@ -29,7 +29,7 @@
 import * as THREE from 'three';
 import type { GameState, Vehicle, VehicleKind } from '../core/types';
 import { TILE } from './coords';
-import { WATER_SURFACE_Y, roadSurfaceY } from './world-utils';
+import { WATER_SURFACE_Y, roadSurfaceY, tileTopY } from './world-utils';
 
 export interface VehiclesView {
   group: THREE.Group;
@@ -40,7 +40,7 @@ export interface VehiclesView {
 // ─────────────────────────── 渲染常數 ───────────────────────────
 
 /** 最多同時渲染的交通車輛（與 sim/vehicles.ts 的 MAX_TRAFFIC_VEHICLES 一致） */
-const MAX_RENDER_VEHICLES = 120;
+const MAX_RENDER_VEHICLES = 128;
 
 /** 車道偏移（世界單位；香港靠左行駛） */
 const LANE_OFFSET = 0.2;
@@ -398,6 +398,47 @@ function ferryTemplate(): PartTemplate {
   return parts;
 }
 
+/** 港鐵列車：3 節白色車廂、紅色腰線、藍色車頂線、夜間窗光／頭尾燈。 */
+function trainTemplate(): PartTemplate {
+  const parts: PartTemplate = [];
+  const W = 0.92;
+  const L = 2.0;
+  const carZ = [-2.16, 0, 2.16];
+  for (let c = 0; c < carZ.length; c++) {
+    const z = carZ[c];
+    // 車身（白色）
+    parts.push(part('box', 0, 0.58, z, W, 0.56, L, 0xf2f1ea));
+    // 車頂（略深灰）
+    parts.push(part('box', 0, 0.88, z, W * 0.96, 0.08, L * 0.98, 0xb9bdc2));
+    // 紅色腰線
+    parts.push(part('box', 0, 0.44, z, W + 0.01, 0.1, L * 0.99, 0xb02a2a));
+    // 藍色車頂線
+    parts.push(part('box', 0, 0.82, z, W + 0.01, 0.035, L * 0.99, 0x2f5f9f));
+    // 兩側連續車窗（夜間發亮）
+    parts.push(
+      part('win', W / 2 + 0.008, 0.62, z, 0.02, 0.2, L * 0.82, GLASS_DAY),
+      part('win', -W / 2 - 0.008, 0.62, z, 0.02, 0.2, L * 0.82, GLASS_DAY),
+    );
+    // 車門（深色）
+    parts.push(
+      part('box', W / 2 + 0.004, 0.52, z - L * 0.28, 0.025, 0.44, 0.3, 0x39424a),
+      part('box', -W / 2 - 0.004, 0.52, z - L * 0.28, 0.025, 0.44, 0.3, 0x39424a),
+    );
+    // 車底轉向架
+    parts.push(
+      part('box', 0, 0.2, z, W * 0.78, 0.18, L * 0.82, 0x2a2f33),
+      part('cyl', 0, 0.16, z + L * 0.28, 0.1, 0.08, 0.1, 0x151515, { rz: Math.PI / 2 }),
+      part('cyl', 0, 0.16, z - L * 0.28, 0.1, 0.08, 0.1, 0x151515, { rz: Math.PI / 2 }),
+    );
+  }
+  // 頭尾燈
+  parts.push(
+    part('glow', 0, 0.45, 3.18, 0.28, 0.1, 0.02, 0xfff0c0),
+    part('glow', 0, 0.45, -3.18, 0.28, 0.1, 0.02, 0xff3326),
+  );
+  return parts;
+}
+
 const TEMPLATES: Record<string, PartTemplate> = {
   bus: busTemplate(),
   minibus: minibusTemplate(),
@@ -406,6 +447,7 @@ const TEMPLATES: Record<string, PartTemplate> = {
   motorcycle: motorcycleTemplate(),
   tram: tramTemplate(),
   ferry: ferryTemplate(),
+  mtr: trainTemplate(),
 };
 
 /** 預處理零件：把本地位置／旋轉／尺寸烘成矩陣，每幀只需 parent × local 一次矩陣乘。 */
@@ -684,6 +726,7 @@ export function createVehiclesView(state: GameState): VehiclesView {
       const vehicle = s.vehicles[i];
       if (!vehicle || vehicle.done) continue;
       const template = templateFor(vehicle.kind);
+      const isMtr = vehicle.kind === 'mtr';
 
       // ── 目標世界座標（vehicle.x/y 為格中心座標） ──
       const isFerry = vehicle.kind === 'ferry';
@@ -718,6 +761,19 @@ export function createVehiclesView(state: GameState): VehiclesView {
       let laneZ = 0;
       if (isFerry) {
         baseY = WATER_SURFACE_Y + FERRY_DRAFT + Math.sin(elapsed * 1.3 + idHash(vehicle.id) * 6.28) * 0.025;
+      } else if (isMtr) {
+        const tx = Math.min(width - 1, Math.max(0, Math.floor(vehicle.x)));
+        const ty = Math.min(height - 1, Math.max(0, Math.floor(vehicle.y)));
+        const tile = s.tiles[ty * width + tx];
+        const grade = tile?.rail ?? 'surface';
+        if (grade === 'underground' && !s.ui.showUnderground) {
+          // U 層未開：地下列車唔顯示（同地下管網圖層一致）
+          continue;
+        }
+        if (!tile) baseY = 0.35;
+        else if (grade === 'elevated') baseY = tileTopY(tile) + 3.06;
+        else if (grade === 'underground') baseY = tileTopY(tile) + 0.3;
+        else baseY = tileTopY(tile) + 0.17;
       } else {
         const tx = Math.min(width - 1, Math.max(0, Math.floor(vehicle.x)));
         const ty = Math.min(height - 1, Math.max(0, Math.floor(vehicle.y)));

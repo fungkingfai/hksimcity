@@ -3302,3 +3302,354 @@ export function addGateBooth(
   addBox(g, lib.lambert(PAL.ironDark), 0.24, 0.3, 0.02, 0, 0.32, 0.31);
   return g;
 }
+
+// ═══════════════════════════ 第四部分（Round 6）：邊境口岸零件 ═══════════════════════════
+
+/**
+ * 重型鐵路軌（道碴＋枕木＋兩條鋼軌），沿本地 +x 延伸。
+ * 全部受光 lambert 幾何，合併進 vertexLit。
+ */
+export function addHeavyRail(
+  parent: THREE.Object3D,
+  lib: MaterialLibrary,
+  x: number,
+  z: number,
+  len: number,
+  ry = 0,
+  y = 0,
+): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, y, z);
+  g.rotation.y = ry;
+  parent.add(g);
+  // 道碴
+  addBox(g, lib.lambert(PAL.gravel), len, 0.1, 0.72, 0, 0.05, 0);
+  addBox(g, lib.lambert(PAL.rockDark), len, 0.04, 0.8, 0, 0.02, 0);
+  // 枕木
+  const sleepers = Math.max(3, Math.round(len / 0.52));
+  for (let i = 0; i < sleepers; i++) {
+    const px = -len / 2 + (len / sleepers) * (i + 0.5);
+    addBox(g, lib.lambert(PAL.woodDark), 0.14, 0.045, 0.62, px, 0.11, 0);
+  }
+  // 鋼軌
+  const railMat = lib.lambert(PAL.aluminiumDark);
+  addBox(g, railMat, len, 0.055, 0.055, 0, 0.16, 0.235);
+  addBox(g, railMat, len, 0.055, 0.055, 0, 0.16, -0.235);
+  // 軌旁電纜槽
+  addBox(g, lib.lambert(PAL.concreteDark), len, 0.06, 0.12, 0, 0.07, 0.48);
+  return g;
+}
+
+/** 跨境旅遊巴（白身藍紅腰線、行李艙、車頂冷氣），靜態。 */
+export function addCoach(
+  parent: THREE.Object3D,
+  lib: MaterialLibrary,
+  x: number,
+  z: number,
+  ry = 0,
+  y = 0,
+  opts: { livery?: number } = {},
+): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, y, z);
+  g.rotation.y = ry;
+  parent.add(g);
+  const white = lib.lambert(PAL.wallWhite);
+  const glass = lib.lambert(PAL.glassDark);
+  const livery = lib.lambert(opts.livery ?? 0x2f5f9f);
+  // 車身
+  addBox(g, white, 2.25, 0.86, 0.62, 0, 0.78, 0);
+  // 腰線
+  addBox(g, livery, 2.27, 0.12, 0.63, 0, 0.86, 0);
+  addBox(g, livery, 2.27, 0.06, 0.63, 0, 1.1, 0);
+  // 窗帶
+  addBox(g, glass, 1.95, 0.3, 0.64, -0.05, 1.06, 0);
+  // 車頭擋風玻璃／車尾
+  addBox(g, glass, 0.03, 0.34, 0.52, 1.13, 1.02, 0);
+  addBox(g, glass, 0.03, 0.3, 0.5, -1.13, 1.04, 0);
+  // 行李艙門
+  addBox(g, lib.lambert(PAL.aluminiumDark), 0.7, 0.28, 0.02, -0.4, 0.66, 0.32);
+  addBox(g, lib.lambert(PAL.aluminiumDark), 0.7, 0.28, 0.02, 0.6, 0.66, -0.32);
+  // 車頂冷氣
+  addBox(g, white, 0.5, 0.12, 0.34, -0.3, 1.27, 0);
+  addBox(g, white, 0.5, 0.12, 0.34, 0.6, 1.27, 0);
+  // 車輪
+  for (const [wx, wz] of [
+    [0.78, 0.32],
+    [0.78, -0.32],
+    [-0.78, 0.32],
+    [-0.78, -0.32],
+    [-0.05, 0.32],
+    [-0.05, -0.32],
+  ]) {
+    addCylinder(g, lib.lambert(0x1c1c1c), 0.17, 0.17, 0.09, wx, 0.17, wz, 8, 0, Math.PI / 2);
+  }
+  // 保險桿、車燈
+  addBox(g, lib.lambert(PAL.aluminium), 0.08, 0.14, 0.56, 1.14, 0.42, 0);
+  addBox(g, lib.lambert(PAL.wallWhite), 0.02, 0.1, 0.16, 1.15, 0.6, 0.2);
+  addBox(g, lib.lambert(PAL.fireRed), 0.02, 0.08, 0.14, -1.15, 0.58, 0.2);
+  return g;
+}
+
+/** 貨運列車（柴油機車＋貨櫃平車），沿本地 +x 排列，靜態。 */
+export function addFreightTrain(
+  parent: THREE.Object3D,
+  lib: MaterialLibrary,
+  x: number,
+  z: number,
+  ry = 0,
+  y = 0,
+  opts: { wagons?: number; locoColor?: number; wagonColors?: number[] } = {},
+): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, y, z);
+  g.rotation.y = ry;
+  parent.add(g);
+  const steel = lib.lambert(PAL.steelGrey);
+  const dark = lib.lambert(PAL.ironDark);
+  const black = lib.lambert(0x1c1c1c);
+  const wagons = opts.wagons ?? 2;
+  const wagonColors = opts.wagonColors ?? [PAL.cargoRed, PAL.cargoBlue, PAL.cargoGreen];
+  // 機車（車頭）
+  const locoX = -1.15;
+  const loco = lib.lambert(opts.locoColor ?? 0x2f5f8a);
+  addBox(g, loco, 1.25, 0.62, 0.52, locoX, 0.72, 0);
+  addBox(g, lib.lambert(PAL.wallWhite), 1.27, 0.1, 0.53, locoX, 0.52, 0);
+  addBox(g, dark, 0.36, 0.5, 0.54, locoX + 0.42, 1.06, 0);
+  addBox(g, lib.lambert(PAL.glassDark), 0.02, 0.2, 0.44, locoX + 0.61, 1.14, 0);
+  addBox(g, loco, 0.9, 0.16, 0.5, locoX - 0.12, 1.1, 0);
+  addBox(g, steel, 1.2, 0.08, 0.4, locoX, 1.45, 0);
+  // 機車輪架
+  for (const wx of [locoX - 0.38, locoX + 0.32]) {
+    for (const wz of [0.24, -0.24]) addCylinder(g, black, 0.2, 0.2, 0.1, wx, 0.2, wz, 8, 0, Math.PI / 2);
+  }
+  // 貨櫃平車
+  for (let i = 0; i < wagons; i++) {
+    const wx = 0.15 + i * 1.42;
+    addBox(g, dark, 1.35, 0.12, 0.52, wx, 0.34, 0);
+    addBox(g, lib.lambert(PAL.cargoGrey), 1.35, 0.05, 0.6, wx, 0.27, 0);
+    addContainer(g, lib, wx, 0.42, 0, 1.25, 0.44, 0.48, wagonColors[i % wagonColors.length]);
+    for (const bx of [wx - 0.44, wx + 0.44]) {
+      for (const bz of [0.24, -0.24]) addCylinder(g, black, 0.15, 0.15, 0.08, bx, 0.17, bz, 8, 0, Math.PI / 2);
+    }
+  }
+  return g;
+}
+
+/** 客運列車（白色 EMU、紅色腰線、斜車頭），沿本地 +x 排列，靜態。 */
+export function addPassengerTrain(
+  parent: THREE.Object3D,
+  lib: MaterialLibrary,
+  x: number,
+  z: number,
+  ry = 0,
+  y = 0,
+  opts: { cars?: number; livery?: number; nose?: boolean } = {},
+): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, y, z);
+  g.rotation.y = ry;
+  parent.add(g);
+  const white = lib.lambert(PAL.wallWhite);
+  const glass = lib.lambert(PAL.glassDark);
+  const livery = lib.lambert(opts.livery ?? 0xb02a2a);
+  const black = lib.lambert(0x1c1c1c);
+  const cars = opts.cars ?? 2;
+  const carLen = 1.5;
+  for (let i = 0; i < cars; i++) {
+    const cx = -((cars - 1) * carLen) / 2 + i * carLen;
+    // 車身
+    addBox(g, white, carLen - 0.06, 0.6, 0.5, cx, 0.72, 0);
+    // 紅腰線
+    addBox(g, livery, carLen - 0.04, 0.1, 0.51, cx, 0.56, 0);
+    // 窗帶
+    addBox(g, glass, carLen - 0.24, 0.22, 0.52, cx, 0.88, 0);
+    // 車門
+    addBox(g, glass, 0.08, 0.4, 0.52, cx - 0.4, 0.72, 0);
+    addBox(g, glass, 0.08, 0.4, 0.52, cx + 0.4, 0.72, 0);
+    // 車頂冷氣
+    addBox(g, lib.lambert(PAL.aluminium), 0.5, 0.09, 0.3, cx, 1.05, 0);
+    // 轉向架
+    for (const bx of [cx - 0.45, cx + 0.45]) {
+      for (const bz of [0.22, -0.22]) addCylinder(g, black, 0.14, 0.14, 0.08, bx, 0.16, bz, 8, 0, Math.PI / 2);
+    }
+  }
+  if (opts.nose !== false) {
+    // 車頭斜錐（用兩段收窄盒近似）
+    const noseX = -((cars - 1) * carLen) / 2 - carLen / 2 - 0.12;
+    addBox(g, white, 0.3, 0.5, 0.46, noseX, 0.7, 0);
+    addBox(g, livery, 0.3, 0.1, 0.47, noseX, 0.56, 0);
+    addBox(g, glass, 0.06, 0.24, 0.4, noseX - 0.14, 0.82, 0);
+    addBox(g, white, 0.12, 0.28, 0.36, noseX - 0.2, 0.55, 0);
+  }
+  return g;
+}
+
+/** 鐵路月台（黃色觸覺邊、上蓋、長椅、光管）；沿本地 +x 延伸。 */
+export function addRailPlatform(
+  parent: THREE.Object3D,
+  lib: MaterialLibrary,
+  x: number,
+  z: number,
+  len: number,
+  ry = 0,
+  y = 0,
+  opts: { canopy?: boolean; name?: string } = {},
+): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, y, z);
+  g.rotation.y = ry;
+  parent.add(g);
+  const concrete = lib.lambert(PAL.concreteLight);
+  // 月台
+  addBox(g, lib.lambert(PAL.concreteDark), len, 0.34, 0.92, 0, 0.17, 0);
+  addBox(g, concrete, len, 0.06, 0.88, 0, 0.37, 0);
+  // 兩側黃色觸覺邊
+  addBox(g, lib.lambert(PAL.hazardYellow), len, 0.04, 0.1, 0, 0.39, 0.4);
+  addBox(g, lib.lambert(PAL.hazardYellow), len, 0.04, 0.1, 0, 0.39, -0.4);
+  // 上蓋
+  if (opts.canopy !== false) {
+    const cols = Math.max(2, Math.round(len / 1.6) + 1);
+    for (let i = 0; i < cols; i++) {
+      const px = -len / 2 + (len / (cols - 1)) * i;
+      addCylinder(g, lib.lambert(PAL.steelGrey), 0.04, 0.05, 1.25, px, 0.99, 0, 6);
+    }
+    addBox(g, lib.lambert(PAL.aluminium), len + 0.15, 0.08, 1.35, 0, 1.66, 0);
+    addBox(g, lib.lambert(PAL.wallWhite), len + 0.18, 0.05, 1.38, 0, 1.72, 0);
+    // 光管（夜間 vertexNeon 桶）
+    addBox(g, lib.neonTube(PAL.wallWhite), len * 0.86, 0.03, 0.06, 0, 1.6, 0);
+    // 長椅
+    addBench(g, lib, -len * 0.22, 0.1, Math.PI, 0.4, PAL.woodLight);
+    addBench(g, lib, len * 0.24, 0.1, 0, 0.4, PAL.woodLight);
+  }
+  return g;
+}
+
+/** 鐵路號誌（紅／綠燈；夜間 vertexNeon 發光）。 */
+export function addRailSignal(
+  parent: THREE.Object3D,
+  lib: MaterialLibrary,
+  x: number,
+  z: number,
+  ry = 0,
+  y = 0,
+  height = 1.5,
+): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, y, z);
+  g.rotation.y = ry;
+  parent.add(g);
+  addCylinder(g, lib.lambert(PAL.steelGrey), 0.035, 0.045, height, 0, height / 2, 0, 6);
+  addBox(g, lib.lambert(PAL.ironDark), 0.18, 0.46, 0.15, 0, height + 0.12, 0);
+  addBox(g, lib.lambert(PAL.hazardBlack), 0.2, 0.05, 0.17, 0, height + 0.02, 0);
+  addSphere(g, lib.neonTube(PAL.neonRed), 0.045, 0, height + 0.23, 0.09, 5, 4);
+  addSphere(g, lib.neonTube(PAL.neonGreen), 0.045, 0, height + 0.06, 0.09, 5, 4);
+  return g;
+}
+
+/**
+ * 邊境圍欄（混凝土基座＋高鐵柱＋鐵絲網橫杆＋斜頂防攀刺＋紅色警示燈）。
+ * 兩點之間自動計算方向；lamps=true 時警示燈夜間亮（vertexNeon）。
+ */
+export function addBorderFence(
+  parent: THREE.Object3D,
+  lib: MaterialLibrary,
+  x1: number,
+  z1: number,
+  x2: number,
+  z2: number,
+  h = 1.35,
+  opts: { y?: number; lamps?: boolean; color?: number } = {},
+): THREE.Group {
+  const dx = x2 - x1;
+  const dz = z2 - z1;
+  const len = Math.hypot(dx, dz);
+  const g = new THREE.Group();
+  g.position.set((x1 + x2) / 2, opts.y ?? 0, (z1 + z2) / 2);
+  g.rotation.y = Math.atan2(-dz, dx);
+  parent.add(g);
+  if (len < 0.1) return g;
+  const metal = lib.lambert(opts.color ?? PAL.steelGrey);
+  const concrete = lib.lambert(PAL.concrete);
+  // 混凝土基座
+  addBox(g, lib.lambert(PAL.concreteDark), len, 0.18, 0.2, 0, 0.09, 0);
+  addBox(g, concrete, len, 0.28, 0.12, 0, 0.32, 0);
+  // 立柱＋橫杆
+  const posts = Math.max(2, Math.round(len / 0.7) + 1);
+  for (let i = 0; i < posts; i++) {
+    const px = -len / 2 + (len / (posts - 1)) * i;
+    addBox(g, metal, 0.045, h, 0.045, px, 0.46 + h / 2, 0);
+    // 斜頂防攀刺
+    addBox(g, metal, 0.03, 0.22, 0.03, px + 0.04, 0.46 + h + 0.1, 0).rotation.z = 0.5;
+    if (opts.lamps && i % 2 === 0) {
+      addSphere(g, lib.neonTube(PAL.neonRed), 0.035, px, 0.46 + h + 0.03, 0.05, 5, 4);
+    }
+  }
+  for (let r = 1; r <= 3; r++) {
+    addBox(g, metal, len, 0.03, 0.03, 0, 0.46 + (h / 4) * r, 0);
+  }
+  // 鐵絲網（幾何斜線，不用透明材質；密度適中以控制三角形）
+  const meshN = Math.max(2, Math.round(len / 0.38));
+  for (let i = 0; i < meshN; i++) {
+    const px = -len / 2 + (len / meshN) * (i + 0.5);
+    addBox(g, metal, 0.014, h * 0.9, 0.014, px, 0.46 + h * 0.45, 0).rotation.z = 0.8;
+    addBox(g, metal, 0.014, h * 0.9, 0.014, px, 0.46 + h * 0.45, 0).rotation.z = -0.8;
+  }
+  return g;
+}
+
+/**
+ * LED 資訊顯示屏（邊境口岸過關資訊／離境大堂班次牌）。
+ * 一個 symbol 貼圖材質（1 draw call），日間可見、夜間自發光。
+ */
+export function addLedInfoBoard(
+  parent: THREE.Object3D,
+  lib: MaterialLibrary,
+  x: number,
+  y: number,
+  z: number,
+  w: number,
+  h: number,
+  ry = 0,
+  lines: string[] = ['往深圳 過關暢順', '請備回鄉證'],
+  accent = '#ffb347',
+): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(x, y, z);
+  g.rotation.y = ry;
+  parent.add(g);
+  // 外框＋遮光罩
+  addBox(g, lib.lambert(PAL.ironDark), w + 0.1, h + 0.1, 0.1, 0, 0, -0.05);
+  addBox(g, lib.lambert(PAL.steelGrey), w + 0.04, 0.05, 0.18, 0, h / 2 + 0.06, 0.05);
+  const key = `borderled|${lines.join('~')}|${accent}`;
+  const mat = lib.symbol(key, 512, 160, (ctx) => {
+    ctx.fillStyle = '#05080c';
+    ctx.fillRect(0, 0, 512, 160);
+    // 邊框光點
+    ctx.fillStyle = accent;
+    ctx.globalAlpha = 0.5;
+    for (let i = 0; i < 24; i++) ctx.fillRect(8 + i * 21, 4, 10, 3);
+    ctx.globalAlpha = 1;
+    ctx.font = '800 40px "Noto Sans TC", "PingFang HK", "Microsoft JhengHei", sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = accent;
+    lines.slice(0, 3).forEach((line, i) => {
+      ctx.globalAlpha = 1 - i * 0.18;
+      ctx.fillText(line, 20, 48 + i * 44);
+    });
+    ctx.globalAlpha = 1;
+    // 右側綠色指示箭頭
+    ctx.fillStyle = '#5cff9d';
+    ctx.beginPath();
+    ctx.moveTo(440, 70);
+    ctx.lineTo(480, 80);
+    ctx.lineTo(440, 90);
+    ctx.closePath();
+    ctx.fill();
+  });
+  const face = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
+  face.position.z = 0.02;
+  g.add(face);
+  return g;
+}

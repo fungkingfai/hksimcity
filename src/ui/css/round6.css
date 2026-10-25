@@ -1,0 +1,464 @@
+/**
+ * Round 6 UI：鐵路工具／鐵路網卡／邊境口岸／內地糧食／現有樓宇 badge。
+ */
+
+/* ─────────────── 建造面板：鐵路工具區 ─────────────── */
+
+.rail-block {
+  flex: 0 0 auto;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line-soft);
+}
+
+.rail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  margin-top: 5px;
+}
+
+.rail-card {
+  --rail: #9fb4c8;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: center;
+  gap: 2px 7px;
+  padding: 6px 8px;
+  text-align: left;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--rail) 26%, transparent);
+  background:
+    radial-gradient(120% 130% at 0% 0%, color-mix(in srgb, var(--rail) 12%, transparent), transparent 62%),
+    linear-gradient(160deg, rgba(20, 36, 62, 0.7), rgba(7, 14, 28, 0.8));
+  transition: border-color 0.16s, box-shadow 0.16s, transform 0.16s;
+}
+
+.rail-card:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--rail) 58%, transparent);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
+}
+
+.rail-card.active {
+  border-color: var(--rail);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--rail) 45%, transparent), 0 0 16px color-mix(in srgb, var(--rail) 24%, transparent);
+  background:
+    radial-gradient(120% 130% at 0% 0%, color-mix(in srgb, var(--rail) 28%, transparent), transparent 66%),
+    linear-gradient(160deg, rgba(24, 42, 72, 0.85), rgba(8, 16, 30, 0.9));
+}
+
+.rail-card.danger {
+  --rail: #ff5a5a;
+}
+
+.rail-ico {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  grid-row: 1 / span 2;
+  border-radius: 6px;
+  color: var(--rail);
+  background: color-mix(in srgb, var(--rail) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--rail) 32%, transparent);
+}
+
+.rail-ico .ico {
+  width: 14px;
+  height: 14px;
+}
+
+.rail-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.rail-meta b {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.rail-meta small {
+  font-size: 8px;
+  color: var(--ink-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+.rail-badge {
+  grid-column: 2;
+  justify-self: start;
+  margin-top: 1px;
+  padding: 0 5px;
+  font-size: 7.5px;
+  font-style: normal;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: var(--rail);
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--rail) 30%, transparent);
+  background: color-mix(in srgb, var(--rail) 8%, transparent);
+}
+
+.rail-hint {
+  margin: 6px 0 0;
+  font-size: 9px;
+  line-height: 1.5;
+  color: var(--ink-faint);
+}
+
+.rail-hint kbd {
+  height: 14px;
+  min-width: 14px;
+  font-size: 8px;
+  padding: 0 3px;
+}
+
+/* ─────────────── 交通面板：鐵路網卡 ─────────────── */
+
+.rail-network {
+  margin-top: 10px;
+}
+
+.rail-net-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.rail-grades {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 8px;
+}
+
+.rail-grade {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-size: 9.5px;
+  color: var(--ink-dim);
+  border-radius: 999px;
+  background: rgba(234, 244, 255, 0.04);
+  border: 1px solid var(--line-soft);
+}
+
+.rail-grade i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--rail, #9fb4c8);
+  box-shadow: 0 0 6px var(--rail, #9fb4c8);
+}
+
+.rail-grade b {
+  font-size: 9.5px;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.rail-tools {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.rail-tool-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 27px;
+  padding: 0 5px;
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--ink-dim);
+  border-radius: 5px;
+  border: 1px solid color-mix(in srgb, var(--rail, #9fb4c8) 28%, transparent);
+  background: rgba(234, 244, 255, 0.04);
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.rail-tool-btn .ico {
+  width: 11px;
+  height: 11px;
+  color: var(--rail, #9fb4c8);
+}
+
+.rail-tool-btn:hover {
+  color: var(--ink);
+  border-color: var(--rail, #9fb4c8);
+  background: color-mix(in srgb, var(--rail, #9fb4c8) 12%, transparent);
+}
+
+.rail-tool-btn.danger {
+  border-color: rgba(255, 90, 90, 0.3);
+}
+
+.rail-tool-btn.danger .ico {
+  color: var(--danger);
+}
+
+/* ─────────────── 貿易面板：內地供應 ─────────────── */
+
+.mainland-block {
+  margin-top: 10px;
+}
+
+.mainland-hero {
+  display: flex;
+  gap: 9px;
+  align-items: stretch;
+  margin-bottom: 8px;
+}
+
+.mainland-main {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  flex: 1 1 46%;
+  min-width: 230px;
+  padding: 10px 13px;
+  border-radius: var(--radius-sm);
+  background:
+    radial-gradient(120% 130% at 0% 0%, rgba(92, 255, 157, 0.12), transparent 62%),
+    linear-gradient(160deg, rgba(18, 38, 52, 0.72), rgba(7, 14, 20, 0.85));
+  border: 1px solid rgba(92, 255, 157, 0.28);
+}
+
+.mainland-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  flex: 1 1 54%;
+}
+
+.mainland-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 6px;
+}
+
+.mainland-crossing {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: rgba(234, 244, 255, 0.035);
+  border: 1px solid var(--line-soft);
+}
+
+.mc-ico {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  border-radius: 6px;
+  color: var(--gold);
+  background: rgba(255, 209, 102, 0.08);
+  border: 1px solid rgba(255, 209, 102, 0.24);
+}
+
+.mc-ico .ico {
+  width: 14px;
+  height: 14px;
+}
+
+.mc-name {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.mc-name b {
+  font-size: 10.5px;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mc-name small {
+  font-size: 8.5px;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.mc-food {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.mc-food.positive {
+  color: var(--green);
+}
+
+.mc-food.negative {
+  color: var(--danger);
+}
+
+/* ─────────────── 現有樓宇 badge ─────────────── */
+
+.hero-existing {
+  display: inline-block;
+  margin-top: 3px;
+  padding: 1px 7px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: var(--gold-hi);
+  border-radius: 999px;
+  border: 1px solid rgba(255, 209, 102, 0.3);
+  background: rgba(255, 209, 102, 0.08);
+  font-variant-numeric: tabular-nums;
+}
+
+.pill.existing {
+  color: var(--gold-hi) !important;
+  border-color: rgba(255, 209, 102, 0.4) !important;
+  background: rgba(255, 209, 102, 0.1) !important;
+}
+
+.sel-existing-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 6px 0 2px;
+  padding: 6px 9px;
+  font-size: 10px;
+  line-height: 1.55;
+  color: var(--gold-hi);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 209, 102, 0.07);
+  border: 1px solid rgba(255, 209, 102, 0.26);
+}
+
+.sel-existing-note .ico {
+  width: 12px;
+  height: 12px;
+  margin-top: 2px;
+  flex: 0 0 auto;
+}
+
+.food-mainland {
+  display: block;
+  color: var(--green) !important;
+}
+
+/* ─────────────── 手機 ─────────────── */
+
+.hud.is-mobile-ui .rail-block {
+  margin-top: 5px;
+  padding-top: 6px;
+}
+
+.hud.is-mobile-ui .rail-grid {
+  gap: 4px;
+}
+
+.hud.is-mobile-ui .rail-hint {
+  display: none;
+}
+
+.hud.is-mobile-ui .rail-card {
+  padding: 5px 6px;
+}
+
+.hud.is-mobile-ui .rail-meta b {
+  font-size: 10px;
+}
+
+.hud.is-mobile-ui .rail-meta small {
+  font-size: 7.5px;
+}
+
+.hud.is-mobile-ui .rail-net-stats {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.hud.is-mobile-ui .rail-tools {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.hud.is-mobile-ui .mainland-hero {
+  flex-direction: column;
+}
+
+.hud.is-mobile-ui .mainland-main {
+  min-width: 0;
+}
+
+.hud.is-mobile-ui .mainland-stats {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.hud.is-mobile-ui .mainland-crossing {
+  flex-wrap: wrap;
+}
+
+.hud.is-mobile-ui .mc-name {
+  flex-basis: calc(100% - 32px);
+}
+
+.hud.is-mobile-ui .mainland-crossing .trade-focus {
+  margin-left: auto;
+}
+
+@media (max-width: 1180px) {
+  .rail-tools {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* 手機：建造 sheet 內容（分區＋鐵路＋公共建築＋列表＋工具列）整體可滾動，
+   避免新增鐵路工具後固定區太高、把建築卡／工具列擠出畫面。 */
+.hud.is-mobile-ui .build-panel {
+  display: block;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  max-height: min(80vh, 700px);
+}
+
+.hud.is-mobile-ui .build-panel .build-scroll {
+  flex: 0 0 auto;
+  min-height: 0;
+  overflow: visible;
+  padding-bottom: 4px;
+}
+
+.hud.is-mobile-ui .build-panel .rail-block {
+  padding-bottom: 6px;
+}
+
+/* 預設唔 sticky（避免遮住鐵路卡）；有工具開啟時取消按鈕才固定底部 */
+.hud.is-mobile-ui .build-panel .build-tools {
+  position: static;
+}
+
+.hud.is-mobile-ui .build-panel:has(.cancel-tool:not([hidden])) .build-tools {
+  position: sticky;
+  bottom: 0;
+  background: linear-gradient(180deg, rgba(7, 14, 28, 0.55), rgba(7, 14, 28, 0.96));
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}

@@ -11,6 +11,7 @@ import {
   BUILDING_LIST,
   DAYS_PER_MONTH,
   MAP_LABELS,
+  RAIL_INFO,
   TRANSIT_INFO,
   TRANSIT_LINE_CONFIG,
   TRANSIT_SPEED,
@@ -21,6 +22,7 @@ import {
 import type {
   GameActions,
   GameState,
+  RailGrade,
   TransitLine,
   TransitLineMode,
   TransitMode,
@@ -307,6 +309,59 @@ export function createTransitPanel(container: HTMLElement, store: GameStore, act
     store.bumpUI();
   };
 
+  const renderRailNetwork = (state: GameState): string => {
+    const snap = state.railNetwork;
+    const railTiles = state.tiles.reduce((n, tile) => (tile.rail ? n + 1 : n), 0);
+    const gradeCounts: Record<RailGrade, number> = snap
+      ? snap.gradeCounts
+      : state.tiles.reduce(
+          (acc, tile) => {
+            if (tile.rail) acc[tile.rail]++;
+            return acc;
+          },
+          { surface: 0, elevated: 0, underground: 0 } as Record<RailGrade, number>,
+        );
+    const stations = snap ? snap.stations : state.buildings.filter((b) => BUILDINGS[b.key]?.railStation).length;
+    const connected = snap ? snap.connectedStations : Math.max(0, Math.round(state.stats.railStations ?? 0));
+    const isolated = snap ? snap.isolatedStations : Math.max(0, stations - connected);
+    const length = snap ? snap.totalLength : railTiles;
+    const ridership = snap ? snap.ridership : 0;
+    const upkeep = snap ? snap.upkeep : 0;
+    const gradeChip = (grade: RailGrade) => {
+      const info = RAIL_INFO[grade];
+      return `<span class="rail-grade" style="--rail:${info.color}"><i></i>${info.name}<b>${num(gradeCounts[grade] ?? 0)} 格</b></span>`;
+    };
+    const toolBtn = (grade: RailGrade | 'remove', label: string) => `
+      <button type="button" class="rail-tool-btn${grade === 'remove' ? ' danger' : ''}" data-act="rail-tool" data-grade="${grade}"
+        style="--rail:${grade === 'remove' ? '#ff5a5a' : RAIL_INFO[grade].color}">
+        ${ico(grade === 'remove' ? 'hammer' : grade === 'surface' ? 'rail' : grade === 'elevated' ? 'railElevated' : 'railUnderground')}
+        <span>${label}</span>
+      </button>`;
+    return `
+      <div class="fin-block rail-network">
+        <div class="block-head">
+          <h3>${ico('rail')}港鐵鐵路網</h3>
+          <span class="mini">${snap ? '每日結算' : '網絡計算中'} · 鋪軌後自動接駁</span>
+        </div>
+        <div class="rail-net-stats">
+          <div class="fin-card"><span>總長</span><b>${num(length)} 格</b></div>
+          <div class="fin-card"><span>車站</span><b>${num(stations)} 座</b></div>
+          <div class="fin-card"><span>已接駁</span><b class="positive">${num(connected)}</b></div>
+          <div class="fin-card"><span>孤立站</span><b class="${isolated > 0 ? 'negative' : ''}">${num(isolated)}</b></div>
+          <div class="fin-card"><span>每日乘客</span><b>${num(ridership)}</b></div>
+          <div class="fin-card"><span>每月維護</span><b>${formatMoneyShort(upkeep)}</b></div>
+        </div>
+        <div class="rail-grades">${gradeChip('surface')}${gradeChip('elevated')}${gradeChip('underground')}</div>
+        <div class="rail-tools${''}">
+          ${toolBtn('surface', '地面鐵路')}
+          ${toolBtn('elevated', '高架鐵路')}
+          ${toolBtn('underground', '地下鐵路')}
+          ${toolBtn('remove', '拆除軌道')}
+        </div>
+        <p class="hint">地面鐵路不可跨水；高架／地下可過海穿山。mtrStation 要貼近軌道（正交外側）；按 <b>U</b> 顯示地下鐵路圖層。孤立車站覆蓋 ×0.35。</p>
+      </div>`;
+  };
+
   const renderRoutes = (state: GameState): string => {
     const lines = state.transitLines ?? [];
     const busCount = lines.filter((line) => line.mode === 'bus').length;
@@ -449,6 +504,7 @@ export function createTransitPanel(container: HTMLElement, store: GameStore, act
         : 'no-editor',
       state.ui.selectedLineId ?? -1,
       Math.round(state.finance.treasury),
+      state.railNetwork ? `${state.railNetwork.revision}:${state.railNetwork.totalLength}:${state.railNetwork.connectedStations}:${state.railNetwork.isolatedStations}:${Math.round(state.railNetwork.ridership)}` : 'no-rail',
     ].join('|');
   };
 
@@ -523,6 +579,7 @@ export function createTransitPanel(container: HTMLElement, store: GameStore, act
         </div>
       </div>
       ${alert}
+      ${renderRailNetwork(state)}
       ${renderRoutes(state)}
 
       <div class="fin-block" style="margin-top:10px">
@@ -584,6 +641,22 @@ export function createTransitPanel(container: HTMLElement, store: GameStore, act
       case 'select-station': {
         const id = Number(node.dataset.id);
         if (Number.isFinite(id)) actions.selectBuilding(id);
+        break;
+      }
+      case 'rail-tool': {
+        const grade = node.dataset.grade;
+        if (!grade) break;
+        const tool = grade === 'remove' ? 'rail:remove' : `rail:${grade}`;
+        state.ui.tool = state.ui.tool === tool ? null : tool;
+        if (state.ui.tool) {
+          state.ui.showTransit = false;
+          restoreInfoPanel(store);
+          store.toast(
+            grade === 'remove' ? '拆除鐵路：拖曳或點擊軌道' : `鋪設${RAIL_INFO[grade as RailGrade]?.name ?? '鐵路'}：拖曳地圖連續鋪軌`,
+            'info',
+          );
+        }
+        store.bumpUI();
         break;
       }
       case 'route-new': {

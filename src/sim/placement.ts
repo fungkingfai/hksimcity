@@ -49,6 +49,7 @@ import {
 } from '../core/config';
 import type { Building, GameState, PlaceResult, ResourceKey, TerrainType, ZoneType } from '../core/types';
 import { HK_DESIGN_SIZE, HK_REGIONS } from '../world/worldgen';
+import { isNearBorderCrossing, tileToDesignFloat } from '../world/border';
 import { addCargo } from './logistics-inventory';
 import {
   invalidatePathCache,
@@ -319,8 +320,8 @@ function terrainNearby(
 
 /**
  * GDD §2.6 地區／特殊限制。回傳 null 代表通過，否則回傳香港用語原因。
- * - 電車站：只可在香港島（港島北岸電車線概念）。
- * - 貨櫃碼頭：只可建於西岸港口（葵青一帶，x<34、y 34–48）。
+ * - 電車站：任何貼路可建地都可興建（香港電車已擴展至多區；唔再只限港島）。
+ * - 貨櫃碼頭：任何臨水＋貼路地點都可興建（葵涌只係 bonus 區，唔再限制）。
  * - 林地：不可建高密度住宅、工業與商廈／商場（需先清林）。
  * - 豪宅：需距海 ≤4 格或距山地／丘陵 ≤3 格（景觀）。
  * - 學校／醫院：不可建於發電廠 3 格內（污染）。
@@ -336,6 +337,14 @@ function specialPlacementRule(
   const center = footprintCenter(x, y, w, h);
   const region = regionAt(Math.floor(center.x), Math.floor(center.y));
 
+  // Round 6：道路／鐵路口岸只可建於邊境通道附近（Issue #4/#6）
+  if (def.borderGate) {
+    const d = tileToDesignFloat(center.x, center.y, state.width, state.height);
+    if (!isNearBorderCrossing(d.x, d.y, 6)) {
+      return `${def.name}只可建於深圳河邊境通道附近（羅湖／落馬洲／文錦渡／沙頭角）`;
+    }
+  }
+
   // Round 5：機場／貨櫃碼頭設施必須位於真實地理 region 內（HK_REGIONS 設計座標）
   if (def.requiredRegion) {
     const cx = Math.floor(center.x);
@@ -346,10 +355,6 @@ function specialPlacementRule(
         ? `${def.name}只可建於赤鱲角機場區`
         : `${def.name}只可建於葵涌貨櫃碼頭區`;
     }
-  }
-
-  if (key === 'tramStop' && region !== 'hongKongIsland') {
-    return '電車站只可在香港島興建（港島電車線）';
   }
 
   // 林地限制（逐格檢查 footprint）

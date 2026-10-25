@@ -296,15 +296,24 @@ function buildStarterRoads(world: WorldGenResult, seed: number): void {
   const sx = width / HK_DESIGN_SIZE;
   for (const tunnel of HK_TUNNELS) {
     const tx = Math.max(1, Math.min(width - 2, Math.round((tunnel.x + 0.5) * sx - 0.5)));
+    // 只喺維港水域（大約 design y 48–64）搵兩端都係陸地嘅最短海峽，
+    // 避免把南中國海／外海長條水域當成隧道而出現「三條路通往大海」（issue #3）
+    const yMin = Math.max(2, Math.round(48 * (height / HK_DESIGN_SIZE)));
+    const yMax = Math.min(height - 3, Math.round(64 * (height / HK_DESIGN_SIZE)));
     let best: { start: number; end: number } | null = null;
-    let y = 0;
-    while (y < height) {
+    let y = yMin;
+    while (y <= yMax) {
       if (tiles[idx(tx, y)].terrain === 'water') {
         const start2 = y;
-        while (y < height && tiles[idx(tx, y)].terrain === 'water') y++;
+        while (y <= yMax && tiles[idx(tx, y)].terrain === 'water') y++;
         const end = y - 1;
-        if (end - start2 + 1 >= 3 && (!best || end - start2 > best.end - best.start)) {
-          best = { start: start2, end };
+        const len = end - start2 + 1;
+        if (len >= 3 && len <= 60) {
+          const before = start2 > 0 ? tiles[idx(tx, start2 - 1)].terrain : 'water';
+          const after = end < height - 1 ? tiles[idx(tx, end + 1)].terrain : 'water';
+          if (before !== 'water' && after !== 'water' && (!best || len > best.end - best.start)) {
+            best = { start: start2, end };
+          }
         }
       } else {
         y++;

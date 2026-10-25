@@ -29,7 +29,7 @@
 | 地圖 | **600×600 格（360,000 格；每格 112m，涵蓋 67.2km×67.2km）**，由 **CSDI／地政總署真實地理數據**重新生成（DTM 5m＋342,233 個建築輪廓＋水塘／土地利用；見 `REAL_GEO_DATA.md`）；`WORLD_SPAN=1200`；可建地約 **22%**（600 精細數據後以 QA 實測為準；山多平地少）；spawn 中環（格座標 **259,299**，設計 51.4,59.4） |
 | 區域 | 新界北、獅子山走廊、九龍、維多利亞港、香港島、南區及離島、西岸港口（見 §2.2） |
 | 時間 | 1 遊戲日＝1440 分鐘＝**30 真實秒**（1×）；1 月＝7 日；1 年＝12 月（約 42 分鐘）🕐 |
-| 起始資源 | 兩種開局：**已有城鎮**（中環連通優先道路網＋34 棟 auto＋10 項公共設施〔學校×2、醫院〕、倉庫食品 520、庫房 $6,500,000、10 日 warm-up、目標 120／實測約 146 人）／**由零開始**（**完全空地**：0 道路／0 建築／0 分區／無人造地標，庫房 $8,000,000、5 名市民〔設計要求〕） |
+| 起始資源 | 兩種開局：**已有城鎮**（中環連通優先道路網＋34 棟 auto＋10 項設施〔學校×2、醫院〕＋**250–400 棟 existing 現有樓宇**、倉庫食品 520、庫房 $6,500,000、10 日 warm-up；Round 6 建議目標人口 **520**（現況 config 145，existing 上線後調））／**由零開始**（**完全空地**：0 道路／0 建築／0 分區／無人造地標，庫房 $8,000,000、5 名市民〔設計要求〕） |
 | 人口上限 | **1,600 人**（`sim/population.ts` 常數 `MAX_POPULATION=1600`；豪宅在人口 800 解鎖＝後期目標） |
 | 建築 | **32 個 key**：**19 種分區自動開發**（住宅 6／商業 7／工業 5／農業 1）＋**13 種玩家手動置**（公共 4／交通 4／休憩 2／物流 1／工業 2）；分類見 `CATEGORY_INFO` |
 | 目標客群 | 喜歡城市建造、香港情懷、輕鬆但有事可做的玩家（桌面為主、手機可玩） |
@@ -174,6 +174,10 @@ Round 4 不再用 Round 3 的「7 區矩形」程序化分區；地圖上的香�
 12. **驗收**：startup 解碼＋生成約 2.5–4 秒（boot screen）；starter overview ≤2.0M tris／≤550 calls；empty 1.032M tris／37 calls；地圖無穿崩邊界；舊 96×96／304×304 存檔拒絕。
 
 > 詳細數據（DTM 取樣、terrain 分類、density／height 公式、限制）見 **`REAL_GEO_DATA.md`**。
+
+13. **Round 6 真實數據擴充**：`MapData` 加 `landuse`（規劃署 LUHK 2020，0..92）、`roadHint`（每格 1 bit）、`borderCrossings`（羅湖／落馬洲／文錦渡／深圳灣設計座標）、`shenzhenRiver`（深圳河 ring）；`tools/build-hk-data.py` 需以 600×600／112m 重新生成。
+14. **深圳河／邊境**：香港北面以深圳河為界；北岸深圳係 render-only（不可建／不可穿越）；4 個口岸位置見 `ROUND6_ISSUES.md` §3。道路／鐵路口岸建築只可喺對應通道 5 格內。
+15. **現有樓群（issue #7）**：starter 會把 spawn 附近 250–400 座 density 樓群轉為真正 `Building`（`existing:true`、zone、居民／職位、道路接駁）；faux density 在 `tile.buildingId>=0` 自動隱藏；empty 完全不變。詳見 `ROUND6_ISSUES.md` §5。
 
 ### 2.5 道路規則（整合行人路）
 
@@ -1115,23 +1119,23 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
 
 ---
 
-## 12. 存檔與版本（v6 精簡格式，600×600 真實地圖）
+## 12. 存檔與版本（v7 精簡格式，600×600 真實地圖）
 
 | 項目 | 內容 |
 |---|---|
-| `GAME_VERSION` | **6**（`config.ts`） |
+| `GAME_VERSION` | **7**（Round 6；`config.ts` 現為 6，待 Lead bump） |
 | 存檔 key | localStorage 前綴 `victoria-harbour.save.`；slot 0 自動、slot 1–3 手動 |
-| 格式 | **`hk-city-compact`**：`{ format, version:6, seed, width:600, height:600, gameMode, tileEdits:number[], info:{...}, state:Omit<GameState,'tiles'> }` |
-| 稀疏格 | 只序列化有道路／行人路／分區的格；`packed = road | sidewalk<<1 | zoneCode<<2`；地形由 seed 重新生成（真實數據不變） |
-| 還原 | 用 `seed` 重新 `generateWorld(seed,600,600,{starterRoads: gameMode==='starter'})`（解碼真實數據）→ 套 sparse edits → 由 buildings 重建 `buildingId` → 補 spawn／gameMode |
+| 格式 | **`hk-city-compact`**：`{ format, version:7, seed, width:600, height:600, gameMode, tileEdits:number[], railEdits:number[], info:{...}, state:Omit<GameState,'tiles'> }` |
+| 稀疏格 | `tileEdits` 記道路／行人路／分區／管線；**`railEdits=[index,gradeCode,...]`**（0 無／1 地面／2 高架／3 地下）；地形由 seed＋生成檔重新解碼 |
+| 還原 | 用 `seed` 重新 `generateWorld(seed,600,600,{starterRoads: gameMode==='starter'})` → 套 tileEdits／railEdits → 由 buildings 重建 `buildingId` → 補 spawn／gameMode／railNetwork |
 | 大小 | 約 **80–140KB**（完整 360,000 格 JSON 會爆 localStorage 配額） |
 | 存檔列表 | 用 `info` 快照（城市名／人口／庫房／日期／地圖 600×600），不重新解碼地圖，避免 1–2 秒卡 |
-| 兼容性 | 只接受 **600×600、version 6**；96×96（v2）／304×304（v4）舊存檔／匯入拒絕（提示重新開局） |
+| 兼容性 | 只接受 **600×600、version 7**；96／304／480（v2–v5）／600 v6 舊存檔拒絕（提示重新開局） |
 | 讀檔後 | `ui.mode='city'`、退出室內、清除工具、重算連通性、UI 重繪（`store.on('reset')`） |
 
 **已定稿 state 欄位**：同 Round 3（clock／finance／stats／gameMode／spawn／zoneDemand／vehicles／transit／Tile.zone／Building.auto/zone／UIState.showZones/showStartScreen／citizen.salary/commuteMode 等），另加 **`Tile.density`／`Tile.buildingHeight`**（真實樓群視覺；只 render 用，不需 sparse save——由地形數據重新生成）。
 
-> 📌 v5 只記道路／行人路／分區；地形（含 density／height）由 seed＋生成檔重新解碼；日後若加填海／地形改造，需把地形變更納入 sparse diff。詳見 `LARGE_MAP_NOTES.md` §7。
+> 📌 v7 記道路／行人路／分區／管線＋鐵路 railEdits；地形（含 density／height）由 seed＋生成檔重新解碼；深圳河／口岸／existing 由 worldgen／starter 重生。
 
 ## 13. 數值平衡與 config 建議（600 真實地理）
 
@@ -1153,7 +1157,7 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
 | 道路 | $15,000／格（自帶行人路）；`SIDEWALK_COST` 不再使用 |
 | `AUTO_DEVELOP` | intervalDays 1、每區每日 **6**、全城每日 **15**、`minDemand=0.12`、`overSupplyDemand=−0.35`、`abandonDays=8`、`maxAutoBuildings=1200` |
 | devScore 權重 | base 18；power 14、water 12、police 8、fire 8、school 10、hospital 8、transit 10、happiness 12、landValue 10 |
-| 開局 | starter：$6,500,000、warmup 10 日、目標 120／實測約 146 人、34 棟 auto＋10 設施（學校×2、醫院）、倉庫食品 520；empty：$8,000,000、5 市民（設計）、完全空地 |
+| 開局 | starter：$6,500,000、warmup 10 日、目標 120／實測約 146 人、34 棟 auto＋10 設施、倉庫食品 520；**Round 6 加 250–400 棟 existing 樓宇、建議 target 520、warm-up 15 日**；empty：$8,000,000、5 市民（設計）、完全空地 |
 | 稅率 | 薪俸 15%／利得 16.5%／差餉 5%（上限 20／25／12%） |
 | 賣地／煙花 | $2,500,000（15 日）／$800,000（20 日） |
 | 相機 | MIN 16、MAX≈1,625（`260×MAP_SCALE=6.25`）、far≈3,750；`fitMap` 距離≈1,495 |
@@ -1209,7 +1213,7 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
 
 | 常數 | 值 | 說明 |
 |---|---|---|
-| `GAME_VERSION` | **6** | save v6 compact |
+| `GAME_VERSION` | **7**（Round 6；`config.ts` 現為 6，待 Lead bump） |
 | `GRID_WIDTH`／`GRID_HEIGHT` | **600／600** | 360,000 格 |
 | `TILE_SIZE` | 2 | 每格世界 2 單位 |
 | `MAP_SCALE` | **6.25**（600/96） | 霧／天空／相機距離／deco 密度 |
@@ -1389,6 +1393,69 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
 - [ ] 機場：客運／貨運大樓可建（赤鱲角）、可簽客運／貨運航線；航班／乘客／貨運／收入／旅遊／噪音就業正常；8 號風球關閉。
 - [ ] 貨櫃碼頭：貨櫃場／龍門吊／閘口可建（葵青）、可簽船線；吞吐 = min(吊機、場、閘口、道路)；進出口入 goods／electronics；颱風停裝卸。
 - [ ] 所有新面板（地下層 U、路線 tab、機場、碼頭）可運作；save v6 包含 pipe bits／utilities／transitLines／airport／port。
+
+### 17.6 Round 6 新增玩法驗收
+
+- [ ] **#5 鐵路**：三 grade 工具、成本（$18k／$65k／$42k）、80 格上限、mtrStation 接駁、BFS 網絡、connected／isolated、乘客／票價／維護、U 層、save v7 railEdits。
+- [ ] **#4 深圳河**：北面河流＋北岸深圳遠景；4 口岸位置；道路／鐵路口岸放置 5 格限制＋接駁判定。
+- [ ] **#6 內地糧食**：道路 60／日、鐵路 120／日、40% 需求上限、天氣係數、貿易面板內地 tab、城事食品卡。
+- [ ] **#7 existing**：starter 250–400 棟真正樓宇、道路接駁、faux 隱藏、人口／就業／收支平衡、empty 不變、hard cap 500。
+- [ ] 已修 #1（電車站任何貼路）、#2（貨櫃碼頭非葵涌 ×0.9）、#3（南面外海冇三條路）、#8（手機可開局）回歸正常。
+
+## 19. Round 6 GitHub Issues（#4 深圳河／#5 鐵路／#6 內地糧食／#7 existing）
+
+> 完整規格、契約、公式、UI wireframe、驗收見 **`ROUND6_ISSUES.md`**；本章只列 GDD 層面的玩法定位與資料影響。
+
+### 19.1 #5 港鐵地下／地上鐵路
+
+- 三種 grade：地面 $18k/格（不可跨海）、高架 $65k（可跨海／谷）、地下 $42k（可過海／穿山，只喺 U 層顯示）；最長一次 80 格。
+- `mtrStation.railStation=true`；站 4 鄰有 rail 才接駁；每日 BFS 鐵路網；connected stations ≥2 才有正常效益，孤立站覆蓋 ×0.35。
+- 營運：`connectedStations×220 + totalLength×2.5` × 需求／天氣；票價 $8×0.9；維護 = 軌 grade upkeep + 每站 $8k + 車站建築 upkeep。
+- 颱風：地面停駛、高架 50%、地下 90%；有軌用網絡、冇軌用 mtrStation 半徑 fallback。
+- Save v7：`railEdits`；UI 交通面板「鐵路」tab＋U 層。
+
+### 19.2 #4 深圳河與邊境通道
+
+- 北面以深圳河為界；北岸深圳 render-only、不可建／不可穿越。
+- 4 個通道：羅湖（鐵路，tile≈282,130／設計 44.7,20.4）、落馬洲（道路，241,155／38.1,24.4）、文錦渡（道路，291,127／46.1,19.9）、深圳灣（道路，128,153／20.1,24.1）；沙頭角 P2。
+- 新口岸建築：`roadBorderGate` 3×2 $8M／upkeep $60k／40 工人／解鎖 300；`railBorderGate` 3×2 $9M／$70k／60 工人／解鎖 400。
+- 放置：通道 5 格內、香港側、可建地；道路口岸要 road 接駁、鐵路口岸要 rail 接駁；否則 food=0。
+- 數據：`MapData.borderCrossings`／`shenzhenRiver`／`landuse`／`roadHint`（600 data 待重生）。
+
+### 19.3 #6 內地糧食支援
+
+- 道路口岸 60 food/日、鐵路口岸 120 food/日；進口價 $0（補貼）；維護費由口岸承擔。
+- 上限 = 全城需求 ×**40%**，保留本地農業／食品廠必要性；8 號風球道路 ×0.5、鐵路 ×0.9。
+- 結算：`MainlandState{foodPerDay, roadLinks, railLinks, crossings[]}`；食物入 `stats.foodStored`；`stats.mainlandFoodPerDay` 顯示。
+- UI：貿易面板「內地」tab；城事食品卡「本地＋進口」；地圖口岸 badge。
+
+### 19.4 #7 已有城鎮現有樓群真正化
+
+- starter spawn 半徑 120 格內，把 250–400 座 density 樓群（density≥28、bh≥4）轉為真正 `Building`：
+  - `existing:true`；按 height／density／landuse 映射 officeTower／publicHousing／tongLau／subdividedFlat／industrialBuilding；
+  - 道路由 `roadHint` 生成＋BFS 接入 starter 路網；faux density 在 `tile.buildingId>=0` 自動隱藏；
+  - hard cap 500；empty 完全唔生成。
+- 平衡建議：`STARTER_TOWN.targetPopulation` 145→**520**（450–650）、warm-up 15 日、existing upkeep ratio 0.6；需 economy-dev 模擬調。
+- UI：建築卡「現有樓宇」badge；可拆（不退款）／P2 升級；開局 starter 卡顯示現有樓宇數。
+
+### 19.5 共通契約（Round 6）
+
+| 項目 | 內容 |
+|---|---|
+| `Tile` | `rail?: RailGrade`（已加） |
+| `GameState` | `railNetwork?`、`mainland?`（已加）；existing 在 `buildings` |
+| `Building` | `existing?: boolean`（已加） |
+| `BuildingDef` | `railStation?`／`borderGate?`（已加）；新 key `roadBorderGate`／`railBorderGate` |
+| `GameActions` | rail tool 用 `setTool('rail:*')`；`setTransitTab('rail')`；`openTradePanel('mainland')` |
+| `UIState` | `railPlanGrade?`／`tradeTab?`（待加）；`showUnderground` 已有 |
+| Save | **v7**：railEdits；舊 v6 拒絕 |
+| Stats | `railStations?`／`railLength?`／`mainlandFoodPerDay?`（已加）；existing 數量／人口建議加 |
+
+### 19.6 MVP／P2 與風險
+
+- MVP：#5 三 grade＋網絡／鐵路 tab／save v7；#4 四通道＋兩種口岸；#6 進口 60／120＋40% cap；#7 existing 250–400＋道路。
+- P2：列車班次／轉乘、沙頭角／深圳灣鐵路、邊境擠塞事件、existing 升級／專屬模型、口岸排隊。
+- 風險：數據未重生（#4/#7 fallback）；rail 與 mtr 覆蓋雙重計算；existing 令 starter 人口／upkeep 爆升；500 棟效能；v6→v7 兼容。
 
 ## 附錄 A：數值速查（分區版，以 config 為準）
 

@@ -33,6 +33,7 @@ import { BUILDINGS, TRANSIT_LINE_CONFIG, WEATHER_EFFECT } from '../core/config';
 import { mulberry32, type Rng } from '../core/rng';
 import type { Building, GameState, TransitLine, TransitMode, Vehicle, VehicleKind } from '../core/types';
 import { getTransitLines, lineRoadPath } from './transit';
+import { railTrainRoutes, type RailTrainRoute } from './rail';
 
 // ─────────────────────────── 常數（檔案頂部集中管理） ───────────────────────────
 
@@ -90,8 +91,13 @@ const BFS_VISIT_LIMIT = 3200;
 /** 颱風時路面車輛目標數量倍率（其餘天氣用 WEATHER_EFFECT.move） */
 const STORM_TRAFFIC_FACTOR = 0.4;
 
-/** 可自動生成的交通車輛種類（truck／van 由物流負責、mtr 不戶外渲染） */
+/** 可自動生成的交通車輛種類（truck／van 由物流負責；mtr 列車由鐵路網單獨派車） */
 export const TRAFFIC_KINDS: VehicleKind[] = ['bus', 'minibus', 'taxi', 'car', 'motorcycle', 'tram'];
+
+/** 同時最多嘅港鐵列車數（Round 6 鐵路網） */
+export const MAX_RAIL_TRAINS = 8;
+/** 每幀最多補幾架列車（避免一次爆量） */
+const RAIL_TRAIN_SPAWN_PER_TICK = 2;
 
 /** 交通系統執行期診斷（QA／除錯用；不進存檔） */
 export interface VehicleDiagnostics {
@@ -224,6 +230,7 @@ function countGenericVehicles(state: GameState): number {
   let count = 0;
   for (const vehicle of state.vehicles) {
     if (vehicle.done) continue;
+    if (vehicle.kind === 'mtr') continue; // 港鐵列車唔佔用路面車流 quota
     if (vehicleLineId(vehicle) === null) count++;
   }
   return count;
@@ -841,7 +848,8 @@ function rebuildOccupancy(state: GameState, rt: VehiclesRuntime): void {
   if (!rt.occupancy || rt.occupancy.length !== n) rt.occupancy = new Int16Array(n);
   else rt.occupancy.fill(0);
   for (const vehicle of state.vehicles) {
-    if (vehicle.done || vehicle.kind === 'ferry') continue;
+    // 渡輪喺水面、港鐵列車喺鐵路圖層，唔計入道路佔用
+    if (vehicle.done || vehicle.kind === 'ferry' || vehicle.kind === 'mtr') continue;
     const tile = currentTileOf(state, vehicle);
     if (tile >= 0 && tile < n) rt.occupancy[tile]++;
   }
@@ -1093,6 +1101,117 @@ function capTargetsToBudget(targets: VehicleTargets, budget: number): void {
   for (const key of keys) targets[key] = Math.floor(targets[key] * scale);
 }
 
+// ─────────────────────────── Round 6：港鐵列車（rail network） ───────────────────────────
+
+/** 現有 mtr 列車（未 done） */
+function existingRailTrains(state: GameState): Vehicle[] {
+  const result: Vehicle[] = [];
+  for (const vehicle of state.vehicles) {
+    if (!vehicle.done && vehicle.kind === 'mtr') result.push(vehicle);
+  }
+  return result;
+}
+
+/** 生成一架港鐵列車，沿 rail route 循環；冇路網／已滿回傳 null */
+function spawnRailTrain(state: GameState, rt: VehiclesRuntime, route: RailTrainRoute): Vehicle | null {
+  if (route.path.length < 2) return null;
+  if (existingRailTrains(state).length >= MAX_RAIL_TRAINS) return null;
+  // 列車唔佔用路面 120 架 quota，但整體仍有上限避免無限增長
+  if (state.vehicles.length >= MAX_TRAFFIC_VEHICLES + MAX_RAIL_TRAINS) return null;
+  const rng = rt.rng;
+  const path = route.path.slice();
+  const vehicle: Vehicle = {
+    id: state.nextVehicleId++,
+    kind: 'mtr',
+    x: 0,
+    y: 0,
+    angle: 0,
+    path,
+    pathProgress: rng() * (path.length - 1),
+    speed: VEHICLE_SPEED.mtr * (0.9 + rng() * 0.2),
+    color: 0xb02a2a,
+    load: 60 + Math.floor(rng() * 240),
+    transit: true,
+    done: false,
+  };
+  updateVehiclePose(state, vehicle);
+  state.vehicles.push(vehicle);
+  return vehicle;
+}
+
+/**
+ * 同步鐵路列車：路網每個有效分量（≥2 已接駁站）按建議車數派車，總數上限 MAX_RAIL_TRAINS。
+ * 刪軌／改路網 → 列車 path 失效會回收，下一幀按新路網重新派車。
+ */
+function syncRailTrains(state: GameState, rt: VehiclesRuntime): void {
+  const routes = railTrainRoutes(state);
+  const trains = existingRailTrains(state);
+  let desiredTotal = 0;
+  const desiredPerRoute: number[] = routes.map((route) => {
+    const count = clamp(route.trains, 1, 3);
+    desiredTotal += count;
+    return count;
+  });
+  if (desiredTotal > MAX_RAIL_TRAINS) {
+    const scale = MAX_RAIL_TRAINS / desiredTotal;
+    for (let i = 0; i < desiredPerRoute.length; i++) {
+      desiredPerRoute[i] = Math.max(1, Math.floor(desiredPerRoute[i] * scale));
+    }
+    desiredTotal = desiredPerRoute.reduce((sum, count) => sum + count, 0);
+    desiredTotal = Math.min(desiredTotal, MAX_RAIL_TRAINS);
+  }
+
+  // 超額列車回收（由尾開始）
+  for (let i = trains.length - 1; i >= desiredTotal; i--) {
+    trains[i].done = true;
+    diagnostics.retired++;
+  }
+
+  // 補車（round-robin；每幀上限 2 架）
+  let missing = Math.max(0, desiredTotal - trains.length);
+  let spawnBudget = RAIL_TRAIN_SPAWN_PER_TICK;
+  let cursor = 0;
+  while (missing > 0 && spawnBudget > 0 && routes.length > 0) {
+    const route = routes[cursor % routes.length];
+    cursor++;
+    if (!spawnRailTrain(state, rt, route)) break;
+    missing--;
+    spawnBudget--;
+  }
+}
+
+/** 更新一架港鐵列車；回傳 false 代表應回收（路軌被拆） */
+function updateRailTrain(state: GameState, vehicle: Vehicle, gameMinutes: number): boolean {
+  const path = vehicle.path;
+  const last = path.length - 1;
+  if (last < 1) return false;
+  const seg = clamp(Math.floor(vehicle.pathProgress), 0, last - 1);
+  const tileA = path[seg];
+  const tileB = path[seg + 1];
+  const gradeA = state.tiles[tileA]?.rail;
+  const gradeB = state.tiles[tileB]?.rail;
+  if (!gradeA || !gradeB) return false; // 路軌被拆：回收，sync 會按新路網重派
+
+  // 速度：颱風時地下段維持 80%、地面／高架 50%；其他天氣地下段基本唔受影響
+  const stormy = state.clock.weather === 'storm';
+  const weatherMove = WEATHER_EFFECT[state.clock.weather]?.move ?? 1;
+  let factor: number;
+  if (gradeA === 'underground' && gradeB === 'underground') {
+    factor = stormy ? 0.8 : 1;
+  } else {
+    factor = stormy ? 0.5 : Math.max(0.5, weatherMove);
+  }
+  vehicle.pathProgress += Math.max(0.001, vehicle.speed * factor) * gameMinutes;
+  if (vehicle.pathProgress >= last) {
+    // 到總站：反轉自己條 path 調頭（雙向行車）
+    vehicle.path.reverse();
+    vehicle.pathProgress = 0;
+    vehicle.load = 60 + Math.floor(Math.random() * 240);
+  }
+  updateVehiclePose(state, vehicle);
+  return true;
+}
+
 /** 更新一艘渡輪；回傳 false 代表應回收（靠岸／颱風停航） */
 function updateFerryVehicle(state: GameState, vehicle: Vehicle, gameMinutes: number): boolean {
   if (state.transit.suspended || state.clock.weather === 'storm') return false;
@@ -1159,6 +1278,13 @@ export function tickVehicles(state: GameState, gameMinutes: number): void {
       }
       continue;
     }
+    if (vehicle.kind === 'mtr') {
+      if (!updateRailTrain(state, vehicle, dt)) {
+        vehicle.done = true;
+        diagnostics.retired++;
+      }
+      continue;
+    }
     const lineId = vehicleLineId(vehicle);
     if (lineId !== null) {
       const line = lineById.get(lineId);
@@ -1186,6 +1312,9 @@ export function tickVehicles(state: GameState, gameMinutes: number): void {
 
   // ── 2b) 路線車輛同步（刪線／停駛／加減車／颱風） ──
   syncLineVehicles(state, rt, index);
+
+  // ── 2c) 港鐵列車同步（Round 6 鐵路網；冇路軌時自然 0 架） ──
+  syncRailTrains(state, rt);
 
   // ── 3) 生成（依目標數量與節奏） ──
   if (index.roadTiles.length < 8) return;

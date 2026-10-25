@@ -586,6 +586,286 @@ def bounds_design(lat0,lat1,lon0,lon1):
         E,N=hk1980(la,lo); x,y=tile_of(E,N); dx,dy=design_coord(x,y); xs.append(dx); ys.append(dy)
     return min(xs),min(ys),max(xs),max(ys)
 
+# ----------------------------- Border / Shenzhen River (Issue #4) -----------------------------
+# 深圳河邊界（WGS84 lat, lon，西→東）。公開資料近似：串連后海灣→落馬洲→羅湖→文錦渡→
+# 沙頭角→大鵬灣；真河位置會喺 tile 層用平滑曲線 rasterize。唔會影響香港島／九龍海岸。
+BORDER_POINTS = [
+    (22.508, 113.945), (22.512, 113.975), (22.509, 114.000), (22.505, 114.030),
+    (22.507, 114.083),  # 落馬洲
+    (22.516, 114.100), (22.531, 114.113),  # 羅湖
+    (22.535, 114.135),  # 文錦渡
+    (22.540, 114.156), (22.543, 114.178), (22.545, 114.200),
+    (22.545, 114.223),  # 沙頭角
+    (22.548, 114.250), (22.545, 114.275),
+]
+BORDER_CROSSINGS = [
+    ("羅湖", 22.531, 114.113, 'rail'),
+    ("落馬洲", 22.507, 114.083, 'road'),
+    ("文錦渡", 22.535, 114.135, 'road'),
+    ("沙頭角", 22.545, 114.223, 'road'),
+]
+BORDER_RIVER_HALF = 1.0      # 河寬約 2 tiles（112m grid）
+BORDER_LAND_X_MARGIN = 2     # 深圳市區合成範圍左右 margin（tiles）
+
+
+def _design_float(tx, ty):
+    """tile 浮點座標 → 96 設計座標（同 design_coord 對整數 tile 一致）。"""
+    sx = W / 96.0
+    sy = H / 96.0
+    return (tx + 0.5) / sx - 0.5, (ty + 0.5) / sy - 0.5
+
+
+def border_polyline_tiles():
+    """BORDER_POINTS → tile 座標折線（於相鄰點間插值，令河岸彎曲平滑）。"""
+    base = []
+    for lat, lon in BORDER_POINTS:
+        E, N = hk1980(lat, lon)
+        base.append(((E - E0) / TILE_M, (NTOP - N) / TILE_M))
+    out = []
+    for k in range(len(base) - 1):
+        x0, y0 = base[k]
+        x1, y1 = base[k + 1]
+        steps = max(1, int(abs(x1 - x0) + abs(y1 - y0)))
+        for s in range(steps):
+            t = s / steps
+            out.append((x0 + (x1 - x0) * t, y0 + (y1 - y0) * t))
+    out.append(base[-1])
+    return out
+
+
+def _border_y_at(poly, x):
+    """以折線分段線性內插：給定 tile x（可浮點）→ 邊界河中心 tile y。"""
+    if x <= poly[0][0]:
+        return poly[0][1]
+    for k in range(len(poly) - 1):
+        x0, y0 = poly[k]
+        x1, y1 = poly[k + 1]
+        if x <= x1:
+            t = 0.0 if x1 == x0 else (x - x0) / (x1 - x0)
+            return y0 + (y1 - y0) * t
+    return poly[-1][1]
+
+
+def _hash01(x, y, salt=0):
+    """deterministic 0..1 hash（同 game rng 無關，只作世界生成）。"""
+    h = (x * 73856093) ^ (y * 19349663) ^ ((salt + 1) * 83492791)
+    h &= 0x7fffffff
+    h = (h ^ (h >> 13)) * 1274126177
+    h &= 0x7fffffff
+    return h / 0x7fffffff
+
+
+# 深圳市區／口岸附近土地利用（landuse class）
+SHENZHEN_LU = {
+    'urbanCore': 11,   # commercial/business（羅湖、福田口岸一帶）
+    'residential': 1,
+    'industrial': 21,
+    'woodland': 71,
+    'grass': 73,
+}
+
+
+def build_landuse_layers(lu_counts, lu_valid):
+    """由 LU samples 聚合出每格 majority landuse + 道路 hint bit（LU 41/42）。"""
+    n = W * H
+    landuse = bytearray(n)
+    road_hint = bytearray(n)
+    for i in range(n):
+        tot = lu_valid[i]
+        if tot <= 0:
+            continue
+        best_cls = 0
+        best_n = 0
+        road_samples = 0
+        ci_41 = LU_CLASS_INDEX.get(41)
+        ci_42 = LU_CLASS_INDEX.get(42)
+        if ci_41 is not None:
+            road_samples += lu_counts[ci_41][i]
+        if ci_42 is not None:
+            road_samples += lu_counts[ci_42][i]
+        for ci, cls in enumerate(LU_TRACK_CLASSES):
+            v = lu_counts[ci][i]
+            if v > best_n:
+                best_n = v
+                best_cls = cls
+        landuse[i] = best_cls
+        # 16 樣本中 >=2 個係道路／鐵路 → 視為道路 hint（避免單點 noise）
+        if road_samples >= 2:
+            road_hint[i] = 1
+    return landuse, road_hint
+
+
+def apply_border_and_shenzhen(terrain, elev, density, heights, landuse, road_hint):
+    """深圳河 + 北岸深圳市區 + 邊境通道；只改動現時空資料（water）嘅北面 strip
+    及河兩岸 buffer，唔會影響香港島／九龍海岸。回傳 (crossings, river_ring_design, stats)。"""
+    poly = border_polyline_tiles()
+    if not poly:
+        return [], [], {}
+    x_min = max(0, int(poly[0][0]) - BORDER_LAND_X_MARGIN)
+    x_max = min(W - 1, int(poly[-1][0]) + BORDER_LAND_X_MARGIN)
+    # 深圳市區合成只喺「有陸地」嘅口路段（西面后海灣／東面大鵬灣保持海，
+    # 避免將真實海灣填成陸地；唔影響香港島海岸）
+    land_x_min = tile_of(*hk1980(22.510, 114.030))[0] - 3
+    land_x_max = tile_of(*hk1980(22.545, 114.250))[0] + 3
+    land_x_min = max(0, land_x_min)
+    land_x_max = min(W - 1, land_x_max)
+    river_tiles = 0
+    shenzhen_tiles = 0
+    shenzhen_urban = 0
+    for y in range(H):
+        for x in range(x_min, x_max + 1):
+            if not (0 <= y < H):
+                continue
+            i = y * W + x
+            by = _border_y_at(poly, x + 0.5)
+            d = by - (y + 0.5)  # >0 = 河北岸（深圳方向）
+            # 河：河中心 ± 1 tile（約 2 tiles 闊）→ water；只喺邊界走廊內覆蓋
+            if abs(d) <= BORDER_RIVER_HALF:
+                terrain[i] = WATER
+                elev[i] = 0
+                density[i] = 0
+                heights[i] = 0
+                landuse[i] = 92  # stream/nullah class
+                river_tiles += 1
+                continue
+            if d <= BORDER_RIVER_HALF:
+                continue
+            if not (land_x_min <= x <= land_x_max):
+                continue
+            # 左右海岸用 noise 侵蝕，避免出現直線邊界（同真實海灣／深圳海岸更似）
+            edge = min(x - land_x_min, land_x_max - x)
+            if edge < 8:
+                r_edge = _hash01(x, y, 9)
+                if r_edge < (8 - edge) / 8.0 * 0.8:
+                    continue
+            # 北岸：只有原本冇 DTM 資料（海/NODATA）嘅格才合成深圳市區/郊野
+            if terrain[i] != WATER:
+                continue
+            dist = d
+            # 口岸附近密度較高
+            near_cross = min(abs(x + 0.5 - cx) for cx in [((hk1980(lat, lon)[0] - E0) / TILE_M) for _, lat, lon, _k in BORDER_CROSSINGS])
+            r1 = _hash01(x, y, 4)
+            r2 = _hash01(x, y, 12)
+            if dist <= 12 and near_cross <= 30:
+                # 深圳市核心（羅湖／福田／皇崗一帶）
+                terrain[i] = URBAN
+                landuse[i] = SHENZHEN_LU['urbanCore'] if r1 < 0.6 else SHENZHEN_LU['residential']
+                elev[i] = max(1, int(2 + r1 * 3))
+                density[i] = 120 + int(r1 * 70)
+                heights[i] = 100 + int(r1 * 120)
+                shenzhen_urban += 1
+            elif dist <= 45 and near_cross <= 55:
+                # 深圳市區帶：住宅／工業／少量綠化
+                if r2 < 0.55:
+                    terrain[i] = URBAN
+                    landuse[i] = SHENZHEN_LU['residential'] if r1 < 0.55 else (SHENZHEN_LU['industrial'] if r1 < 0.78 else SHENZHEN_LU['urbanCore'])
+                    elev[i] = max(1, int(2 + r1 * 6))
+                    density[i] = 55 + int(r1 * 95)
+                    heights[i] = 45 + int(r1 * 130)
+                    shenzhen_urban += 1
+                else:
+                    terrain[i] = GRASS if r2 < 0.75 else FOREST
+                    landuse[i] = SHENZHEN_LU['grass'] if r2 < 0.75 else SHENZHEN_LU['woodland']
+                    elev[i] = max(1, int(3 + r1 * 10))
+                    density[i] = 0
+                    heights[i] = 0
+            elif dist <= 70 and near_cross <= 70:
+                # 市郊過渡：低層／村屋 + 農地／林地
+                if r2 < 0.22:
+                    terrain[i] = URBAN
+                    landuse[i] = SHENZHEN_LU['residential']
+                    elev[i] = max(1, int(2 + r1 * 5))
+                    density[i] = 30 + int(r1 * 50)
+                    heights[i] = 25 + int(r1 * 60)
+                    shenzhen_urban += 1
+                else:
+                    terrain[i] = GRASS if r2 < 0.7 else FOREST
+                    landuse[i] = SHENZHEN_LU['grass'] if r2 < 0.7 else SHENZHEN_LU['woodland']
+                    elev[i] = max(1, int(4 + r1 * 20))
+                    density[i] = 0
+                    heights[i] = 0
+            else:
+                # 深圳市郊／丘陵（梧桐山、塘朗山方向）
+                hillside = dist > 50 and r1 > 0.55 and (x > 300 or x < 240)
+                if hillside:
+                    terrain[i] = HILL if r1 > 0.8 else FOREST
+                    elev[i] = max(1, int(30 + r1 * 90))
+                else:
+                    terrain[i] = FOREST if r1 < 0.55 else GRASS
+                    elev[i] = max(1, int(5 + r1 * 25))
+                landuse[i] = SHENZHEN_LU['woodland'] if r1 < 0.55 else SHENZHEN_LU['grass']
+                density[i] = 0
+                heights[i] = 0
+            shenzhen_tiles += 1
+    # ── 道路／鐵路 hint：每個口岸向北 + 向南各延伸（俾 worldgen 駁路／鋪軌）──
+    crossings = []
+    for name, lat, lon, kind in BORDER_CROSSINGS:
+        E, N = hk1980(lat, lon)
+        cx = (E - E0) / TILE_M
+        cy = (NTOP - N) / TILE_M
+        # 口岸 anchor：河嘅南岸（香港側）最近可建陸地
+        ax = int(round(cx))
+        ay = int(round(cy + BORDER_RIVER_HALF + 2))
+        for r in range(0, 14):
+            found = None
+            for dy in range(-r, r + 1):
+                for dx in (-r, 0, r):
+                    xx, yy = ax + dx, ay + dy
+                    if not (0 <= xx < W and 0 <= yy < H):
+                        continue
+                    if terrain[yy * W + xx] != WATER:
+                        found = (xx, yy)
+                        break
+                if found:
+                    break
+            if found:
+                ax, ay = found
+                break
+        # 道路 hint：anchor 向北過河（for bridge/tunnel）＋向南接香港路網
+        for step in range(0, 26):
+            yy = ay - step
+            if 0 <= yy < H:
+                ii = yy * W + min(W - 1, max(0, ax))
+                road_hint[ii] = 1
+        for step in range(0, 43):
+            yy = ay + step
+            if 0 <= yy < H:
+                ii = yy * W + min(W - 1, max(0, ax))
+                road_hint[ii] = 1
+        dx, dy = _design_float(cx, cy)
+        crossings.append([name, round(dx, 3), round(dy, 3), kind, ax, ay])
+    # ── 深圳河 polygon ring（設計座標；左右岸 offset）──
+    ring = []
+    bank = 0.9
+    for k in range(len(poly) - 1):
+        x0, y0 = poly[k]
+        x1, y1 = poly[k + 1]
+        dx = x1 - x0
+        dy = y1 - y0
+        ln = math.hypot(dx, dy) or 1.0
+        nx, ny = -dy / ln, dx / ln
+        ring.append((x0 + nx * bank, y0 + ny * bank))
+    for k in range(len(poly) - 1, 0, -1):
+        x0, y0 = poly[k]
+        x1, y1 = poly[k - 1]
+        dx = x1 - x0
+        dy = y1 - y0
+        ln = math.hypot(dx, dy) or 1.0
+        nx, ny = -dy / ln, dx / ln
+        ring.append((x0 + nx * bank, y0 + ny * bank))
+    river_ring_design = []
+    for tx, ty in ring:
+        ddx, ddy = _design_float(tx, ty)
+        river_ring_design.append([round(ddx, 3), round(ddy, 3)])
+    stats = {
+        'riverTiles': river_tiles,
+        'shenzhenLandTiles': shenzhen_tiles,
+        'shenzhenUrbanTiles': shenzhen_urban,
+        'crossings': crossings,
+    }
+    return crossings, river_ring_design, stats
+
+
 def snap_land(x, y, terrain, maxr=6):
     """把 label／spawn 由水面 snap 到最近陸地格（保持 96 設計座標系不變）。"""
     if 0 <= x < W and 0 <= y < H and terrain[y*W+x] != WATER:
@@ -657,8 +937,20 @@ def main():
     res_per, res_union, res_new = rasterize_reservoirs(terrain, elev)
     print('carving rivers...', flush=True)
     river_tiles = carve_rivers(terrain, elev)
+    print('aggregating landuse + roadHint...', flush=True)
+    landuse, road_hint = build_landuse_layers(lu_counts, lu_valid)
+    print('Shenzhen River / border crossings / north bank (Issue #4)...', flush=True)
+    border_crossings_raw, shenzhen_river, border_stats = apply_border_and_shenzhen(
+        terrain, elev, density, heights, landuse, road_hint
+    )
     print('labels/landmarks/tunnels/regions...', flush=True)
     labels,lm,tun,regions = build_labels(terrain)
+    # 追加深圳地名標籤（設計座標，向東／北顯示）
+    for name, lat, lon, kind in [('深圳市', 22.540, 114.060, 'district'), ('深圳河', 22.520, 114.100, 'water')]:
+        E, N = hk1980(lat, lon)
+        tx, ty = tile_of(E, N)
+        dx, dy = design_coord(tx, ty)
+        labels.append([name, round(dx, 3), round(dy, 3), kind])
     # spawn：中環，若落水則 snap 到最近陸地
     E,N=hk1980(22.2819,114.1582)
     sx,sy=tile_of(E,N)
@@ -685,18 +977,47 @@ def main():
     missing = [n for n in EXPECTED_RES if res_per.get(n, 0) <= 0]
     print('    expected reservoirs missing:', missing if missing else 'none', flush=True)
     print(f'  river/stream tiles: {len(set(river_tiles))}; labels {len(labels)}, landmarks {len(lm)}, regions {len(regions)}, tunnels {len(tun)}')
+    print('  border (Issue #4):', flush=True)
+    for c in border_stats.get('crossings', []):
+        print(f"    - {c[0]} ({c[3]}) tile=({c[4]},{c[5]}) design=({c[1]},{c[2]})")
+    print(f"    river water tiles: {border_stats.get('riverTiles', 0)}; Shenzhen land tiles: {border_stats.get('shenzhenLandTiles', 0)} "
+          f"(urban {border_stats.get('shenzhenUrbanTiles', 0)})")
+    lu_hint = sum(1 for b in road_hint if b)
+    lu_counts_stat = Counter(landuse)
+    print('  landuse (majority / tile) top:', ', '.join(f'{k}:{v}' for k, v in lu_counts_stat.most_common(10)))
+    print(f'  roadHint tiles: {lu_hint}')
     dens_n=sum(1 for b in density if b>0)
     print(f'  density>0 tiles: {dens_n}; height>0 tiles: {sum(1 for b in heights if b>0)}')
     lu_tot=[(cls, sum(lu_counts[i])) for i,cls in enumerate(LU_TRACK_CLASSES)]
     lu_tot.sort(key=lambda kv:-kv[1])
     print('  landuse sample stats (top 12):', ', '.join(f'{cls}:{n}' for cls,n in lu_tot[:12]))
     # ── write generated.ts ──
+    # roadHint：每格 1 bit（LSB-first；tile i → byte i>>3, bit i&7）
+    hint_bytes = bytearray((W * H + 7) // 8)
+    for i, v in enumerate(road_hint):
+        if v:
+            hint_bytes[i >> 3] |= 1 << (i & 7)
+    # border centreline（設計座標；每 2 個採樣點存一次）
+    border_poly = border_polyline_tiles()
+    centerline_design = []
+    for k in range(0, len(border_poly), 2):
+        tx, ty = border_poly[k]
+        ddx, ddy = _design_float(tx, ty)
+        centerline_design.append([round(ddx, 3), round(ddy, 3)])
+    border_crossings = [
+        {'name': c[0], 'x': c[1], 'y': c[2], 'kind': c[3]} for c in border_crossings_raw
+    ]
     obj = {
       'format':'hk-map-data-v1','width':W,'heightTiles':H,'tileMeters':TILE_M,
       'e0':E0,'nTop':NTOP,'terrainRle':b64(rle_bytes(terrain)),
       'elevation':b64(bytes(elev)),'density':b64(bytes(density)),'buildingHeight':b64(bytes(heights)),
       'labels':labels,'landmarks':lm,'tunnels':tun,'regions':regions,
       'spawn':{'x':spawn[0],'y':spawn[1]},
+      'landuse': b64(bytes(landuse)),
+      'roadHint': b64(bytes(hint_bytes)),
+      'borderCrossings': border_crossings,
+      'shenzhenRiver': shenzhen_river,
+      'border': {'riverWidthTiles': 2, 'centerline': centerline_design},
     }
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     outdir=os.path.join(root,'src','world')
@@ -712,7 +1033,8 @@ def main():
     size=os.path.getsize(path)
     print(f'wrote {path} {size} bytes ({size/1024/1024:.2f} MB); spawn tile {spawn}; total {round(time.time()-t0,1)}s', flush=True)
     preview_png(terrain, elev, labels, spawn, '/tmp/hk-map-600-preview.png')
-    print('preview /tmp/hk-map-600-preview.png', flush=True)
+    preview_shenzhen(terrain, elev, landuse, border_crossings_raw, border_polyline_tiles(), '/tmp/hk-map-600-shenzhen.png')
+    print('preview /tmp/hk-map-600-preview.png + /tmp/hk-map-600-shenzhen.png', flush=True)
 
 
 # ----------------------------- preview PNG (pure python, no PIL) -----------------------------
@@ -737,6 +1059,57 @@ def write_png(path, width, height, rgb):
     png += _png_chunk(b'IEND', b'')
     with open(path, 'wb') as f:
         f.write(png)
+
+def preview_shenzhen(terrain, elev, landuse, crossings, border_poly, path, scale=3):
+    """北面邊界 preview：深圳河 + 深圳市區 + 4 個邊境通道標記。"""
+    y0, y1 = 0, 270
+    x0, x1 = 60, 520
+    cw = (x1 - x0) * scale
+    ch = (y1 - y0) * scale
+    rgb = bytearray(cw * ch * 3)
+    for yy in range(y0, y1):
+        for xx in range(x0, x1):
+            i = yy * W + xx
+            r, g, b = PREVIEW_COLORS.get(terrain[i], (0, 0, 0))
+            if terrain[i] == WATER:
+                # 深圳河用較亮青藍，同海分開
+                if 55 <= landuse[i] <= 92:
+                    r, g, b = (38, 150, 190)
+            else:
+                e = elev[i] / 255.0
+                k = 0.62 + 0.45 * e
+                r = int(r * k); g = int(g * k); b = int(b * k)
+            for sy in range(scale):
+                base = ((yy - y0) * scale + sy) * cw
+                for sx in range(scale):
+                    di = (base + (xx - x0) * scale + sx) * 3
+                    rgb[di] = min(255, r); rgb[di + 1] = min(255, g); rgb[di + 2] = min(255, b)
+    # 邊界線（黃）＋口岸標記（紅=道路、藍=鐵路）
+    for tx, ty in border_poly:
+        xx, yy = int(tx), int(ty)
+        if x0 <= xx < x1 and y0 <= yy < y1:
+            px = (xx - x0) * scale
+            py = (yy - y0) * scale
+            for sy in range(scale):
+                di = ((py + sy) * cw + px) * 3
+                rgb[di] = 240; rgb[di + 1] = 220; rgb[di + 2] = 80
+    for name, dx, dy, kind, ax, ay in crossings:
+        color = (230, 70, 70) if kind == 'road' else (70, 140, 240)
+        if x0 <= ax < x1 and y0 <= ay < y1:
+            px = (ax - x0) * scale
+            py = (ay - y0) * scale
+            rad = scale * 2
+            for sy in range(-rad, rad + 1):
+                for sx in range(-rad, rad + 1):
+                    if sx * sx + sy * sy > rad * rad:
+                        continue
+                    xx2 = px + sx; yy2 = py + sy
+                    if 0 <= xx2 < cw and 0 <= yy2 < ch:
+                        di = (yy2 * cw + xx2) * 3
+                        rgb[di] = color[0]; rgb[di + 1] = color[1]; rgb[di + 2] = color[2]
+    write_png(path, cw, ch, rgb)
+    print('shenzhen preview', path, flush=True)
+
 
 def preview_png(terrain, elev, labels, spawn, path, scale=2):
     """600×600 → 1200×1200 PNG（地形色 + 高程陰影 + 水塘深藍 + label 白點 + spawn 紅點）。"""

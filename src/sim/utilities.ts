@@ -363,13 +363,16 @@ function statForService(
   for (const entry of demands) {
     const amount = entry[key];
     if (amount <= 0) continue;
-    demand += amount;
-    const connected = connectedSet.has(entry.building.id);
+    const isExisting = entry.building.existing === true;
+    // 現有樓宇（existing）自帶既有水電／污水設施：不佔新管網容量，但 UI 覆蓋率
+    // 應視為已獲供應（否則 900 名現有居民會顯示 0% 覆蓋，誤導玩家）。
+    if (!isExisting) demand += amount;
     const def = BUILDINGS[entry.building.key];
     if (def?.housing && def.housing > 0) totalResidents += entry.building.residents.length;
+    const connected = isExisting || connectedSet.has(entry.building.id);
     if (connected) {
       connectedBuildings++;
-      connectedDemand += amount;
+      if (!isExisting) connectedDemand += amount;
       if (def?.housing && def.housing > 0) connectedResidents += entry.building.residents.length;
     } else {
       unconnectedBuildings++;
@@ -488,6 +491,8 @@ export function utilityFactorFor(
   building: Building,
   service: UtilityKind,
 ): number {
+  // 現有樓宇已有既有公用設施（唔受新管網容量影響）
+  if (building.existing) return 1;
   if (utilityDemandOf(building, service) <= 0) return 1;
   const snapshot = ensureUtilitySnapshot(state);
   const rt = runtimeOf(state);
@@ -506,6 +511,7 @@ export function buildingUtilityConnected(
   building: Building,
   service: UtilityKind,
 ): boolean {
+  if (building.existing) return true;
   ensureUtilitySnapshot(state);
   return runtimeOf(state).connected?.[service]?.has(building.id) ?? false;
 }

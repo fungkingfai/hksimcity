@@ -1073,6 +1073,16 @@ export function canCommute(state: GameState, cache: CitizenCache, home: Building
   if (home) {
     // 同一行人路網分量即可通勤（唔使逐對行 A*；1600 人時就業配對快好多）
     if (sharesWalkComponent(state, cache, home, work)) return true;
+    // Issue #7：開局現有樓群係舊區，街道網未完整接入玩家路網；現有樓宇之間
+    // 以「舊區內街步行」抽象容許近距離通勤，避免大量現有居民無故失業。
+    if (home.existing || work.existing) {
+      const hx = home.x + home.w / 2;
+      const hy = home.y + home.h / 2;
+      const wx = work.x + work.w / 2;
+      const wy = work.y + work.h / 2;
+      const dist = Math.hypot(hx - wx, hy - wy);
+      if ((home.existing && work.existing && dist <= 45) || dist <= 18) return true;
+    }
   } else {
     const center = buildingCenter(work);
     const goal = buildingWalkGoal(state, cache, work);

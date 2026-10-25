@@ -19,6 +19,7 @@
  * 才重寫實例顏色或矩陣。所有可被玩家建築／道路覆蓋的裝飾會自動隱藏。
  */
 
+import { isShenzhenSideTile } from '../world/border';
 import * as THREE from 'three';
 import { hash2d } from '../core/rng';
 import type { GameState, Season, TerrainType, Tile, Weather } from '../core/types';
@@ -712,7 +713,16 @@ export function createTerrainView(state: GameState): TerrainView {
   // ───────────── 3b. 深海大平面（地圖內深海 + 地圖外無邊海面） ─────────────
   // 深海用一塊純色大平面（Basic + 霧）避免巨大 shader 三角形喺 overview 出摩爾紋；
   // 淺水／近岸仍有 per-tile 水 shader mesh（見上），顏色於邊界自然過渡。
-  const outerSeaMat = track(new THREE.MeshBasicMaterial({ color: WATER_DEEP[state.clock.season], fog: true }));
+  const outerSeaMat = track(
+    new THREE.MeshBasicMaterial({
+      color: WATER_DEEP[state.clock.season],
+      fog: true,
+      // 當成背景海面：最先畫、唔寫 depth，之後所有地形／道路／建築都一定覆蓋佢。
+      // 修正近岸／深圳河一帶深海平面喺近鏡時遮住陸地嘅問題。
+      depthWrite: false,
+      depthTest: false,
+    }),
+  );
   const outerSeaGeo = track(new THREE.PlaneGeometry(1, 1));
   outerSeaGeo.rotateX(-Math.PI / 2);
   const outerSea = new THREE.Mesh(outerSeaGeo, outerSeaMat);
@@ -721,7 +731,7 @@ export function createTerrainView(state: GameState): TerrainView {
   const deepSpan = Math.max(width, height) * TILE + 8400;
   outerSea.scale.set(deepSpan, 1, deepSpan);
   outerSea.frustumCulled = false;
-  outerSea.renderOrder = -1; // 先畫深海平面，淺水 mesh 之後覆蓋
+  outerSea.renderOrder = -100; // 背景海面最先畫，淺水 mesh／陸地之後覆蓋
   track(outerSea);
   group.add(outerSea);
 
@@ -1116,7 +1126,9 @@ export function createTerrainView(state: GameState): TerrainView {
     //  - 杏花邨／柴灣／小西灣等真實高層住宅：density 高 + buildingHeight 高 → 住宅塔樓
     //  - 中環／尖沙咀／觀塘 skyline 區 + 高樓 → 玻璃商廈（office）
     //  - 全部 InstancedMesh，額外 3 draw calls
-    if (showcaseCity) {
+    // Issue #7：starter 已有真實 existing 樓群（會經 buildings renderer 顯示），
+    // 唔再生成裝飾用 faux skyline，避免玩家見到無法運作嘅假樓。
+    if (showcaseCity && false) {
       const skylineRegions = HK_REGIONS.filter((r) => r.kind === 'skyline' || r.kind === 'newTown');
       for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
@@ -1745,6 +1757,31 @@ export function createTerrainView(state: GameState): TerrainView {
         out.setHex(0x3d5a5e);
         break;
     }
+    // ── 深圳河北岸合成區（Issue #4）：降低 flat urban 灰、加森林／海岸過渡 ──
+    // 資料上北岸係人工合成矩形；render 側用 noise 把市區色混入草地／林地，
+    // 海邊格混沙岩色，並喺地圖最北邊緣淡入海色，避免 overview 見到直線灰色大塊。
+    if (isShenzhenSideTile(x, y, width, height)) {
+      const n1 = hash(x >> 1, y >> 1, seed + 9001);
+      if (tile.terrain === 'urban' || tile.terrain === 'reclaimed') {
+        const density = tile.density ?? 0;
+        const urbanMix = clamp01(density / 160);
+        _c1.copy(seasonC.grass).lerp(seasonC.forest, n1 * 0.55);
+        _c1.multiplyScalar(0.84 + n1 * 0.22);
+        out.lerp(_c1, 0.26 + (1 - urbanMix) * 0.4);
+        out.multiplyScalar(0.8 + n1 * 0.14);
+        // 海岸過渡：貼住水嘅格混深沙岩／灘色
+        if (isWater(x + 1, y) || isWater(x - 1, y) || isWater(x, y + 1) || isWater(x, y - 1)) {
+          out.lerp(_c1.setHex(0x7d7f6e), 0.45 + n1 * 0.15);
+        }
+      } else if (tile.terrain === 'grass' || tile.terrain === 'forest') {
+        out.multiplyScalar(0.9 + n1 * 0.12);
+      }
+      // 地圖最北邊緣淡入海色（只影響深圳側，唔郁香港島海岸）
+      if (y < 7) {
+        out.lerp(_c1.setHex(0x334a52), ((7 - y) / 7) * 0.42);
+      }
+    }
+
     // 每格微差異
     const shade = 0.92 + tile.variant * 0.16;
     out.multiplyScalar(shade * seasonC.vivid);

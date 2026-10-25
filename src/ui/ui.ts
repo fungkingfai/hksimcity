@@ -21,8 +21,9 @@ import './css/mobile.css';
 import './css/start-screen.css';
 import './css/minimap.css';
 import './css/round5.css';
+import './css/round6.css';
 
-import { BUILDINGS, ROAD_COST, ZONES, formatMoney } from '../core/config';
+import { BUILDINGS, RAIL_INFO, ROAD_COST, ZONES, formatMoney } from '../core/config';
 import { applyUiMode, getUiMode } from '../core/device';
 import type { GameActions, GameState } from '../core/types';
 import type { GameStore } from '../core/store';
@@ -249,6 +250,22 @@ export function createUI(root: HTMLElement, store: GameStore, actions: GameActio
     if (!tool || tool.startsWith('pipe:')) {
       // pipe 工具由地下管網工具列顯示提示
       setClass(modeHint, 'show', false);
+      return;
+    }
+    if (tool.startsWith('rail:')) {
+      const grade = tool.slice(5);
+      const info = grade === 'remove' ? null : RAIL_INFO[grade as 'surface' | 'elevated' | 'underground'];
+      hintIcon.innerHTML = ico(grade === 'remove' ? 'hammer' : grade === 'elevated' ? 'railElevated' : grade === 'underground' ? 'railUnderground' : 'rail');
+      setClass(modeHint, 'show', true);
+      setHidden(hintCancel, false);
+      hintText.textContent =
+        grade === 'remove'
+          ? mobileUi
+            ? '拆除鐵路：點擊／拖曳軌道 · 退還 30%'
+            : '拆除鐵路：按住左鍵拖曳軌道 · 退還 30% · 右鍵取消'
+          : mobileUi
+            ? `鋪設${info?.name ?? '鐵路'}：點擊／拖曳地圖 · ${formatMoney(info?.cost ?? 0)}/格${info?.overWater ? ' · 可跨水' : ''}`
+            : `鋪設${info?.name ?? '鐵路'}：按住左鍵拖曳地圖 · ${formatMoney(info?.cost ?? 0)}/格 · ${info?.overWater ? '可跨水／穿山' : '不可跨水'}${grade === 'underground' ? ' · 按 U 顯示地下層' : ''} · 右鍵取消`;
       return;
     }
     if (tool === 'road') {
