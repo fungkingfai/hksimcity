@@ -20,8 +20,10 @@ import { createEnvironmentView, type EnvironmentView } from './environment';
 import { createZonesView, type ZonesView } from './zones';
 import { createUndergroundView, type UndergroundView } from './underground';
 import { createTransitOverlayView, type TransitOverlayView } from './transit-overlay';
+import { createRailView, type RailView } from './rail';
 import { createInteriorView, type InteriorView } from './interior';
 import { canPlaceBuilding } from '../sim/placement';
+import { canPlaceRail, railToolGrade } from '../sim/rail';
 
 export interface CityViewOptions {
   container: HTMLElement;
@@ -73,6 +75,7 @@ export class CityView {
   private zones!: ZonesView;
   private underground!: UndergroundView;
   private transitOverlay!: TransitOverlayView;
+  private rail!: RailView;
 
   private target = new THREE.Vector3(0, 0, 0);
   private yaw = -Math.PI / 4;
@@ -198,6 +201,7 @@ export class CityView {
     if (this.zones) this.zones.dispose();
     if (this.underground) this.underground.dispose();
     if (this.transitOverlay) this.transitOverlay.dispose();
+    if (this.rail) this.rail.dispose();
     if (this.interior) {
       this.interior.dispose();
       this.interior = null;
@@ -213,6 +217,7 @@ export class CityView {
     this.zones = createZonesView(state);
     this.underground = createUndergroundView(state);
     this.transitOverlay = createTransitOverlayView(state);
+    this.rail = createRailView(state);
     this.cityScene.add(
       this.terrain.group,
       this.roads.group,
@@ -222,6 +227,7 @@ export class CityView {
       this.citizens.group,
       this.underground.group,
       this.transitOverlay.group,
+      this.rail.group,
     );
 
     // 輕量模式：隱藏細小花草／碎石等裝飾 InstancedMesh，降低 fill-rate 負擔
@@ -288,11 +294,12 @@ export class CityView {
     this.environment.update(state, dt, this.activeCamera());
     this.terrain.update(state, dt);
     this.roads.update(state, dt);
-    this.buildings.update(state, dt);
+    this.buildings.update(state, dt, this.activeCamera(), this.distance);
     this.vehicles.update(state, dt);
     this.zones.update(state, dt);
     this.underground.update(state, dt);
     this.transitOverlay.update(state, dt);
+    this.rail.update(state, dt);
     this.citizens.update(state, dt);
     this.updateGhostAndHighlights(state);
 
@@ -321,14 +328,23 @@ export class CityView {
   private updateGhostAndHighlights(state: GameState): void {
     const tool = state.ui.tool;
     const inCity = state.ui.mode === 'city';
+    const railGrade = railToolGrade(tool);
+    // rail:* 工具：用 canPlaceRail 決定綠色／紅色 ghost（唔用 BUILDINGS[tool]）
+    let railValid: boolean | null = null;
+    if (railGrade && this.hover >= 0) {
+      const hx = this.hover % state.width;
+      const hy = Math.floor(this.hover / state.width);
+      railValid = canPlaceRail(state, hx, hy, railGrade).ok;
+    }
     // 依工具改變 hover 顏色：分區刷子顯示對應分區色、拆卸/取消分區紅色
     const hoverMat = this.hoverMesh?.material as THREE.MeshBasicMaterial | undefined;
     if (hoverMat) {
       const zone = zoneOfTool(tool);
-      if (zone) hoverMat.color.setHex(ZONES[zone].color);
+      if (railGrade) hoverMat.color.setHex(railValid ? 0x7fd6a0 : 0xd46060);
+      else if (zone) hoverMat.color.setHex(ZONES[zone].color);
       else if (tool === 'dezone' || tool === 'demolish') hoverMat.color.setHex(0xff5a5a);
       else hoverMat.color.setHex(0xfff3d0);
-      hoverMat.opacity = zone ? 0.35 : 0.22;
+      hoverMat.opacity = zone ? 0.35 : railGrade ? 0.42 : 0.22;
     }
     this.hoverMesh.visible = inCity && this.hover >= 0;
     if (this.hover >= 0 && inCity) {
@@ -348,8 +364,10 @@ export class CityView {
     }
 
     // 建造幽靈
-    const valid = tool ? this.isToolValidAt(state, this.hover) : false;
+    const valid = railGrade ? (railValid ?? false) : tool ? this.isToolValidAt(state, this.hover) : false;
     this.buildings.setPreview(state, inCity ? tool : null, this.hover, valid);
+    // rail 工具：hoverMesh 已作綠／紅 ghost；再顯示一盞細 pad 令 hover 更清楚
+    // （hoverMesh 本身係半透明平面，足夠顯示單格；唔另加 geometry）
   }
 
   private isToolValidAt(state: GameState, tileIndex: number): boolean {
@@ -817,6 +835,7 @@ export class CityView {
     this.zones?.dispose();
     this.underground?.dispose();
     this.transitOverlay?.dispose();
+    this.rail?.dispose();
     this.environment?.dispose();
     this.interior?.dispose();
     this.renderer.dispose();

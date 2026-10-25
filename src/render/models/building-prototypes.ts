@@ -21,7 +21,7 @@ import { BUILDINGS, NEON_SIGNS, STREET_NAMES } from '../../core/config';
 import type { BuildingDef } from '../../core/types';
 import { TILE } from '../coords';
 import { MaterialLibrary, PAL } from './materials';
-import { addCone, addCylinder, addBox, addSphere, mergeStaticMeshes } from './geometry-utils';
+import { addBeamBetween, addCone, addCylinder, addBox, addSphere, mergeStaticMeshes } from './geometry-utils';
 import {
   addACUnit,
   addACUnitsRow,
@@ -29,6 +29,14 @@ import {
   addArcade,
   addBambooScaffold,
   addBasketballHoop,
+  addBorderFence,
+  addCoach,
+  addFreightTrain,
+  addHeavyRail,
+  addLedInfoBoard,
+  addPassengerTrain,
+  addRailPlatform,
+  addRailSignal,
   addAerationTank,
   addAircraft,
   addBarrelRoof,
@@ -3198,6 +3206,246 @@ function buildPortYard(ctx: Ctx): void {
   addTree(root, lib, W / 2 - 0.4, -D / 2 + 0.4, 0.32, 'banyan', v + 5, 0.05);
 }
 
+
+// ═══════════════════════════ Round 6 新增：邊境口岸（2 種） ═══════════════════════════
+
+/** 道路口岸（深圳灣／落馬洲式）：檢查亭＋閘杆＋排隊車輛＋「往深圳」指示牌＋LED＋邊境圍欄（3x2）。 */
+function buildRoadBorderGate(ctx: Ctx): void {
+  const { lib, root, W, D } = ctx;
+  const v = ctx.variant;
+  asphaltPad(ctx);
+  const lanes = v === 0 ? [-1.45, 0, 1.45] : [-1.7, -0.35, 1.0, 2.0];
+  // ── 車道標線（沿 z 方向過關）──
+  for (const lx of lanes) {
+    addBox(root, lib.lambert(PAL.roadLine), 0.06, 0.012, D - 0.6, lx, 0.08, 0);
+    addBox(root, lib.lambert(PAL.roadLine), 0.06, 0.012, 0.4, lx, 0.08, D / 2 - 0.32);
+  }
+  // 停止線＋黃格
+  addBox(root, lib.lambert(PAL.roadYellow), W - 1.0, 0.012, 0.08, 0, 0.08, 0.95);
+  addHazardStripe(root, lib, -W / 2 + 0.5, -0.4, 0.35, 0.9, 0, 0.14);
+  addHazardStripe(root, lib, W / 2 - 0.5, -0.4, 0.35, 0.9, 0, 0.14);
+  // 檢查通道地面（車轍導引）
+  for (const lx of lanes) {
+    addBox(root, lib.lambert(PAL.ironDark), 0.9, 0.01, 1.8, lx, 0.06, 0.1);
+  }
+  // ── 大型檢查上蓋（橫跨車道）──
+  const canopyW = W - 1.3;
+  const canopyD = 1.7;
+  addBox(root, lib.lambert(PAL.aluminium), canopyW, 0.12, canopyD, 0, 2.3, 0.1);
+  addBox(root, lib.lambert(PAL.wallWhite), canopyW + 0.06, 0.06, canopyD + 0.06, 0, 2.39, 0.1);
+  addBox(root, lib.lambert(PAL.steelGrey), canopyW, 0.18, 0.08, 0, 2.22, 0.1 + canopyD / 2);
+  // 上蓋霓虹燈帶（夜間 vertexNeon）
+  addBox(root, lib.neonTube(PAL.wallWhite), canopyW * 0.92, 0.035, 0.05, 0, 2.19, 0.1 + canopyD / 2 + 0.05);
+  addBox(root, lib.neonTube(PAL.neonCyan), canopyW * 0.75, 0.03, 0.05, 0, 2.19, 0.1 - canopyD / 2 - 0.05);
+  // 上蓋支柱
+  const cols = v === 0 ? 4 : 5;
+  for (let i = 0; i < cols; i++) {
+    const px = -canopyW / 2 + 0.25 + ((canopyW - 0.5) / (cols - 1)) * i;
+    addCylinder(root, lib.lambert(PAL.steelGrey), 0.055, 0.07, 2.25, px, 1.14, 0.1 + canopyD / 2 - 0.12, 6);
+    addCylinder(root, lib.lambert(PAL.steelGrey), 0.045, 0.055, 2.25, px, 1.14, 0.1 - canopyD / 2 + 0.12, 6);
+    addBeamBetween(
+      root,
+      lib.lambert(PAL.steelGrey),
+      new THREE.Vector3(px, 2.2, 0.1 + canopyD / 2 - 0.12),
+      new THREE.Vector3(px, 2.2, 0.1 - canopyD / 2 + 0.12),
+      0.2,
+      4,
+    );
+  }
+  // ── 檢查亭（車道之間）──
+  const boothX = v === 0 ? [-0.75, 0.75] : [-1.05, 0.35, 1.55];
+  for (const bx of boothX) {
+    addGateBooth(root, lib, bx, 0.1, 0, 0.05);
+  }
+  // ── 自動閘杆（紅白）──
+  for (const lx of lanes) {
+    addBoomBarrier(root, lib, lx - 0.45, 0.05, 0.62, 0, 0.9, false);
+    addBoomBarrier(root, lib, lx - 0.45, 0.05, -0.55, Math.PI, 0.9, true);
+  }
+  // ── 大型方向指示牌龍門架（「往深圳」）──
+  const signZ = D / 2 - 0.55;
+  addBox(root, lib.lambert(PAL.steelGrey), 0.12, 2.7, 0.12, -W / 2 + 0.8, 1.35, signZ);
+  addBox(root, lib.lambert(PAL.steelGrey), 0.12, 2.7, 0.12, W / 2 - 0.8, 1.35, signZ);
+  addBox(root, lib.lambert(PAL.steelGrey), W - 1.5, 0.14, 0.14, 0, 2.62, signZ);
+  addLabelSign(root, lib, {
+    text: v === 0 ? '往深圳' : '深圳灣口岸',
+    sub: v === 0 ? 'TO SHENZHEN · 落馬洲' : 'SHENZHEN BAY PORT',
+    x: 0,
+    y: 2.34,
+    z: signZ + 0.09,
+    w: 2.8,
+    h: 0.5,
+    bg: '#1f6b45',
+    fg: '#ffffff',
+    border: '#ffffff',
+  });
+  // ── LED 過關資訊屏（掛在上蓋前方）──
+  addLedInfoBoard(root, lib, v === 0 ? -1.35 : -1.8, 1.82, 0.1 + canopyD / 2 + 0.06, 1.5, 0.42, 0, v === 0 ? ['往深圳 過關暢順', '請備回鄉證'] : ['深圳灣口岸', '車龍 15 分鐘'], '#ffb347');
+  // ── 排隊／過關車輛（靜態）──
+  addCoach(root, lib, lanes[1], 1.1, Math.PI / 2, 0.05, { livery: v === 0 ? 0x2f5f9f : 0xb02a2a });
+  addContainerTruck(root, lib, lanes[0], -0.95, Math.PI / 2, 0.05, v === 0 ? PAL.cargoRed : PAL.cargoBlue);
+  if (v === 1) addContainerTruck(root, lib, lanes[2], -1.3, Math.PI / 2, 0.05, PAL.cargoYellow);
+  // ── 兩地邊境圍欄（左右＋後方留閘口）──
+  addBorderFence(root, lib, -W / 2 + 0.12, -D / 2 + 0.15, -W / 2 + 0.12, D / 2 - 0.15, 1.3, { lamps: true });
+  addBorderFence(root, lib, W / 2 - 0.12, -D / 2 + 0.15, W / 2 - 0.12, D / 2 - 0.15, 1.3, { lamps: true });
+  addBorderFence(root, lib, -W / 2 + 0.12, -D / 2 + 0.15, -1.1, -D / 2 + 0.15, 1.3, { lamps: false });
+  addBorderFence(root, lib, 1.1, -D / 2 + 0.15, W / 2 - 0.12, -D / 2 + 0.15, 1.3, { lamps: false });
+  // ── CCTV、警示牌、速度限制牌 ──
+  for (const [px, pz] of [
+    [-W / 2 + 0.42, -D / 2 + 0.42],
+    [W / 2 - 0.42, D / 2 - 0.42],
+  ]) {
+    addCylinder(root, lib.lambert(PAL.steelGrey), 0.035, 0.045, 2.2, px, 1.1, pz, 6);
+    addBox(root, lib.lambert(PAL.ironDark), 0.16, 0.14, 0.26, px, 2.24, pz + 0.1);
+  }
+  addLabelSign(root, lib, {
+    text: '邊境禁區',
+    sub: 'BORDER AREA · 未經許可不得進入',
+    x: -W / 2 + 0.95,
+    y: 1.05,
+    z: D / 2 - 0.12,
+    w: 1.3,
+    h: 0.42,
+    bg: '#b02a2a',
+    fg: '#ffffff',
+    border: '#ffffff',
+    ry: 0,
+  });
+  // 路面速度限制圈（幾何）
+  addCylinder(root, lib.lambert(PAL.wallWhite), 0.22, 0.22, 0.04, -W / 2 + 1.65, 1.7, D / 2 - 0.2, 12, 0, Math.PI / 2);
+  addBox(root, lib.lambert(PAL.hazardBlack), 0.28, 0.1, 0.02, -W / 2 + 1.65, 1.7, D / 2 - 0.17);
+  // 綠化
+  for (let i = 0; i < 3; i++) {
+    addTree(root, lib, -W / 2 + 0.45 + i * 0.55, -D / 2 + 0.55, 0.26, 'shrub', v + i * 3, 0.05);
+  }
+  addLitterBin(root, lib, W / 2 - 0.35, D / 2 - 0.35);
+}
+
+/** 鐵路口岸（羅湖／落馬洲支線式）：月台＋雙軌＋客運/貨運列車在前面、車站大樓在後、海關棚、邊境圍欄（3x2）。 */
+function buildRailBorderGate(ctx: Ctx): void {
+  const { lib, root, W, D } = ctx;
+  const v = ctx.variant;
+  pad(ctx, PAL.concreteLight, 0.06, 0.02);
+  // 道碴地台（靠 +z 前方，等列車由遊戲鏡頭望得到）
+  addBox(root, lib.lambert(PAL.concreteDark), W - 0.2, 0.05, D * 0.72, 0, 0.05, -D / 2 + D * 0.36 + 0.15);
+  // ── 兩條重型鐵路軌（沿 x 穿過口岸）──
+  const trackZ = v === 0 ? [0.85, 1.72] : [0.8, 1.66];
+  for (const tz of trackZ) addHeavyRail(root, lib, 0, tz, W - 0.35, 0, 0.02);
+  // ── 島式月台（軌道後方，+z 側為行車軌）──
+  const platZ = v === 0 ? -0.18 : -0.1;
+  addRailPlatform(root, lib, 0, platZ, W - 0.5, 0, 0.06, { canopy: true });
+  // ── 車站大樓（月台後方／陸側）──
+  const hallX = v === 0 ? -0.55 : -0.35;
+  const hallW = v === 0 ? 3.8 : 4.1;
+  addTower(root, lib, {
+    x: hallX,
+    z: -1.5,
+    w: hallW,
+    d: 0.8,
+    h: 1.55,
+    y0: 0.04,
+    style: null,
+    wallColor: PAL.tileWhite,
+    roofColor: PAL.concreteLight,
+  });
+  addBox(root, lib.lambert(PAL.aluminium), hallW + 0.1, 0.09, 0.9, hallX, 1.64, -1.5);
+  // 玻璃幕牆入口（面向 +z 月台／路）
+  addBox(root, lib.lambert(PAL.glassDark), hallW - 0.7, 1.1, 0.06, hallX, 0.72, -1.08);
+  for (let i = 0; i < 5; i++) {
+    addBox(root, lib.lambert(PAL.aluminium), 0.05, 1.15, 0.1, hallX - hallW / 2 + 0.3 + i * ((hallW - 0.6) / 4), 0.72, -1.06);
+  }
+  // ── 站名牌（抬高到月台上蓋之上，正面一定望到）──
+  addBox(root, lib.lambert(PAL.steelGrey), 0.06, 0.7, 0.06, hallX - 0.9, 1.85, -1.5);
+  addBox(root, lib.lambert(PAL.steelGrey), 0.06, 0.7, 0.06, hallX + 0.9, 1.85, -1.5);
+  addBox(root, lib.lambert(PAL.steelGrey), 2.0, 0.06, 0.06, hallX, 2.2, -1.5);
+  addLabelSign(root, lib, {
+    text: v === 0 ? '羅湖' : '落馬洲',
+    sub: v === 0 ? 'LO WU · RAIL BORDER' : 'LOK MA CHAU · RAIL BORDER',
+    x: hallX,
+    y: 2.43,
+    z: -1.47,
+    w: 2.7,
+    h: 0.52,
+    bg: '#b02a2a',
+    fg: '#ffffff',
+    border: '#ffffff',
+  });
+  // ── LED 班次屏（掛月台上蓋前沿，列車上方）──
+  addLedInfoBoard(root, lib, v === 0 ? -1.35 : 1.15, 1.5, platZ + 0.63, 1.3, 0.36, 0, v === 0 ? ['往深圳 12:30', '羅湖 → 深圳'] : ['往落馬洲 12:45', '福田口岸'], '#5cff9d');
+  // 月台「往深圳」指示牌
+  addLabelSign(root, lib, {
+    text: '往深圳',
+    sub: 'TO SHENZHEN',
+    x: -W / 2 + 1.05,
+    y: 1.62,
+    z: platZ + 0.4,
+    w: 1.0,
+    h: 0.3,
+    bg: '#1f6b45',
+    fg: '#ffffff',
+    border: '#ffffff',
+    ry: 0,
+  });
+  // ── 海關檢查棚（左／右側，貼近月台）──
+  const shedX = v === 0 ? W / 2 - 1.15 : -W / 2 + 1.15;
+  addBox(root, lib.lambert(PAL.steelGrey), 1.9, 0.09, 1.15, shedX, 1.52, -1.05);
+  addBox(root, lib.lambert(PAL.wallWhite), 1.94, 0.06, 1.19, shedX, 1.58, -1.05);
+  for (const [px, pz] of [
+    [shedX - 0.85, -0.55],
+    [shedX + 0.85, -0.55],
+    [shedX - 0.85, -1.55],
+    [shedX + 0.85, -1.55],
+  ]) {
+    addCylinder(root, lib.lambert(PAL.steelGrey), 0.035, 0.04, 1.52, px, 0.76, pz, 6);
+  }
+  addBox(root, lib.lambert(PAL.woodLight), 1.2, 0.07, 0.42, shedX, 0.72, -1.0);
+  addBox(root, lib.lambert(PAL.ironDark), 1.1, 0.6, 0.06, shedX, 0.42, -1.25);
+  for (let i = 0; i < 3; i++) {
+    addBox(root, lib.lambert(i % 2 === 0 ? PAL.cargoRed : PAL.cargoBlue), 0.26, 0.2, 0.18, shedX - 0.35 + i * 0.35, 0.52, -0.82);
+  }
+  addLabelSign(root, lib, {
+    text: '海關檢查',
+    sub: 'CUSTOMS',
+    x: shedX,
+    y: 1.26,
+    z: -0.42,
+    w: 1.1,
+    h: 0.3,
+    bg: '#1b2b33',
+    fg: '#ffd166',
+    border: '#ffd166',
+  });
+  // ── 列車（客運 EMU＋貨運列車，靜態；放前方軌道，鏡頭可見）──
+  addPassengerTrain(root, lib, v === 0 ? 0.35 : -0.5, trackZ[0], 0, 0.06, {
+    cars: 2,
+    livery: v === 0 ? 0xb02a2a : 0x2f5f8a,
+  });
+  addFreightTrain(root, lib, v === 0 ? -0.25 : 0.3, trackZ[1], 0, 0.06, {
+    wagons: v === 0 ? 2 : 1,
+    locoColor: v === 0 ? 0x2f5f8a : 0x6b6f58,
+    wagonColors: v === 0 ? [PAL.cargoRed, PAL.cargoBlue] : [PAL.cargoYellow],
+  });
+  // ── 貨運貨櫃／檢查區（車站後方兩側）──
+  addContainerStack(root, lib, shedX > 0 ? -W / 2 + 1.35 : W / 2 - 1.35, -D / 2 + 0.5, 1, 1, 2, v + 3);
+  addBox(root, lib.lambert(PAL.busYellow), 0.5, 0.32, 0.4, shedX > 0 ? -W / 2 + 2.45 : W / 2 - 2.45, 0.25, -D / 2 + 0.55);
+  addBox(root, lib.lambert(PAL.ironDark), 0.5, 0.08, 0.44, shedX > 0 ? -W / 2 + 2.45 : W / 2 - 2.45, 0.1, -D / 2 + 0.55);
+  // ── 鐵路號誌＋高桿燈 ──
+  addRailSignal(root, lib, -W / 2 + 0.4, trackZ[1], 0, 0.06, 1.5);
+  addRailSignal(root, lib, W / 2 - 0.45, trackZ[0], Math.PI, 0.06, 1.5);
+  addFloodlightMast(root, lib, W / 2 - 0.5, -D / 2 + 0.5, 2.6, 0.06, { glow: true, heads: 2 });
+  addFloodlightMast(root, lib, -W / 2 + 0.5, -D / 2 + 0.5, 2.4, 0.06, { glow: true, heads: 2 });
+  // ── 兩地邊境圍欄（左右兩側，軌道前方留缺口）──
+  const fenceH = 1.4;
+  for (const sx of [-1, 1]) {
+    const fx = sx * (W / 2 - 0.12);
+    addBorderFence(root, lib, fx, -D / 2 + 0.12, fx, trackZ[0] - 0.62, fenceH, { lamps: true });
+  }
+  // 綠化、垃圾桶
+  addTree(root, lib, -W / 2 + 0.4, D / 2 - 0.35, 0.26, 'banyan', v + 2, 0.06);
+  addTree(root, lib, W / 2 - 0.4, -D / 2 + 0.3, 0.24, 'shrub', v + 4, 0.06);
+  addLitterBin(root, lib, -W / 2 + 0.35, -D / 2 + 0.3);
+}
+
 // ─────────────────────────── 通用後備原型 ───────────────────────────
 
 /** 未知 key 的後備原型（日後擴充建築時仍可顯示）。 */
@@ -3291,6 +3539,9 @@ const BUILDERS: Record<string, Builder> = {
   busStop: buildBusStop,
   minibusStop: buildMinibusStop,
   minibusDepot: buildMinibusDepot,
+  // Round 6 新增（2）
+  roadBorderGate: buildRoadBorderGate,
+  railBorderGate: buildRailBorderGate,
 };
 
 /** 每種建築可用的外觀變體數量（用 building.id 取模，令同類建築不至於一模一樣）。 */
@@ -3339,6 +3590,9 @@ const VARIANTS: Record<string, number> = {
   busStop: 2,
   minibusStop: 2,
   minibusDepot: 2,
+  // Round 6 新增
+  roadBorderGate: 2,
+  railBorderGate: 2,
 };
 
 /** 已實作原型的建築 key（供測試／除錯核對 BUILDINGS 覆蓋率）。 */

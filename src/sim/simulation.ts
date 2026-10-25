@@ -31,6 +31,7 @@ import { updateStats } from './stats';
 import { updateConnectedBuildings } from './placement';
 import { computeUtilitySnapshot } from './utilities';
 import { tickTrade } from './trade';
+import { tickMainland } from './mainland';
 
 export class Simulation {
   update(state: GameState, realDt: number, ctx: SimContext): void {
@@ -63,6 +64,8 @@ export class Simulation {
       tickTransit(state, ctx);
       // 機場／貨櫃碼頭貿易結算（收入即時入帳）
       tickTrade(state, ctx);
+      // 內地公路／鐵路糧食支援（Round 6／issue #6）：口岸接駁後每日輸入糧食
+      tickMainland(state, ctx);
       if (flags.newMonth) monthlyFinance(state, ctx);
       tickDailyFinance(state, ctx);
       updateStats(state);

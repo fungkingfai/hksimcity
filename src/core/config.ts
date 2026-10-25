@@ -22,7 +22,7 @@ import type {
 
 // ─────────────────────────── 世界常數 ───────────────────────────
 
-export const GAME_VERSION = 6;
+export const GAME_VERSION = 7;
 
 /** 香港地圖：600×600 格（由 CSDI／地政總署真實地理數據生成；每格 112m，約舊版 96×96 的 39 倍面積） */
 export const GRID_WIDTH = 600;
@@ -566,7 +566,6 @@ export const BUILDINGS: Record<string, BuildingDef> = {
     needsRoad: true,
     interior: 'containerPort',
     tradeRole: 'portTerminal',
-    requiredRegion: 'containerPort',
     production: {
       output: 'goods',
       amountPerDay: 45,
@@ -589,7 +588,6 @@ export const BUILDINGS: Record<string, BuildingDef> = {
     color: 0x8a9670,
     needsRoad: true,
     interior: 'portGate',
-    requiredRegion: 'containerPort',
     tradeRole: 'portGate',
     ploppable: true,
   }),
@@ -607,7 +605,6 @@ export const BUILDINGS: Record<string, BuildingDef> = {
     color: 0x7f8c7a,
     needsRoad: true,
     interior: 'portYard',
-    requiredRegion: 'containerPort',
     tradeRole: 'portYard',
     ploppable: true,
   }),
@@ -645,6 +642,41 @@ export const BUILDINGS: Record<string, BuildingDef> = {
     interior: 'airCargoTerminal',
     requiredRegion: 'airport',
     tradeRole: 'airportCargo',
+    ploppable: true,
+  }),
+
+  roadBorderGate: B({
+    key: 'roadBorderGate',
+    name: '道路口岸',
+    desc: '往深圳嘅道路邊境檢查站；接駁城市道路後，內地貨車每日供應糧食。只可建於邊境通道位置。',
+    category: 'transport',
+    size: [3, 2],
+    cost: 8_000_000,
+    upkeep: 60_000,
+    workers: 40,
+    housing: 0,
+    unlockPop: 300,
+    color: 0xa08a5f,
+    needsRoad: true,
+    interior: 'roadBorderGate',
+    borderGate: 'road',
+    ploppable: true,
+  }),
+  railBorderGate: B({
+    key: 'railBorderGate',
+    name: '鐵路口岸',
+    desc: '往深圳嘅鐵路口岸／貨運站；鐵路軌接駁後，內地鐵路每日供應較大量糧食。只可建於邊境通道位置。',
+    category: 'transport',
+    size: [3, 2],
+    cost: 9_000_000,
+    upkeep: 70_000,
+    workers: 60,
+    housing: 0,
+    unlockPop: 400,
+    color: 0x7f8f9f,
+    needsRoad: true,
+    interior: 'railBorderGate',
+    borderGate: 'rail',
     ploppable: true,
   }),
 
@@ -916,6 +948,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
     color: 0xb02a2a,
     needsRoad: true,
     interior: 'mtrStation',
+    railStation: true,
     transit: { mode: 'mtr', radius: 14, capacity: 900, fare: 8 },
     ploppable: true,
   }),
@@ -1209,10 +1242,94 @@ export const STARTER_TOWN = {
   /** 開局預建後跑多少日模擬，讓市民遷入及建築運作（main.ts warm-up） */
   warmupDays: 10,
   /** 預建人口目標（會經模擬自然遷入，不用硬塞） */
-  targetPopulation: 145,
+  targetPopulation: 420,
   /** 道路／分區布局半徑（格） */
   layoutRadius: 9,
 };
+
+// ─────────────────────────── Round 6：港鐵地下／地上鐵路 ───────────────────────────
+
+export interface RailInfo {
+  grade: 'surface' | 'elevated' | 'underground';
+  name: string;
+  color: string;
+  colorHex: number;
+  /** 每格造價 */
+  cost: number;
+  /** 每格每月維護 */
+  upkeep: number;
+  /** 是否可跨水（高架／地下可過海） */
+  overWater: boolean;
+  description: string;
+}
+
+export const RAIL_INFO: Record<'surface' | 'elevated' | 'underground', RailInfo> = {
+  surface: {
+    grade: 'surface',
+    name: '地面鐵路',
+    color: '#9fb4c8',
+    colorHex: 0x9fb4c8,
+    cost: 18_000,
+    upkeep: 2.2,
+    overWater: false,
+    description: '地面或高架橋前的普通鐵路，較便宜；不可跨海。',
+  },
+  elevated: {
+    grade: 'elevated',
+    name: '高架鐵路',
+    color: '#c8d6e5',
+    colorHex: 0xc8d6e5,
+    cost: 65_000,
+    upkeep: 5.5,
+    overWater: true,
+    description: '高架橋鐵路，可跨海／跨谷；造價及維護較高。',
+  },
+  underground: {
+    grade: 'underground',
+    name: '地下鐵路',
+    color: '#e6c35a',
+    colorHex: 0xe6c35a,
+    cost: 42_000,
+    upkeep: 3.8,
+    overWater: true,
+    description: '鑽挖隧道，可過海及穿越山體；只喺地下層（U）顯示。',
+  },
+};
+
+export const RAIL_TOOLS = ['rail:surface', 'rail:elevated', 'rail:underground', 'rail:remove'] as const;
+
+/** 鐵路網營運（MTR） */
+export const RAIL_CONFIG = {
+  /** 每座 mtrStation 的基本車站維護（building upkeep 另有） */
+  stationUpkeep: 8_000,
+  /** 每一格鐵路軌每月維護（另加 RAIL_INFO.upkeep） */
+  trackUpkeep: 0,
+  /** 鐵路網基礎票價／每日乘客基數 */
+  baseRidershipPerStation: 220,
+  ridershipPerTrackTile: 2.5,
+  farePerRide: 8,
+  /** 未有鐵路網接駁的 mtrStation 覆蓋折扣 */
+  isolatedStationCoverage: 0.35,
+  /** 最長可一次過鋪設（格） */
+  maxPlanLength: 80,
+} as const;
+
+// ─────────────────────────── Round 6：邊境／內地支援 ───────────────────────────
+
+export const BORDER_CONFIG = {
+  /** 道路口岸每日糧食進口（接駁後） */
+  roadFoodPerDay: 60,
+  /** 鐵路口岸每日糧食進口（接駁後，較高） */
+  railFoodPerDay: 120,
+  /** 進口食品成本（每單位；可為 0 = 補貼） */
+  foodImportCost: 0,
+  /** 口岸必須距離邊境通道 centre 幾格內 */
+  placementRadius: 5,
+  /** 接駁判定：口岸 4 鄰有 road（道路口岸）／rail（鐵路口岸） */
+  linkRadius: 1,
+  /** 未接駁提示 */
+  disconnectedFoodPerDay: 0,
+} as const;
 
 // ─────────────────────────── Round 5：地下管網 ───────────────────────────
 
@@ -1313,7 +1430,7 @@ export const TRADE_CONFIG = {
     yardCapacity: 100,
     revenuePerTeu: 280,
     /** 貨櫃碼頭區範圍外建 containerPort 的吞吐折扣 */
-    offRegionPenalty: 0.7,
+    offRegionPenalty: 0.9,
     upgradeCosts: [0, 4_000_000, 8_000_000],
     maxLevel: 3,
   },

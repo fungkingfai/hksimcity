@@ -4,7 +4,7 @@
  * 機場：客運大樓＋空運貨運站 → 旅客／貨運量、收入、就業、噪音；
  *       8 格內冇公共交通接駁 → 客流 ×0.7；颱風 8 號關閉（收入 0）。
  * 貨櫃碼頭：containerPort＋portGate＋portYard → TEU 吞吐／收入；
- *       必須位於 HK_REGIONS 'containerPort'（葵涌）範圍，否則吞吐 ×0.7。
+ *       任何臨水地點都可建；葵涌貨櫃碼頭區有吞吐加成，區外只有輕微折扣（×0.9）。
  * 升級：airportTerminal／containerPort 可升 level 1–3（成本見 TRADE_CONFIG）。
  * 收入以 finance income 'other' 逐日入帳（與服務收入模式一致）。
  */

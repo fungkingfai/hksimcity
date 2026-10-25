@@ -34,6 +34,7 @@ import {
 } from './sim/placement';
 import { updateStats } from './sim/stats';
 import { computeUtilitySnapshot, layStarterPipes, placePipe, removePipe } from './sim/utilities';
+import { isRailRemoveTool, isRailTool, placeRail, railToolGrade, removeRail } from './sim/rail';
 import { regionKindAt } from './sim/placement';
 import { upgradeTradeBuilding } from './sim/trade';
 import {
@@ -134,6 +135,23 @@ function createActions(store: GameStore): GameActions {
         if (pos >= 0) draft.stopIds.splice(pos, 1);
         else draft.stopIds.push(buildingId);
         store.bumpUI();
+        return;
+      }
+
+      if (isRailTool(tool)) {
+        if (isRailRemoveTool(tool)) {
+          const r = removeRail(state, tx, ty);
+          if (r.ok) {
+            store.toast(`已拆除鐵路，退還 ${formatMoneyShort(r.cost)}`, 'info');
+            refresh();
+          } else if (r.reason) warn(r.reason);
+          return;
+        }
+        const grade = railToolGrade(tool);
+        if (!grade) return;
+        const r = placeRail(state, tx, ty, grade);
+        if (r.ok) refresh();
+        else if (r.reason) warn(r.reason);
         return;
       }
 
@@ -731,6 +749,8 @@ function boot(): void {
       computeUtilitySnapshot,
       layStarterPipes,
       regionKindAt,
+      placeRail,
+      removeRail,
     },
   };
   if (uiMode === 'mobile') {

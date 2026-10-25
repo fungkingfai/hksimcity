@@ -80,6 +80,7 @@ export function createStartScreen(
   store: GameStore,
   actions: GameActions,
 ): StartScreenView {
+  const mobile = getUiMode() === 'mobile';
   const root = document.createElement('div');
   root.className = 'start-screen';
   root.hidden = true;
@@ -90,6 +91,7 @@ export function createStartScreen(
       <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
     </div>
     <div class="ss-frame">
+      <div class="ss-scroll">
       <header class="ss-head">
         <div class="ss-brand">
           <span class="ss-neon" aria-hidden="true"></span>
@@ -122,13 +124,20 @@ export function createStartScreen(
         ).join('')}
       </div>
 
-      <div class="ss-seed-row">
-        <label class="ss-seed-label" for="ss-seed-input">
+      <details class="ss-seed-row"${mobile ? '' : ' open'}>
+        <summary class="ss-seed-summary">
           <span>地圖種子（選填）</span>
-          <input id="ss-seed-input" type="text" inputmode="numeric" data-act="ss-seed" placeholder="留空＝隨機，例如 20260301" autocomplete="off" />
-        </label>
-        <button type="button" class="ss-dice" data-act="ss-dice" title="隨機種子">${ico('spark')}<span>隨機</span></button>
-        <span class="ss-seed-hint">相同種子會生成相同的香港地圖</span>
+          <small>相同種子生成相同香港地圖</small>
+        </summary>
+        <div class="ss-seed-body">
+          <label class="ss-seed-label" for="ss-seed-input">
+            <span>地圖種子</span>
+            <input id="ss-seed-input" type="text" inputmode="numeric" data-act="ss-seed" placeholder="留空＝隨機，例如 20260301" autocomplete="off" />
+          </label>
+          <button type="button" class="ss-dice" data-act="ss-dice" title="隨機種子">${ico('spark')}<span>隨機</span></button>
+          <span class="ss-seed-hint">相同種子會生成相同的香港地圖</span>
+        </div>
+      </details>
       </div>
 
       <footer class="ss-foot">

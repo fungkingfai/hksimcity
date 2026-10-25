@@ -126,6 +126,11 @@ export const ICON = {
   valve: wrap('<circle cx="8" cy="8" r="5.6"/><path d="M8 2.4v11.2M2.4 8h11.2"/><circle cx="8" cy="8" r="1.8"/>'),
   food: wrap('<path d="M2.6 7h10.8a5.4 5.4 0 0 1-10.8 0Z"/><path d="M4.6 7c0-2 1.4-3.6 3.4-3.6S11.4 5 11.4 7"/><path d="M2.2 13.4h11.6"/>'),
   goods: wrap('<path d="M3.2 5.2h9.6l-.9 8.4H4.1Z"/><path d="M5.6 5.2V4a2.4 2.4 0 0 1 4.8 0v1.2"/>'),
+  rail: wrap('<path d="M4.4 2.2 3.2 13.8M11.6 2.2l1.2 11.6"/><path d="M3.7 5h8.6M3.5 7.7h9M3.3 10.4h9.4"/><path d="M5.2 13.8h3.2"/>'),
+  railElevated: wrap('<path d="M2.8 4.2h10.4M2.4 6.8h11.2"/><path d="M3.4 6.8v6.6M12.6 6.8v6.6M5.6 6.8v2.4M10.4 6.8v2.4"/><path d="M1.8 13.4h12.4"/>'),
+  railUnderground: wrap('<circle cx="8" cy="8" r="6"/><path d="M4.6 5.4 3.8 10.6M11.4 5.4l.8 5.2"/><path d="M4.2 7.4h7.6M4 9.4h8"/><path d="M6.4 13.4h3.2"/>'),
+  borderRoad: wrap('<path d="M2 13V8.4h12V13M2 8.4 4 3h8l2 5.4"/><path d="M4.6 13v-2.6h2.4V13M9 13v-2.6h2.4V13"/><path d="M2 5.6h12"/>'),
+  borderRail: wrap('<path d="M3.8 13V7.6h8.4V13"/><path d="M2.4 7.6 4.4 3.2h7.2l2 4.4"/><path d="M5.6 13v-2.4h4.8V13"/><path d="M1.4 13.4h13.2"/><circle cx="5.6" cy="9.4" r="0.6"/><circle cx="10.4" cy="9.4" r="0.6"/>'),
 } as const;
 
 export type IconName = keyof typeof ICON;
@@ -264,6 +269,8 @@ export const BUILDING_GLYPHS: Record<string, string> = {
   airCargoTerminal: '📦',
   portGate: '🚧',
   portYard: '🧱',
+  roadBorderGate: '🛂',
+  railBorderGate: '🚉',
 };
 
 /** 建築卡圖示；未知 key 用首字 */

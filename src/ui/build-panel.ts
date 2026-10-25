@@ -8,11 +8,14 @@
  */
 
 import {
+  BORDER_CONFIG,
   BUILDINGS,
   CATEGORY_INFO,
   DEMOLISH_REFUND_RATE,
   PLOPPABLE_BUILDINGS,
   PLOPPABLE_CATEGORIES,
+  RAIL_CONFIG,
+  RAIL_INFO,
   RESOURCES,
   ROAD_COST,
   TERRAIN_INFO,
@@ -67,8 +70,8 @@ function buildingsOf(category: BuildingCategory): BuildingDef[] {
 function cardSubtitle(def: BuildingDef): string {
   const bits: string[] = [];
   if (['airportTerminal', 'airCargoTerminal'].includes(def.key)) bits.push('只限機場區');
-  if (['portGate', 'portYard'].includes(def.key)) bits.push('只限碼頭區');
-  if (def.key === 'containerPort') bits.push('需臨水');
+  if (def.borderGate) bits.push(def.borderGate === 'road' ? '邊境道路口岸' : '邊境鐵路口岸');
+  if (['containerPort', 'portGate', 'portYard'].includes(def.key)) bits.push('臨水 · 貼路（葵涌加成）');
   if (def.utility) {
     const utilityName =
       def.utility.kind === 'power' ? '供電' : def.utility.kind === 'sewage' ? '污水處理' : '供水';
@@ -121,8 +124,10 @@ function buildTip(def: BuildingDef): string {
     rows.push(row('運力', `每日 ${num(def.transit.capacity)} 人次 · 車費 $${def.transit.fare}`));
   }
   if (['airportTerminal', 'airCargoTerminal'].includes(def.key)) rows.push(row('位置限制', '只限機場區'));
-  if (['portGate', 'portYard'].includes(def.key)) rows.push(row('位置限制', '只限碼頭區'));
-  if (def.key === 'containerPort') rows.push(row('位置限制', '需臨水'));
+  if (def.borderGate) {
+    rows.push(row('位置限制', `只限邊境通道 ${BORDER_CONFIG.placementRadius} 格內；${def.borderGate === 'road' ? '需貼路' : '需貼鐵路軌'}`));
+  }
+  if (['containerPort', 'portGate', 'portYard'].includes(def.key)) rows.push(row('位置限制', '臨水＋貼路；葵涌區有吞吐加成'));
   if (def.utility) {
     const utilityLabel =
       def.utility.kind === 'power' ? '供電' : def.utility.kind === 'sewage' ? '污水處理' : '供水';
@@ -231,6 +236,37 @@ function toolTip(tool: string): string {
   `;
 }
 
+/** hover 說明：鐵路工具 */
+function railTip(grade: 'surface' | 'elevated' | 'underground' | 'remove'): string {
+  if (grade === 'remove') {
+    return `
+      <div class="tip-head">
+        <span class="tip-icon tool danger">${ico('hammer')}</span>
+        <div class="tip-title"><b>拆除鐵路</b><em>鐵路工具 · 退還 30%</em></div>
+      </div>
+      <p class="tip-desc">拆除地面／高架／地下鐵路軌道，退還三成造價；已接駁的車站會即時重新計算鐵路網。</p>
+      <dl class="tip-rows">
+        ${row('操作', '拖曳或點擊要拆除的鐵路')}
+        ${row('取消', '右鍵或 Esc')}
+      </dl>`;
+  }
+  const info = RAIL_INFO[grade];
+  return `
+    <div class="tip-head">
+      <span class="tip-icon tool" style="color:${info.color}">${ico(grade === 'surface' ? 'rail' : grade === 'elevated' ? 'railElevated' : 'railUnderground')}</span>
+      <div class="tip-title"><b>${info.name}</b><em>鐵路工具 · ${formatMoneyShort(info.cost)}/格</em></div>
+    </div>
+    <p class="tip-desc">${info.description}</p>
+    <dl class="tip-rows">
+      ${row('造價', `${formatMoney(info.cost)} / 格`)}
+      ${row('維護', `$${info.upkeep}/格 / 月`)}
+      ${row('跨水', info.overWater ? '可以（跨海／穿山）' : '不可跨水／山地')}
+      ${row('最長', `一次過 ${RAIL_CONFIG.maxPlanLength} 格（可分段）`)}
+      ${grade === 'underground' ? row('圖層', '按 U 地下層顯示') : ''}
+      ${row('取消', '右鍵或 Esc')}
+    </dl>`;
+}
+
 export function createBuildPanel(container: HTMLElement, store: GameStore, actions: GameActions): BuildPanelView {
   const root = document.createElement('aside');
   root.className = 'build-panel';
@@ -296,6 +332,31 @@ export function createBuildPanel(container: HTMLElement, store: GameStore, actio
       </div>
     </div>
 
+    <div class="rail-block">
+      <div class="tools-label"><span>鐵路 RAIL</span><span class="tools-pop">地面 · 高架 · 地下</span></div>
+      <div class="rail-grid">
+        ${(['surface', 'elevated', 'underground'] as const)
+          .map((grade) => {
+            const info = RAIL_INFO[grade];
+            const icon = grade === 'surface' ? 'rail' : grade === 'elevated' ? 'railElevated' : 'railUnderground';
+            return `
+              <button type="button" class="rail-card" data-act="tool" data-tool="rail:${grade}" data-tip="r:${grade}"
+                style="--rail:${info.color}" title="${info.name} · ${formatMoney(info.cost)}/格 · 維護 $${info.upkeep}/月">
+                <span class="rail-ico">${ico(icon)}</span>
+                <span class="rail-meta"><b>${info.name}</b><small>${formatMoneyShort(info.cost)}/格 · $${info.upkeep}/月</small></span>
+                <em class="rail-badge">${info.overWater ? '可跨水' : '不可跨水'}</em>
+              </button>`;
+          })
+          .join('')}
+        <button type="button" class="rail-card danger" data-act="tool" data-tool="rail:remove" data-tip="r:remove"
+          title="拆除鐵路（退還 30%）">
+          <span class="rail-ico">${ico('hammer')}</span>
+          <span class="rail-meta"><b>拆除鐵路</b><small>退還 30% 造價</small></span>
+        </button>
+      </div>
+      <p class="rail-hint">地圖拖曳鋪軌（最長一次過 ${RAIL_CONFIG.maxPlanLength} 格）· 地下鐵路按 <kbd>U</kbd> 顯示 · mtrStation 要貼近軌道先接駁</p>
+    </div>
+
     <div class="build-tabs-wrap">
       <div class="tools-label"><span>公共建築 · 手動建造</span><span class="tools-pop" data-k="plopCount"></span></div>
       <div class="category-tabs" role="tablist" aria-label="可手動建造的建築分類">
@@ -331,6 +392,7 @@ export function createBuildPanel(container: HTMLElement, store: GameStore, actio
   const zoneToggleBtn = qs<HTMLElement>(root, '[data-act="toggle-zones"]')!;
   const undergroundBtn = qs<HTMLElement>(root, '[data-act="toggle-underground"]')!;
   const utilityBtn = qs<HTMLElement>(root, '[data-act="toggle-utility"]')!;
+  const railButtons = Array.from(root.querySelectorAll<HTMLElement>('[data-tool^="rail:"]'));
   const zoneButtons = new Map<ZoneType, { btn: HTMLElement; demand: HTMLElement }>();
   for (const zone of ZONE_ORDER) {
     const btn = qs<HTMLElement>(root, `[data-zone="${zone}"]`);
@@ -368,6 +430,7 @@ export function createBuildPanel(container: HTMLElement, store: GameStore, actio
     let html = tipCache.get(key);
     if (!html) {
       if (key.startsWith('tool:')) html = toolTip(key.slice(5));
+      else if (key.startsWith('r:')) html = railTip(key.slice(2) as 'surface' | 'elevated' | 'underground' | 'remove');
       else if (key.startsWith('z:')) html = zoneTip(key.slice(2) as ZoneType);
       else html = buildTip(BUILDINGS[key.slice(2)]);
       tipCache.set(key, html);
@@ -550,6 +613,7 @@ export function createBuildPanel(container: HTMLElement, store: GameStore, actio
     setClass(roadBtn, 'active', ui.tool === 'road');
     setClass(dezoneBtn, 'active', ui.tool === 'dezone');
     setClass(demolishBtn, 'active', ui.tool === 'demolish');
+    for (const btn of railButtons) setClass(btn, 'active', ui.tool === btn.dataset.tool);
     setHidden(cancelBtn, !ui.tool);
 
     let hint = '選擇分區刷子或馬路，在地圖上拖曳';
@@ -559,7 +623,15 @@ export function createBuildPanel(container: HTMLElement, store: GameStore, actio
       else if (ui.tool === 'road') hint = '鋪設馬路（已含行人路）· 拖曳連續鋪設 · 右鍵取消';
       else if (ui.tool === 'dezone') hint = '取消分區：拖曳清除色塊（退 50%）· 右鍵取消';
       else if (ui.tool === 'demolish') hint = '拆卸：點擊建築／道路 · 建築退還 30%';
-      else hint = `放置「${BUILDINGS[ui.tool]?.name ?? ''}」· 點擊地圖放置`;
+      else if (ui.tool.startsWith('rail:')) {
+        const grade = ui.tool.slice(5);
+        hint =
+          grade === 'remove'
+            ? `拆除鐵路：拖曳／點擊軌道 · 退還 30% · 車站會即時重算`
+            : `鋪設${RAIL_INFO[grade as 'surface' | 'elevated' | 'underground']?.name ?? '鐵路'}：拖曳連續鋪軌 · ${
+                RAIL_INFO[grade as 'surface' | 'elevated' | 'underground']?.overWater ? '可跨水／穿山' : '不可跨水'
+              } · 右鍵取消`;
+      } else hint = `放置「${BUILDINGS[ui.tool]?.name ?? ''}」· 點擊地圖放置`;
     }
     setText(hintEl, hint);
 

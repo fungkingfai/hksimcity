@@ -35,7 +35,7 @@ export function createUndergroundBar(container: HTMLElement, store: GameStore, a
   root.hidden = true;
   root.innerHTML = `
     <div class="ug-head">
-      <span class="ug-title">${ico('pipe')}<b>地下管網</b><span class="ug-mode">三網圖層</span></span>
+      <span class="ug-title">${ico('pipe')}<b>地下管網</b><span class="ug-mode">水 · 污水 · 電 · 鐵路</span></span>
       <span class="ug-status" data-k="ugStatus">管網計算中…</span>
       <div class="ug-actions">
         <button type="button" class="ug-action" data-act="ug-utility" title="公用設施面板">${ico('gauge')}<span>公用</span></button>
@@ -128,6 +128,7 @@ export function createUndergroundBar(container: HTMLElement, store: GameStore, a
       }
     }
 
+    setHidden(hintEl, false);
     const pipeLabel = pipeKind
       ? pipeKind === 'remove'
         ? '拆除管道'
@@ -138,7 +139,7 @@ export function createUndergroundBar(container: HTMLElement, store: GameStore, a
       hintEl,
       pipeKind
         ? `正在鋪設「${pipeLabel}」：點擊／拖曳地圖 · 右鍵取消 · Esc 返回`
-        : '點擊上方工具選擇食水管／污水管／電力電纜；建築需接駁對應管道先有水／電。',
+        : '點擊上方工具鋪設食水管／污水管／電力電纜；建築需接駁先有水／電。地下層亦顯示地下鐵路軌（地面／高架鐵路按地圖顯示）。',
     );
   };
 

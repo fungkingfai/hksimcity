@@ -13,6 +13,9 @@
  */
 
 import { BUILDINGS, STARTER_TOWN } from './config';
+import { generateExistingBuildings } from '../world/existing-city';
+import { layStarterPipes } from '../sim/utilities';
+import { createCitizen, getCitizenCache } from '../sim/citizen-common';
 import type { Building, GameState, ZoneType } from './types';
 
 const BUILDABLE = new Set(['grass', 'urban', 'reclaimed', 'fertile', 'forest', 'hill']);
@@ -658,6 +661,40 @@ export function buildStarterTown(state: GameState): {
     if (spot && addBuilding(state, key, spot.x, spot.y)) autoCount++;
   }
 
+  // Issue #7：生成香港已發展區的「現有樓群」真正建築（existing:true；唔會塞市民，由 sim 遷入）
+  const existingStats = generateExistingBuildings(state, {
+    maxBuildings: 900,
+    maxRoads: 5200,
+    minSpawnDistance: 20,
+  });
+  // Issue #7／Round 5：現有道路亦要接駁公用管網（覆蓋現有樓宇）
+  const pipeCounts = layStarterPipes(state);
+
+  // Issue #7：為現有住宅預先遷入部分市民，令開局已有真實人口（之後由 sim 自然增長）
+  {
+    const cache = getCitizenCache(state);
+    const homes = state.buildings
+      .filter((b) => b.existing && b.zone === 'residential' && (BUILDINGS[b.key]?.housing ?? 0) > 0)
+      .sort((a, b) => (BUILDINGS[b.key]?.housing ?? 0) - (BUILDINGS[a.key]?.housing ?? 0));
+    let target = 400;
+    for (const home of homes) {
+      if (target <= 0) break;
+      const capacity = Math.max(0, (BUILDINGS[home.key]?.housing ?? 0) - home.residents.length);
+      const fill = Math.min(capacity, target);
+      for (let k = 0; k < fill; k++) {
+        const citizen = createCitizen(state, cache, {
+          homeId: home.id,
+          age: 18 + Math.floor(Math.random() * 45),
+          state: 'home',
+        });
+        home.residents.push(citizen.id);
+        state.citizens.push(citizen);
+      }
+      target -= fill;
+    }
+    state.stats.population = state.citizens.length;
+  }
+
   for (const b of state.buildings) {
     if (b.key === 'warehouse') {
       b.inventory.food = Math.max(b.inventory.food ?? 0, 900);
@@ -673,6 +710,8 @@ export function buildStarterTown(state: GameState): {
   state.gameMode = 'starter';
   const zoneTotal =
     zoneCounts.residential + zoneCounts.commercial + zoneCounts.industrial + zoneCounts.farmland;
+  void existingStats;
+  void pipeCounts;
   state.log.push({
     id: state.nextLogId++,
     year: state.clock.year,

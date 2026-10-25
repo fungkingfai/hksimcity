@@ -60,6 +60,9 @@ export type UtilityKind = 'water' | 'sewage' | 'power';
 /** 可鋪設的地下管線種類 */
 export type PipeKind = 'water' | 'sewer' | 'power';
 
+/** 鐵路等級：地面／高架／地下（issue #5） */
+export type RailGrade = 'surface' | 'elevated' | 'underground';
+
 /** 公共交通模式 */
 export type TransitMode = 'mtr' | 'bus' | 'tram' | 'ferry';
 
@@ -138,6 +141,8 @@ export interface Tile {
   sewerPipe?: boolean;
   /** 地下電力電纜 */
   powerCable?: boolean;
+  /** 鐵路軌（地面／高架／地下；Round 6 MTR 規劃） */
+  rail?: RailGrade;
 }
 
 // ─────────────────────────── 建築 ───────────────────────────
@@ -241,6 +246,10 @@ export interface BuildingDef {
   tradeRole?: 'airportPassenger' | 'airportCargo' | 'portTerminal' | 'portGate' | 'portYard';
   /** 路線站點種類（巴士／小巴站；有值即可以作為路線站） */
   stopMode?: 'bus' | 'minibus';
+  /** 鐵路站（mtrStation；只要有鐵路軌相鄰即可納入鐵路網，issue #5） */
+  railStation?: boolean;
+  /** 邊境口岸種類（道路／鐵路；issue #4/#6） */
+  borderGate?: BorderCrossingKind;
 }
 
 export interface Building {
@@ -273,6 +282,8 @@ export interface Building {
   auto?: boolean;
   /** 自動開發建築所屬分區 */
   zone?: ZoneType;
+  /** 是否為開局已有的真實樓宇（issue #7；existing 建築可有人運作） */
+  existing?: boolean;
   /** 公用設施接駁狀態（由 sim/utilities.ts 每日更新；只作 UI／視覺） */
   powered?: boolean;
   watered?: boolean;
@@ -424,6 +435,53 @@ export interface UtilitySnapshot {
   waterQuality: number;
   /** 每月管線維護費（港幣） */
   pipeUpkeep: number;
+}
+
+// ─────────────────────────── 港鐵鐵路網（Round 6） ───────────────────────────
+
+export interface RailNetworkSnapshot {
+  /** worldRevision／railRevision 簽章 */
+  revision: number;
+  /** 各 grade 的軌道格數 */
+  gradeCounts: Record<RailGrade, number>;
+  totalLength: number;
+  /** 連通分量數 */
+  components: number;
+  /** 最大分量長度 */
+  largestComponent: number;
+  /** 全部 mtrStation 數 */
+  stations: number;
+  /** 已接駁鐵路軌（同分量有 2+ 站）的車站數 */
+  connectedStations: number;
+  /** 孤立（未接軌／單站）車站數 */
+  isolatedStations: number;
+  /** 鐵路網每日乘客 */
+  ridership: number;
+  /** 每月維護費 */
+  upkeep: number;
+}
+
+// ─────────────────────────── 內地邊境支援（Round 6） ───────────────────────────
+
+export type BorderCrossingKind = 'road' | 'rail';
+
+export interface BorderCrossingState {
+  name: string;
+  kind: BorderCrossingKind;
+  x: number;
+  y: number;
+  /** 是否有玩家道路／鐵路接駁到城市 */
+  connected: boolean;
+  buildingId: number;
+  foodPerDay: number;
+}
+
+export interface MainlandState {
+  roadLinks: number;
+  railLinks: number;
+  foodPerDay: number;
+  lastImportDay: number;
+  crossings: BorderCrossingState[];
 }
 
 // ─────────────────────────── 巴士／小巴路線（Round 5） ───────────────────────────
@@ -642,6 +700,12 @@ export interface GameStats {
   portThroughput?: number;
   /** 貿易設施每日收入（港幣，Round 5） */
   tradeRevenue?: number;
+  /** 鐵路網：已接駁車站數（Round 6） */
+  railStations?: number;
+  /** 鐵路網總長（格，Round 6） */
+  railLength?: number;
+  /** 內地糧食進口（每日，Round 6） */
+  mainlandFoodPerDay?: number;
 }
 
 export interface UIState {
@@ -703,6 +767,10 @@ export interface GameState {
   nextTransitLineId?: number;
   /** 機場／貨櫃碼頭營運狀態 */
   trade?: TradeState;
+  /** 港鐵鐵路網快照（每日重算） */
+  railNetwork?: RailNetworkSnapshot;
+  /** 內地邊境支援快照 */
+  mainland?: MainlandState;
   /** 開局模式（starter／empty） */
   gameMode: NewGameMode;
   /** 分區需求 -1..1（residential／commercial／industrial／farmland） */

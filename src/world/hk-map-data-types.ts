@@ -7,6 +7,7 @@
 export type MapLabelKind = 'district' | 'mountain' | 'water' | 'island' | 'landmark' | 'reservoir';
 export type MapLandmarkKind = 'peakTower' | 'buddha' | 'ferrisWheel' | 'clockTower' | 'convention' | 'bigBridge';
 export type MapRegionKind = 'skyline' | 'airport' | 'runway' | 'containerPort' | 'newTown';
+export type BorderCrossingKind = 'road' | 'rail';
 
 export interface MapData {
   format: 'hk-map-data-v1';
@@ -29,4 +30,19 @@ export interface MapData {
   tunnels: [string, number, number][];
   regions: [string, number, number, number, number, MapRegionKind][];
   spawn: { x: number; y: number };
+  /** 土地利用 class（0..92，600×600；來自規劃署 LUHK 2020）base64，每格 1 byte */
+  landuse?: string;
+  /** 道路 hint bit mask（每格 1 bit；來自 landuse 41/42）。
+   *  編碼：tile index i → byte i>>3、bit i&7（LSB-first）；byte array base64。 */
+  roadHint?: string;
+  /** 深圳河／邊境元資料（Issue #4） */
+  border?: {
+    riverWidthTiles?: number;
+    /** 深圳河中心線（96 設計座標；西→東） */
+    centerline?: [number, number][];
+  };
+  /** 深圳河及邊境通道（設計座標） */
+  borderCrossings?: { name: string; x: number; y: number; kind: BorderCrossingKind }[];
+  /** 深圳河多邊形（設計座標 ring；可供 render 畫河／邊界） */
+  shenzhenRiver?: [number, number][];
 }

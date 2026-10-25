@@ -307,3 +307,37 @@ interiors-dev 共用材質庫而不互相覆寫）。Lead 在開發中途同步�
 - 手機 `mobile-test.mjs`：**17 / 17**；桌面 UI `ui-click-test.mjs`：**21 / 21**
 - 線上部署：GitHub push 後 Cloudflare Workers Builds 自動部署（詳見 README 網址）
 - 截圖：`docs/screenshots/`（600 overview、東區、水塘、機場、碼頭、地下管網、路線、公用面板、貿易面板、mobile）
+
+---
+
+# 第六輪改版：處理 GitHub issues #1–#8（Round 6）
+
+> 玩家要求：讀取並處理 `fungkingfai/hksimcity` 全部 issues、更新版本、建立 git 版本 tag。
+> 日期：2026-10-25。版本：**GAME_VERSION 7／package 0.7.0／git tag v0.7.0**。
+
+## R6.1 Issue 對應與處理
+
+| Issue | 問題 | 實作 |
+|---|---|---|
+| **#8** | 手機版無法開始遊戲 | 開局畫面重構：`.ss-frame` flex column、內容 `.ss-scroll` 可滾動、**「開始規劃」CTA 固定 footer（100dvh + safe-area）**；iPhone 13 390×664 實測 CTA 永遠可見可點；seed 區改 `<details>`；手機資訊密度降低 |
+| **#1** | 電車站只限港島 | 移除 `placement.ts` 港島 region 檢查；任何貼路可建地都可建電車站；UI/help 文案清理 |
+| **#2** | 貨櫃碼頭只限葵涌 | 移除 `containerPort`／`portGate`／`portYard` 的 `requiredRegion`；任何臨水＋貼路可建；葵涌只保留吞吐加成（off-region ×0.9）；UI 文案更新 |
+| **#3** | 三條道路通往南中國海 | `worldgen.ts` 隧道生成限定喺維港水域（design y 48–64）、兩端必須陸地、長度 3–60；實測只剩 3 條真實過海隧道（334–369），冇外海道路 |
+| **#4** | 深圳河及道路連接 | generator 加入 **深圳河 616 water tiles**＋北岸合成深圳市區（23,812 tiles）；**4 個邊境通道**（羅湖 rail、落馬洲/文錦渡/沙頭角 road）；starter 自動放置 4 個口岸並接駁主道路（components=1）；render 海岸過渡／低對比 |
+| **#5** | 港鐵地下／地上鐵路規劃 | 新增 `Tile.rail` 三 grade（surface/elevated/underground）＋`sim/rail.ts`（造價/地形/跨海、BFS 鐵路網、接駁站、孤立站 ×0.35、乘客/收入/維護/颱風）；`rail:*` 工具＋`U` 圖層；render 軌道（surface 枕木鋼軌／elevated 橋柱／underground 黃色隧道）＋3 卡 MTR 列車；save v7 `railEdits` |
+| **#6** | 內地公路／鐵路糧食支援 | `sim/mainland.ts`：道路口岸 60 food/日、鐵路口岸 120/日；接駁道路/鐵路 component >20 判定；食物依次入倉庫/市場/餐廳，滿倉 pending 翌日；天氣係數；weather/log/stats；貿易面板「內地供應」 |
+| **#7** | starter 現有樓群應為真建築非裝飾 | generator 加 `landuse`／`roadHint`；`existing-city.ts` 由真實土地用途＋道路＋密度生成 **572 棟 existing 真 `Building`**（住宅/商業/工業/農地，1–2×1–2、level、existing:true）＋**60 座現有公共設施**；道路以 main component 合併（**components=1、100% 連通**）；seed 400 現有居民；faux skyline 停用；render 距離 LOD（遠景有高度深色 box、近景完整模型），draw 1160→83 overview、tris 1.98M；選中/info 保留 |
+
+## R6.2 版本／存檔
+
+- `GAME_VERSION` **6 → 7**；`package.json` **0.7.0**。
+- compact 存檔新增 `railEdits`（tileIndex + grade code）；`tileEdits` 保留道路/行人路/分區/管道；hydrate 後 `state.railNetwork` 重算。
+- 同尺寸 v6 存檔可升級（rail/border/mainland 預設空，world data 會重生）；舊 96／304／480 存檔仍拒絕。
+
+## R6.3 驗收（Round 6）
+
+- `npx tsc --noEmit`：**0 error**；`npm test`：**89 / 89**（7 files，新增 rail 18、mainland 7、round6 3）；`npm run build` 成功。
+- Playwright `verify-hk.mjs`：**36 / 36 checks**，starter 現有樓群/口岸/內地糧食、鐵路工具、管網、巴士線、貿易、天氣、室內、v7 存檔；render **322 draws／2.03M tris**（after verification city）。
+- 手機 `mobile-test.mjs`：**17 / 17**；桌面 UI `ui-click-test.mjs`：**21 / 21**（最終回歸）。
+- 版本 tag：`v0.7.0`；GitHub push 後 Cloudflare Workers Builds 自動部署。
+- 截圖：`docs/screenshots/` 更新（existing 真樓 overview/central、rail surface/elevated/underground、rail ghost、深圳河／口岸、MTR 列車、U 層、empty）。

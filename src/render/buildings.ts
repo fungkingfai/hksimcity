@@ -30,7 +30,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 
 export interface BuildingsView {
   group: THREE.Group;
-  update(state: GameState, dt: number): void;
+  update(state: GameState, dt: number, camera?: THREE.Camera | null, cameraDistance?: number): void;
   setPreview(state: GameState, tool: string | null, hover: number, valid: boolean): void;
   dispose(): void;
 }
@@ -85,6 +85,13 @@ interface BuildingInstance {
   /** 夜間地面暖光暈（每棟 1 個 mesh，白天隱藏，不增加白天 draw call） */
   glow: THREE.Mesh | null;
   yaw: number;
+  /** 建築模型高度（世界單位；LOD box 用） */
+  height: number;
+  /** LOD 顏色（按建築類別） */
+  lodColor: THREE.Color;
+  /** LOD box 佔地（世界單位） */
+  footprintW: number;
+  footprintD: number;
 }
 
 interface GlowSpec {
@@ -248,9 +255,87 @@ function glowSpecFor(key: string, variant: number): GlowSpec {
       return { color: 0xffd166, opacity: 0.7, scale: 1.05 };
     case 'portYard':
       return { color: 0x7fd6ff, opacity: 0.55, scale: 1.3 };
+    // ── Round 6：邊境口岸 ──
+    case 'roadBorderGate':
+      return { color: 0xffd166, opacity: 0.7, scale: 1.35 };
+    case 'railBorderGate':
+      return { color: 0x7fd6ff, opacity: 0.55, scale: 1.3 };
     default:
       return { color: 0xffc07a, opacity: 0.5, scale: 1.0 };
   }
+}
+
+/**
+ * 遠距離 LOD 顏色：低飽和、深灰藍／米灰／褐灰，避免 pastel 色塊。
+ * 近景仍然用正式模型；LOD 只喺 >=LOD 半徑使用。
+ */
+function lodColorFor(key: string, id: number): THREE.Color {
+  let hex = 0x6b665c;
+  switch (key) {
+    case 'tongLau':
+    case 'subdividedFlat':
+      hex = 0x6f675c;
+      break;
+    case 'publicHousing':
+    case 'hOSFlat':
+      hex = 0x827a6d;
+      break;
+    case 'privateEstate':
+    case 'luxuryTower':
+      hex = 0x647078;
+      break;
+    case 'officeTower':
+    case 'shoppingMall':
+      hex = 0x4f5a64;
+      break;
+    case 'convenienceStore':
+    case 'chaChaanTeng':
+    case 'restaurant':
+    case 'wetMarket':
+    case 'supermarket':
+      hex = 0x6d5c50;
+      break;
+    case 'industrialBuilding':
+    case 'foodFactory':
+      hex = 0x5f6058;
+      break;
+    case 'warehouse':
+    case 'importFirm':
+      hex = 0x666459;
+      break;
+    case 'farm':
+      hex = 0x596347;
+      break;
+    case 'school':
+    case 'hospital':
+    case 'policeStation':
+    case 'fireStation':
+    case 'mtrStation':
+    case 'busTerminus':
+      hex = 0x6b747c;
+      break;
+    case 'park':
+    case 'promenade':
+      hex = 0x4f634a;
+      break;
+    case 'roadBorderGate':
+    case 'railBorderGate':
+      hex = 0x7a6b4d;
+      break;
+    case 'containerPort':
+    case 'portGate':
+    case 'portYard':
+    case 'airportTerminal':
+    case 'airCargoTerminal':
+      hex = 0x5d6670;
+      break;
+    default:
+      hex = 0x6b665c;
+  }
+  const c = new THREE.Color(hex);
+  const v = 0.86 + ((id * 2654435761) % 1000) / 1000 * 0.22;
+  c.multiplyScalar(v);
+  return c;
 }
 
 // ─────────────────────────── 視圖 ───────────────────────────
@@ -422,6 +507,14 @@ export function createBuildingsView(state: GameState): BuildingsView {
   const addBuilding = (s: GameState, building: Building): void => {
     const proto = factory.get(building.key, building.id);
     const model = proto.root.clone(true);
+    // 量度模型高度（LOD box 用；喺設定 position/rotation 之前量）
+    let modelHeight = 2;
+    try {
+      const box = new THREE.Box3().setFromObject(model);
+      modelHeight = Math.max(1.2, box.max.y);
+    } catch {
+      /* 量度失敗用 default */
+    }
     const center = buildingWorldCenter(s, building);
     model.position.set(center.x, GROUND_Y, center.z);
     const yaw = buildingYaw(s, building.key, building.x, building.y, building.w, building.h);
@@ -457,6 +550,10 @@ export function createBuildingsView(state: GameState): BuildingsView {
       parts: collectAnimParts(model, building),
       glow,
       yaw,
+      height: modelHeight,
+      lodColor: lodColorFor(building.key, building.id),
+      footprintW: proto.footprintW,
+      footprintD: proto.footprintD,
     });
   };
 
@@ -469,13 +566,164 @@ export function createBuildingsView(state: GameState): BuildingsView {
 
   const sync = (s: GameState): void => {
     const seen = new Set<number>();
+    let structural = false;
     for (const b of s.buildings) {
       seen.add(b.id);
-      if (!instances.has(b.id)) addBuilding(s, b);
+      if (!instances.has(b.id)) {
+        addBuilding(s, b);
+        structural = true;
+      }
     }
     for (const id of [...instances.keys()]) {
-      if (!seen.has(id)) removeBuilding(id);
+      if (!seen.has(id)) {
+        removeBuilding(id);
+        structural = true;
+      }
     }
+    if (structural) rebuildLod(s);
+    else if (lodCount !== instances.size) rebuildLod(s);
+  };
+
+  // ── 遠距離 LOD：所有建築用單一 InstancedMesh 畫遠景簡化樓（1 draw） ──
+  const LOD_DISTANCE = 140; // 世界單位；此距離內用正常模型，以外用 LOD 簡化樓
+  // LOD 幾何：主樓身 + 退台 + 屋頂，總高度 1（之後每棟 scale y = 真實高度）。
+  // 用 vertexColors 畫橫向窗帶／深色屋頂，令遠景仍然似樓宇而非平面色塊。
+  const lodGeo = (() => {
+    const body = new THREE.BoxGeometry(1, 0.74, 1);
+    body.translate(0, 0.37, 0);
+    const setback = new THREE.BoxGeometry(0.76, 0.18, 0.76);
+    setback.translate(0, 0.83, 0);
+    const roof = new THREE.BoxGeometry(0.84, 0.05, 0.84);
+    roof.translate(0, 0.955, 0);
+    const merged = mergeGeometries([body, setback, roof], false) ?? body;
+    body.dispose();
+    setback.dispose();
+    roof.dispose();
+    const pos = merged.getAttribute('position') as THREE.BufferAttribute;
+    const colors = new Float32Array(pos.count * 3);
+    for (let i = 0; i < pos.count; i++) {
+      const yy = pos.getY(i);
+      let shade: number;
+      if (yy > 0.9) shade = 0.58;
+      else if (yy > 0.74) shade = 0.9;
+      else {
+        const band = Math.floor(yy / 0.16) % 2 === 0 ? 1.0 : 0.8;
+        const bottom = 0.82 + yy * 0.2;
+        shade = band * bottom;
+      }
+      colors[i * 3] = shade;
+      colors[i * 3 + 1] = shade;
+      colors[i * 3 + 2] = shade;
+    }
+    merged.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    return merged;
+  })();
+  const lodMat = lib.own(
+    new THREE.MeshBasicMaterial({ color: 0xffffff, vertexColors: true, fog: true, toneMapped: false }),
+  ) as THREE.MeshBasicMaterial;
+  let lodMesh: THREE.InstancedMesh | null = null;
+  let lodCapacity = 0;
+  const lodIndex = new Map<number, number>();
+  const lodIds: number[] = [];
+  /** 每個 instance 上一幀狀態：0=unknown、1=near（scale 0）、2=far（顯示 box） */
+  const lodMask = new Uint8Array(0);
+  let lodMaskArr = new Uint8Array(0);
+  let lodDirty = true;
+  let lastLodCam = new THREE.Vector3(Number.POSITIVE_INFINITY, 0, 0);
+  let lodCount = 0;
+
+  const ensureLodCapacity = (need: number): void => {
+    if (lodMesh && need <= lodCapacity) return;
+    const capacity = Math.max(768, Math.ceil(need * 1.35));
+    const next = new THREE.InstancedMesh(lodGeo, lodMat, capacity);
+    next.name = 'buildings-lod';
+    next.frustumCulled = false;
+    next.count = 0;
+    next.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    next.raycast = () => {
+      /* LOD 只用視覺；點選用地面 raycast，不參與 */
+    };
+    if (lodMesh) {
+      group.remove(lodMesh);
+      lodMesh.dispose();
+    }
+    lodMesh = next;
+    lodCapacity = capacity;
+    lodIndex.clear();
+    lodIds.length = 0;
+    lodMaskArr = new Uint8Array(capacity);
+    lodCount = 0;
+    lodDirty = true;
+    group.add(next);
+  };
+
+  const rebuildLod = (s: GameState): void => {
+    ensureLodCapacity(instances.size);
+    if (!lodMesh) return;
+    lodIndex.clear();
+    lodIds.length = 0;
+    let idx = 0;
+    for (const inst of instances.values()) {
+      lodIndex.set(inst.id, idx);
+      lodIds.push(inst.id);
+      lodMesh.setColorAt(idx, inst.lodColor);
+      idx++;
+    }
+    lodCount = idx;
+    lodMesh.count = idx;
+    lodMesh.userData.buildingIds = lodIds.slice();
+    if (lodMesh.instanceColor) lodMesh.instanceColor.needsUpdate = true;
+    // 初始全部當 near（等待第一次 syncLod 決定）
+    for (let i = 0; i < lodCount; i++) lodMaskArr[i] = 0;
+    lodDirty = true;
+    void s;
+  };
+
+  const syncLod = (s: GameState, camera?: THREE.Camera | null, nearRadius = LOD_DISTANCE): void => {
+    if (!lodMesh || lodCount === 0) return;
+    const camPos = camera ? camera.getWorldPosition(new THREE.Vector3()) : lastLodCam;
+    const selectedId = s.ui.selectedId ?? -1;
+    const thresholdSq = nearRadius * nearRadius;
+    const m = new THREE.Matrix4();
+    const pos = new THREE.Vector3();
+    const quat = new THREE.Quaternion();
+    const scale = new THREE.Vector3();
+    const zero = new THREE.Vector3(0, 0, 0);
+    const axisY = new THREE.Vector3(0, 1, 0);
+    let wrote = false;
+    for (const inst of instances.values()) {
+      const idx = lodIndex.get(inst.id);
+      if (idx == null) continue;
+      pos.copy(inst.group.position);
+      const near = !camera || inst.id === selectedId || pos.distanceToSquared(camPos) <= thresholdSq;
+      if (near) {
+        if (lodMaskArr[idx] !== 1) {
+          m.compose(pos, quat, zero);
+          lodMesh.setMatrixAt(idx, m);
+          lodMaskArr[idx] = 1;
+          wrote = true;
+        }
+        inst.group.visible = true;
+      } else {
+        if (lodMaskArr[idx] !== 2) {
+          quat.setFromAxisAngle(axisY, inst.yaw);
+          // 收窄 footprint 令每棟分得開；高度由原型 bbox 量出（clamp 1.6–8 world units）
+          const hw = Math.max(1.15, inst.footprintW * 0.56);
+          const hd = Math.max(1.15, inst.footprintD * 0.56);
+          const hh = Math.max(1.6, Math.min(8, inst.height * 0.92));
+          scale.set(hw, hh, hd);
+          m.compose(inst.group.position, quat, scale);
+          lodMesh.setMatrixAt(idx, m);
+          lodMaskArr[idx] = 2;
+          wrote = true;
+        }
+        inst.group.visible = false;
+      }
+      if (inst.glow) inst.glow.visible = near && nightMode;
+    }
+    if (wrote) lodMesh.instanceMatrix.needsUpdate = true;
+    lastLodCam.copy(camPos);
+    lodDirty = false;
   };
 
   sync(state);
@@ -632,6 +880,13 @@ export function createBuildingsView(state: GameState): BuildingsView {
     if (sig === lastPreviewSig) return;
     lastPreviewSig = sig;
 
+    if (tool && tool.startsWith('rail:')) {
+      ghostLayer.visible = false;
+      clearGhost();
+      hidePad();
+      return;
+    }
+
     if (!tool || hover < 0 || hover >= s.tiles.length || s.ui.mode !== 'city') {
       ghostLayer.visible = false;
       clearGhost();
@@ -682,18 +937,30 @@ export function createBuildingsView(state: GameState): BuildingsView {
   return {
     group,
 
-    update(s: GameState, dt: number): void {
+    update(s: GameState, dt: number, camera?: THREE.Camera | null, cameraDistance?: number): void {
       elapsed += Math.min(0.1, dt);
       applyNightMode(isNightClock(s.clock));
       sync(s);
+      // 近景 LOD 半徑跟隨 zoom：拉近先顯示完整模型；overview 全部用 LOD box。
+      const nearRadius = cameraDistance != null ? Math.max(85, Math.min(240, cameraDistance * 1.05)) : LOD_DISTANCE;
+      syncLod(s, camera, nearRadius);
       const wind = windFor(s);
-      for (const inst of instances.values()) animateParts(inst, wind);
+      for (const inst of instances.values()) {
+        if (!inst.group.visible) continue;
+        animateParts(inst, wind);
+      }
     },
 
     setPreview,
 
     dispose(): void {
       for (const id of [...instances.keys()]) removeBuilding(id);
+      if (lodMesh) {
+        group.remove(lodMesh);
+        lodMesh.dispose();
+        lodMesh = null;
+      }
+      lodGeo.dispose();
       factory.dispose();
       ghostCache.clear();
       for (const entry of padCache.values()) {

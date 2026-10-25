@@ -281,6 +281,7 @@ export function createInfoPanel(container: HTMLElement, store: GameStore, action
             <b class="hero-city" data-k="cityName">維港之城</b>
             <span class="hero-date" data-k="date"></span>
             <span class="hero-map" data-k="mapSize"></span>
+            <span class="hero-existing" data-k="existingCount" hidden></span>
             <div class="hero-quick">
               <button type="button" data-act="hero-utility" title="公用設施面板">${ico('gauge')}公用</button>
               <button type="button" data-act="hero-trade" title="機場／碼頭貿易（Y）">${ico('plane')}貿易</button>
@@ -303,7 +304,7 @@ export function createInfoPanel(container: HTMLElement, store: GameStore, action
           <div class="stat-card"><span>就業</span><b data-k="employed">0</b><small data-k="jobs">職位 0</small></div>
           <div class="stat-card"><span>失業</span><b data-k="unemployed">0</b><small>待業市民</small></div>
           <div class="stat-card"><span>無家</span><b data-k="homeless">0</b><small>露宿人口</small></div>
-          <div class="stat-card wide"><span>食品</span><b data-k="food">0</b><small data-k="foodRate">日耗 0</small></div>
+          <div class="stat-card wide"><span>食品</span><b data-k="food">0</b><small data-k="foodRate">日耗 0</small><small class="food-mainland" data-k="mainlandFood"></small></div>
           <div class="stat-card"><span>物流在途</span><b data-k="transit">0</b><small>貨運單位</small></div>
         </div>
 
@@ -357,6 +358,8 @@ export function createInfoPanel(container: HTMLElement, store: GameStore, action
   const cityNameEl = qs<HTMLElement>(root, '[data-k="cityName"]')!;
   const dateEl = qs<HTMLElement>(root, '[data-k="date"]')!;
   const mapSizeEl = qs<HTMLElement>(root, '[data-k="mapSize"]')!;
+  const existingCountEl = qs<HTMLElement>(root, '[data-k="existingCount"]')!;
+  const mainlandFoodEl = qs<HTMLElement>(root, '[data-k="mainlandFood"]')!;
   const dialEl = qs<HTMLElement>(root, '[data-k="dial"]')!;
   const happyBigEl = qs<HTMLElement>(root, '[data-k="happyBig"]')!;
   const popEl = qs<HTMLElement>(root, '[data-k="pop"]')!;
@@ -457,6 +460,8 @@ export function createInfoPanel(container: HTMLElement, store: GameStore, action
   // ── 概況（逐幀更新，全部先比對） ──
   let lastCity = '';
   let lastDate = '';
+  let lastExistingCount = -1;
+  let lastMainlandFood = -1;
   let lastHappy = Number.NaN;
   let lastTone = '';
   let lastResSig = '';
@@ -579,6 +584,18 @@ export function createInfoPanel(container: HTMLElement, store: GameStore, action
         state.gameMode === 'starter' ? ' · 已有城鎮' : ' · 由零開始'
       }`,
     );
+    const existingCount = state.buildings.reduce((count, building) => (building.existing ? count + 1 : count), 0);
+    if (existingCount !== lastExistingCount) {
+      lastExistingCount = existingCount;
+      setHidden(existingCountEl, existingCount === 0);
+      setText(existingCountEl, `現有樓宇 ${num(existingCount)} 棟（可拆卸）`);
+    }
+    const mainlandFood = Math.round(state.stats.mainlandFoodPerDay ?? state.mainland?.foodPerDay ?? 0);
+    if (mainlandFood !== lastMainlandFood) {
+      lastMainlandFood = mainlandFood;
+      setHidden(mainlandFoodEl, mainlandFood <= 0);
+      setText(mainlandFoodEl, `內地支援 +${num(mainlandFood)}/日`);
+    }
 
     const happiness = Math.round(stats.happiness);
     const tone = happinessTone(happiness);
@@ -729,6 +746,7 @@ export function createInfoPanel(container: HTMLElement, store: GameStore, action
     return [
       b.id,
       def.key,
+      b.existing ? 1 : 0,
       b.connected ? 1 : 0,
       b.active ? 1 : 0,
       b.level,
@@ -759,6 +777,9 @@ export function createInfoPanel(container: HTMLElement, store: GameStore, action
       status.push(`<span class="pill ${b.active ? 'ok' : 'warn'}">${b.active ? '營運中' : '停擺'}</span>`);
     }
     if (b.level > 1) status.push(`<span class="pill">第 ${b.level} 級</span>`);
+    if (b.existing) {
+      status.push('<span class="pill existing">現有樓宇</span>');
+    }
     if (b.auto || b.zone) {
       const zoneDef = b.zone ? ZONES[b.zone] : null;
       status.push(
@@ -816,6 +837,11 @@ export function createInfoPanel(container: HTMLElement, store: GameStore, action
         </div>
       </div>
       <p class="sel-desc">${esc(def.desc)}</p>
+      ${
+        b.existing
+          ? `<p class="sel-existing-note">${ico('info')}開局已有的真實樓宇：已有居民／員工運作，可拆卸（退還 0%）；重建後會變成新樓。</p>`
+          : ''
+      }
       <div class="status-row">${status.join('')}</div>
       ${progress}
       <div class="section-label">庫存</div>

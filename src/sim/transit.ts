@@ -27,7 +27,14 @@
  * 座標：建築中心 = (x + w/2, y + h/2)，半徑以格為單位（歐氏距離）。
  */
 
-import { BUILDINGS, TRANSIT_INFO, TRANSIT_LINE_CONFIG, TRANSIT_SPEED, WEATHER_EFFECT } from '../core/config';
+import {
+  BUILDINGS,
+  RAIL_CONFIG,
+  TRANSIT_INFO,
+  TRANSIT_LINE_CONFIG,
+  TRANSIT_SPEED,
+  WEATHER_EFFECT,
+} from '../core/config';
 import type {
   Building,
   GameState,
@@ -39,6 +46,8 @@ import type {
 } from '../core/types';
 import { pickCommuteMode } from './citizen-common';
 import { findPathBetweenBuildings, roadAccessTiles } from './pathfinding';
+import { worldRevisionOf } from './placement';
+import { computeRailNetwork, getRailStats, tickRail, type RailTickSummary } from './rail';
 
 // pickCommuteMode 由 citizens-dev 擁有（市民通勤用），在此 re-export 方便 UI／測試／其他模組引用。
 export { pickCommuteMode };
@@ -73,6 +82,9 @@ const CONCESSION_RATIO = 0.9;
 /** 站點容量不足時，覆蓋率最多打 6 折（容量足夠則 100%） */
 const MIN_CAPACITY_COVERAGE_DISCOUNT = 0.6;
 
+/** Round 6：有鐵路網時，舊 mtr 半徑玩法只保留 30%（其餘由 tickRail 提供，避免 double count） */
+const RAIL_LEGACY_MTR_SHARE = 0.3;
+
 /** 模式對天氣的敏感度：颱風時港鐵地下段大致維持，路面／渡輪大受影響 */
 function modeWeatherFactor(mode: TransitMode, state: GameState): number {
   const transitFactor = WEATHER_EFFECT[state.clock.weather]?.transit ?? 1;
@@ -87,7 +99,7 @@ function modeWeatherFactor(mode: TransitMode, state: GameState): number {
 
 /** 覆蓋率快取簽章（避免每幀重算；UI 每幀查詢亦可接受） */
 function coverageKey(state: GameState): string {
-  return `${state.buildings.length}:${state.ui.revision}:${state.clock.totalDays}:${state.citizens.length}`;
+  return `${state.buildings.length}:${state.ui.revision}:${worldRevisionOf()}:${state.clock.totalDays}:${state.citizens.length}`;
 }
 
 function clamp(v: number, min: number, max: number): number {
@@ -263,28 +275,35 @@ interface StationSpec {
   r2: number;
   capacity: number;
   fare: number;
+  /** 覆蓋權重 0..1（Round 6：未接駁鐵路嘅 mtrStation 用 RAIL_CONFIG.isolatedStationCoverage 打折） */
+  weight?: number;
 }
 
-/** 把一批站點標記到住宅／就業點陣列（用 Uint8Array 去重） */
+/**
+ * 把一批站點標記到住宅／就業點陣列（Float32Array 記錄最大覆蓋權重，可做局部折扣）。
+ * 同一點被多個站覆蓋時取最大權重（例如接駁站 1.0 vs 孤立站 0.35）。
+ */
 function markServedSpecs(
   specs: StationSpec[],
   homes: PopulationPoint[],
   jobs: PopulationPoint[],
-  servedHome: Uint8Array,
-  servedJob: Uint8Array,
+  servedHome: Float32Array,
+  servedJob: Float32Array,
 ): void {
   for (const spec of specs) {
+    const weight = spec.weight ?? 1;
+    if (weight <= 0) continue;
     for (let i = 0; i < homes.length; i++) {
-      if (servedHome[i]) continue;
+      if (servedHome[i] >= weight) continue;
       const dx = homes[i].x - spec.x;
       const dy = homes[i].y - spec.y;
-      if (dx * dx + dy * dy <= spec.r2) servedHome[i] = 1;
+      if (dx * dx + dy * dy <= spec.r2) servedHome[i] = weight;
     }
     for (let i = 0; i < jobs.length; i++) {
-      if (servedJob[i]) continue;
+      if (servedJob[i] >= weight) continue;
       const dx = jobs[i].x - spec.x;
       const dy = jobs[i].y - spec.y;
-      if (dx * dx + dy * dy <= spec.r2) servedJob[i] = 1;
+      if (dx * dx + dy * dy <= spec.r2) servedJob[i] = weight;
     }
   }
 }
@@ -311,13 +330,18 @@ export function computeTransitCoverage(state: GameState, force = false): Transit
   const { homes, jobs, totalResidents, totalWorkers } = populationPoints(state);
   const modes: ModeCoverage[] = [];
   // 任一模式可達的住宅／就業人口（用於整體覆蓋率）
-  const coveredHomes = new Uint8Array(homes.length);
-  const coveredJobs = new Uint8Array(jobs.length);
+  const coveredHomes = new Float32Array(homes.length);
+  const coveredJobs = new Float32Array(jobs.length);
   let totalCapacity = 0;
 
+  // Round 6：鐵路網接駁狀態（有 rail 時，未接駁 mtrStation 覆蓋率打折）
+  const railNetwork = computeRailNetwork(state);
+  const hasRail = railNetwork.length > 0;
+  const railConnectedStationIds = new Set(railNetwork.connectedStationIds);
+
   for (const mode of TRANSIT_MODES) {
-    const servedHome = new Uint8Array(homes.length);
-    const servedJob = new Uint8Array(jobs.length);
+    const servedHome = new Float32Array(homes.length);
+    const servedJob = new Float32Array(jobs.length);
 
     // 舊玩法：交通建築本身的 radius／capacity（bus 為巴士總站；tram/mtr/ferry 不變）
     const legacySpecs: StationSpec[] = [];
@@ -326,19 +350,25 @@ export function computeTransitCoverage(state: GameState, force = false): Transit
       const transit = BUILDINGS[station.key]?.transit;
       if (!transit) continue;
       const center = buildingCenter(station);
+      let weight = 1;
+      if (mode === 'mtr' && hasRail && !railConnectedStationIds.has(station.id)) {
+        // 未接駁鐵路網：舊半徑玩法仍運作，但覆蓋率打折（RAIL_CONFIG.isolatedStationCoverage）
+        weight = RAIL_CONFIG.isolatedStationCoverage;
+      }
       legacySpecs.push({
         x: center.x,
         y: center.y,
         r2: transit.radius * transit.radius,
         capacity: transit.capacity,
         fare: transit.fare,
+        weight,
       });
     }
     markServedSpecs(legacySpecs, homes, jobs, servedHome, servedJob);
     let legacyResidentsServed = 0;
     let legacyWorkersServed = 0;
-    for (let i = 0; i < homes.length; i++) if (servedHome[i]) legacyResidentsServed += homes[i].weight;
-    for (let i = 0; i < jobs.length; i++) if (servedJob[i]) legacyWorkersServed += jobs[i].weight;
+    for (let i = 0; i < homes.length; i++) if (servedHome[i] > 0) legacyResidentsServed += homes[i].weight * servedHome[i];
+    for (let i = 0; i < jobs.length; i++) if (servedJob[i] > 0) legacyWorkersServed += jobs[i].weight * servedJob[i];
     let legacyCapacity = 0;
     let legacyFareWeight = 0;
     let legacyFareSum = 0;
@@ -392,11 +422,11 @@ export function computeTransitCoverage(state: GameState, force = false): Transit
     const stationCount = legacySpecs.length + lineSpecs.length;
 
     let residentsServed = 0;
-    for (let i = 0; i < homes.length; i++) if (servedHome[i]) residentsServed += homes[i].weight;
+    for (let i = 0; i < homes.length; i++) if (servedHome[i] > 0) residentsServed += homes[i].weight * servedHome[i];
     let workersServed = 0;
-    for (let i = 0; i < jobs.length; i++) if (servedJob[i]) workersServed += jobs[i].weight;
-    for (let i = 0; i < homes.length; i++) if (servedHome[i]) coveredHomes[i] = 1;
-    for (let i = 0; i < jobs.length; i++) if (servedJob[i]) coveredJobs[i] = 1;
+    for (let i = 0; i < jobs.length; i++) if (servedJob[i] > 0) workersServed += jobs[i].weight * servedJob[i];
+    for (let i = 0; i < homes.length; i++) coveredHomes[i] = Math.max(coveredHomes[i], servedHome[i]);
+    for (let i = 0; i < jobs.length; i++) coveredJobs[i] = Math.max(coveredJobs[i], servedJob[i]);
     totalCapacity += capacity;
 
     const residentialCoverage = totalResidents > 0 ? clamp(residentsServed / totalResidents, 0, 1) : 0;
@@ -439,11 +469,11 @@ export function computeTransitCoverage(state: GameState, force = false): Transit
   let servedResidents = 0;
   let servedWorkers = 0;
   if (homes.length > 0) {
-    for (let i = 0; i < homes.length; i++) if (coveredHomes[i]) servedResidents += homes[i].weight;
+    for (let i = 0; i < homes.length; i++) if (coveredHomes[i] > 0) servedResidents += homes[i].weight * coveredHomes[i];
     residentialOverall = totalResidents > 0 ? clamp(servedResidents / totalResidents, 0, 1) : 0;
   }
   if (jobs.length > 0) {
-    for (let i = 0; i < jobs.length; i++) if (coveredJobs[i]) servedWorkers += jobs[i].weight;
+    for (let i = 0; i < jobs.length; i++) if (coveredJobs[i] > 0) servedWorkers += jobs[i].weight * coveredJobs[i];
     employmentOverall = totalWorkers > 0 ? clamp(servedWorkers / totalWorkers, 0, 1) : 0;
   }
   const overallProximity = totalWorkers > 0 ? employmentOverall : residentialOverall;
@@ -560,9 +590,11 @@ function averageCommuteDistance(state: GameState): number {
 export function tickTransit(state: GameState, ctx: SimContext): void {
   const rt = runtimeOf(state);
   const { clock, transit, finance, stats } = state;
-  // Round 5：先結算巴士／小巴路線（同日 idempotent；main/simulation 之後再加呼叫都安全）
+  // Round 5／6：先結算巴士小巴路線＋鐵路（兩者同日 idempotent；simulation 之後再加呼叫都安全）
   const lineSummary = tickTransitLines(state, ctx);
   const linesActive = lineSummary.activeLines > 0;
+  const railTick = tickRail(state, ctx);
+  const railActive = railTick.connectedStations > 0 && railTick.length > 0;
   const coverage = computeTransitCoverage(state, true);
   const stormy = clock.weather === 'storm';
   const wasSuspended = transit.suspended;
@@ -598,8 +630,10 @@ export function tickTransit(state: GameState, ctx: SimContext): void {
   const weatherFactors: Record<TransitMode, number> = { mtr: 1, bus: 1, tram: 1, ferry: 1 };
   let potentialSum = 0;
   for (const mode of TRANSIT_MODES) {
-    // 有路線營運時，bus 由 tickTransitLines 單獨結算（下面 override），唔參與按比例分配
+    // 有路線營運時，bus 由 tickTransitLines 單獨結算；有鐵路網時 mtr 由 tickRail 結算
+    // （兩者下面 override），唔參與按比例分配，避免 double count
     if (mode === 'bus' && linesActive) continue;
+    if (mode === 'mtr' && railActive) continue;
     const modeCoverage = coverage.modes.find((m) => m.mode === mode);
     if (!modeCoverage || modeCoverage.stations === 0 || modeCoverage.capacity <= 0) continue;
     const weatherFactor = modeWeatherFactor(mode, state);
@@ -658,14 +692,37 @@ export function tickTransit(state: GameState, ctx: SimContext): void {
       lineSummary.fares + keptLegacy * (busEntry?.legacyFare ?? 5) * CONCESSION_RATIO,
     );
   }
+  // ── Round 6：有鐵路網時，mtr 模式 = 鐵路網載客 + 舊站點半徑 30%（避免 double count） ──
+  let mtrFareOverride: number | null = null;
+  if (railActive) {
+    const mtrEntry = coverage.modes.find((m) => m.mode === 'mtr');
+    const legacyResidents = mtrEntry?.legacyResidentsServed ?? 0;
+    const legacyWorkers = mtrEntry?.legacyWorkersServed ?? 0;
+    const legacyWeather = Math.max(0, modeWeatherFactor('mtr', state));
+    const legacyMtrRides = Math.round(
+      Math.min(legacyResidents, legacyWorkers) * participation * TRIPS_PER_COMMUTER * legacyWeather,
+    );
+    const keptLegacy = Math.round(legacyMtrRides * RAIL_LEGACY_MTR_SHARE);
+    dailyByMode.mtr = railTick.ridership + keptLegacy;
+    loadByMode.mtr =
+      mtrEntry && mtrEntry.capacity > 0 ? clamp(dailyByMode.mtr / mtrEntry.capacity, 0, 1) : 0;
+    mtrFareOverride = Math.round(
+      railTick.fares + keptLegacy * (mtrEntry?.legacyFare ?? 8) * CONCESSION_RATIO,
+    );
+  }
   for (const mode of TRANSIT_MODES) totalTrips += dailyByMode[mode];
 
   // ── 車費收入入帳（本模組負責；finance.ts 不可重複計算；faresThisMonth 清零交給 systems-dev） ──
   let faresToday = 0;
   for (const mode of TRANSIT_MODES) {
-    // bus：路線收入已於 tickTransitLines 入帳，呢度只補舊站點半徑部分（避免 double count）
+    // bus／mtr：路線／鐵路收入已於 tickTransitLines／tickRail 入帳，
+    // 呢度只補舊站點半徑部分（避免 double count）
     if (mode === 'bus' && busFareOverride !== null) {
       faresToday += busFareOverride;
+      continue;
+    }
+    if (mode === 'mtr' && mtrFareOverride !== null) {
+      faresToday += mtrFareOverride;
       continue;
     }
     const fare = coverage.modes.find((m) => m.mode === mode)?.fare ?? 0;
@@ -1481,6 +1538,16 @@ export interface TransitStats {
     costs: number;
     profit: number;
   };
+  /** Round 6：鐵路網摘要（交通面板用；cached，每幀成本低） */
+  rail?: {
+    length: number;
+    gradeCounts: { surface: number; elevated: number; underground: number };
+    connectedStations: number;
+    isolatedStations: number;
+    ridership: number;
+    capacity: number;
+    upkeepMonthly: number;
+  };
 }
 
 /** 給 UI 的交通統計（每幀可呼叫；覆蓋率有快取） */
@@ -1535,6 +1602,18 @@ export function getTransitStats(state: GameState): TransitStats {
         revenue: lineStats.totalRevenue,
         costs: lineStats.totalCost,
         profit: lineStats.totalProfit,
+      };
+    })(),
+    rail: (() => {
+      const railStats = getRailStats(state);
+      return {
+        length: railStats.length,
+        gradeCounts: { ...railStats.gradeCounts },
+        connectedStations: railStats.connectedStations,
+        isolatedStations: railStats.isolatedStations,
+        ridership: railStats.ridership,
+        capacity: railStats.capacity,
+        upkeepMonthly: railStats.upkeepMonthly,
       };
     })(),
   };

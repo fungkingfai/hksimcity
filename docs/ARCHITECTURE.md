@@ -350,3 +350,13 @@ createVehiclesView(state): VehiclesView
 ### 10.5 契約與 QA
 - 詳細契約：`docs/ROUND5_CONTRACTS.md`；規格：`docs/ROUND5_UTILITIES.md`／`ROUND5_TRANSIT_LINES.md`／`ROUND5_AIRPORT_PORT.md`。
 - 驗收：tsc 0、vitest **61/61**、build OK、Playwright verify **34/34**、桌面 UI **21/21**、手機 **17/17**；線上部署 Cloudflare。
+
+## 11. 第六輪改版：GitHub issues #1–#8（Round 6，GAME_VERSION 7）
+
+- **#1／#2**：移除 `tramStop` 港島 region 限制；移除 `containerPort`／`portGate`／`portYard` 的 `requiredRegion`（葵涌只保留 ×1.0 vs 區外 ×0.9 吞吐差）。
+- **#3**：`worldgen.ts` 隧道只喺維港設計 y 48–64、兩端陸地、長度 3–60；消除外海三條路。
+- **#4／#6**：generator 新增深圳河（616 water tiles）＋4 個邊境口岸（羅湖 rail／落馬洲／文錦渡／沙頭角 road）＋`landuse`／`roadHint`；新增 `world/border.ts`、`sim/mainland.ts`（道路 60／鐵路 120 food/日、接駁判定、倉庫入貨、pending、天氣）；`buildings` `roadBorderGate`／`railBorderGate`；starter `existing-city.ts` 自動放置 4 口岸並接駁主道路。
+- **#5**：`RailGrade`＝surface／elevated／underground；`Tile.rail`；`sim/rail.ts`（造價/地形/跨海、BFS 網絡、接駁站、孤立站 ×0.35、乘客/收入/維護/颱風、列車路線）；`rail:*` 工具；render `rail.ts`（枕木鋼軌／高架橋柱／地下隧道）；MTR 3 卡列車；save v7 `railEdits`。
+- **#7**：`existing-city.ts` 由 LUHK landuse／roadHint／density 生成 572 棟 existing 真 `Building`＋60 公共設施；道路以最大 component 合併（components=1）；seed 400 居民；`Building.existing`；faux skyline 停用；render 距離 LOD（遠景 box、近景完整模型；starter overview 83 draws／1.98M tris）。
+- **#8**：手機開局畫面 `.ss-frame` flex + `.ss-scroll` + 固定 `.ss-foot` CTA（100dvh／safe-area）；iPhone 13 實測可入局。
+- 驗收：tsc 0、vitest **89/89**、build、verify **36/36**、mobile **17/17**、UI **21/21**；save v7。

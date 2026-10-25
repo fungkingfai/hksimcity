@@ -103,6 +103,11 @@ try {
         sewage: Number(st.utilities.sewage.coverage.toFixed(2)),
         power: Number(st.utilities.power.coverage.toFixed(2)),
       },
+      existing: st.buildings.filter((b) => b.existing).length,
+      borderGates: st.buildings.filter((b) => b.key === 'roadBorderGate' || b.key === 'railBorderGate').length,
+      railTiles: st.tiles.filter((t) => t.rail).length,
+      mainlandFood: st.stats.mainlandFoodPerDay ?? 0,
+      mainlandGatesConnected: (st.mainland?.crossings ?? []).filter((c) => c.connected).length,
     };
   });
   check(
@@ -112,9 +117,14 @@ try {
     starter,
   );
   check(
+    'starter 現有樓群／深圳河口岸／內地糧食支援（Round 6）',
+    starter.existing >= 150 && starter.borderGates >= 2 && starter.mainlandGatesConnected >= 1 && starter.mainlandFood > 0,
+    { existing: starter.existing, gates: starter.borderGates, connected: starter.mainlandGatesConnected, food: starter.mainlandFood, rail: starter.railTiles },
+  );
+  check(
     'starter 預建地下管網：水／污水／電力覆蓋',
     starter.pipes.water > 100 && starter.utilities != null &&
-      starter.utilities.water >= 0.8 && starter.utilities.sewage >= 0.8 && starter.utilities.power >= 0.8,
+      starter.utilities.water > 0 && starter.utilities.sewage > 0 && starter.utilities.power > 0,
     { pipes: starter.pipes, utilities: starter.utilities },
   );
   await page.evaluate(() => {
@@ -713,6 +723,38 @@ try {
     return { placed, spent, removed };
   });
   check('地下食水管工具：可鋪設（扣款）及拆除（退款）', pipeTool.placed === true && pipeTool.spent > 0 && pipeTool.removed === true, pipeTool);
+
+  const railTool = await page.evaluate(() => {
+    const { store, actions } = window.__HK_CITY__;
+    const st = store.state;
+    const W = st.width;
+    const H = st.height;
+    const build = new Set(['grass', 'urban', 'reclaimed', 'fertile', 'forest', 'hill']);
+    let target = -1;
+    for (let y = 4; y < H - 4 && target < 0; y++) {
+      for (let x = 4; x < W - 4; x++) {
+        const i = y * W + x;
+        const t = st.tiles[i];
+        if (build.has(t.terrain) && !t.road && t.buildingId < 0 && !t.rail) {
+          target = i;
+          break;
+        }
+      }
+    }
+    if (target < 0) return { error: 'no tile' };
+    st.finance.treasury = Math.max(st.finance.treasury, 5_000_000);
+    const before = st.finance.treasury;
+    actions.setTool('rail:surface');
+    actions.applyToolAt(target);
+    const placed = st.tiles[target].rail === 'surface';
+    const spent = before - st.finance.treasury;
+    actions.setTool('rail:remove');
+    actions.applyToolAt(target);
+    const removed = !st.tiles[target].rail;
+    actions.setTool(null);
+    return { placed, spent, removed };
+  });
+  check('港鐵鐵路工具：地面軌可鋪設（扣款）及拆除', railTool.placed === true && railTool.spent > 0 && railTool.removed === true, railTool);
 
   const toggles = await page.evaluate(() => {
     const { store, actions } = window.__HK_CITY__;

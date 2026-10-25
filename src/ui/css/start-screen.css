@@ -101,7 +101,10 @@
   z-index: 2;
   width: min(960px, 100%);
   max-height: calc(100vh - 40px);
-  overflow: hidden auto;
+  max-height: calc(100dvh - 40px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   padding: clamp(18px, 3vh, 30px) clamp(18px, 3vw, 38px) clamp(16px, 2.4vh, 24px);
   border-radius: var(--radius);
   background:
@@ -114,6 +117,27 @@
     0 0 70px rgba(36, 224, 255, 0.12);
   backdrop-filter: blur(20px) saturate(145%);
   -webkit-backdrop-filter: blur(20px) saturate(145%);
+}
+
+.ss-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(36, 224, 255, 0.3) transparent;
+  padding-right: 2px;
+  margin-right: -2px;
+}
+
+.ss-scroll::-webkit-scrollbar {
+  width: 5px;
+}
+
+.ss-scroll::-webkit-scrollbar-thumb {
+  background: rgba(36, 224, 255, 0.28);
+  border-radius: 999px;
 }
 
 .ss-frame::before {
@@ -369,17 +393,58 @@
   color: var(--green);
 }
 
-/* 種子列 */
+/* 種子列（手機預設收起，減少資訊密度） */
 .ss-seed-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 9px;
+  display: block;
   margin-top: 14px;
   padding: 10px 12px;
   border-radius: var(--radius-sm);
   background: rgba(4, 9, 18, 0.42);
   border: 1px solid var(--line-soft);
+}
+
+.ss-seed-summary {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.ss-seed-summary::-webkit-details-marker {
+  display: none;
+}
+
+.ss-seed-summary span {
+  font-size: 10.5px;
+  letter-spacing: 1px;
+  color: var(--ink-faint);
+}
+
+.ss-seed-summary small {
+  font-size: 9px;
+  color: rgba(159, 179, 200, 0.65);
+}
+
+.ss-seed-summary::after {
+  content: '▾';
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--cyan);
+  transition: transform 0.18s ease;
+}
+
+.ss-seed-row[open] .ss-seed-summary::after {
+  transform: rotate(180deg);
+}
+
+.ss-seed-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 9px;
+  margin-top: 9px;
 }
 
 .ss-seed-label {
@@ -451,8 +516,9 @@
   letter-spacing: 0.4px;
 }
 
-/* 底部 */
+/* 底部（固定於框底，內容多時毋須 scroll 都見到 CTA） */
 .ss-foot {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -562,18 +628,42 @@
 /* ── 手機／窄螢幕 ── */
 @media (max-width: 900px) {
   .start-screen {
-    padding: 8px;
-    place-items: start center;
+    height: 100vh;
+    height: 100dvh;
+    padding: 0;
+    place-items: stretch;
+    overflow: hidden;
   }
 
   .ss-frame {
-    max-height: 100%;
     width: 100%;
-    padding: 14px 12px 16px;
+    height: 100vh;
+    height: 100dvh;
+    max-height: none;
+    border-radius: 0;
+    border-left: 0;
+    border-right: 0;
+    border-top: 0;
+    padding: 0;
+  }
+
+  .ss-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 12px 12px 6px;
   }
 
   .ss-head {
-    padding-bottom: 10px;
+    padding-bottom: 8px;
+  }
+
+  .ss-data-src {
+    display: none;
+  }
+
+  .ss-map-tag {
+    margin-top: 6px;
   }
 
   .ss-head h1 {
@@ -618,7 +708,6 @@
   .ss-seed-row {
     margin-top: 10px;
     padding: 8px 9px;
-    gap: 7px;
   }
 
   .ss-seed-label {
@@ -633,28 +722,66 @@
   }
 
   .ss-seed-hint {
-    flex: 1 1 100%;
+    display: none;
   }
 
   .ss-foot {
-    flex-direction: column-reverse;
+    position: relative;
+    z-index: 5;
+    flex: 0 0 auto;
+    flex-direction: column;
     align-items: stretch;
-    gap: 10px;
-    margin-top: 12px;
+    gap: 8px;
+    margin: 0;
+    padding: 9px 12px calc(9px + env(safe-area-inset-bottom, 0px));
+    border-top: 1px solid var(--line-strong);
+    background: linear-gradient(180deg, rgba(6, 12, 24, 0.94), rgba(4, 8, 16, 0.99));
+    box-shadow: 0 -14px 32px rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
   }
 
   .ss-start {
     width: 100%;
     justify-content: center;
-    height: 44px;
+    height: 50px;
+    font-size: 15px;
   }
 
   .ss-note {
-    max-width: none;
+    display: none;
   }
 
   .ss-skyline {
     height: 16vh;
+  }
+}
+
+/* 短螢幕（iPhone 13 390×664 等）：再減少資訊密度，確保 CTA 區唔逼爆 */
+@media (max-width: 900px) and (max-height: 740px) {
+  .ss-head h1 {
+    font-size: clamp(24px, 7.5vw, 30px);
+    letter-spacing: 4px;
+  }
+
+  .ss-en {
+    font-size: 8px;
+    letter-spacing: 3.5px;
+  }
+
+  .ss-mode {
+    padding: 9px 10px;
+  }
+
+  .ss-mode-desc {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .ss-mode-points {
+    display: none;
   }
 }
 

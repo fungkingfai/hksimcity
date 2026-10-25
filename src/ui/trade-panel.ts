@@ -7,7 +7,7 @@
  * `state.trade` 未計算時 fallback 顯示建築數量與 config 估算容量。
  */
 
-import { BUILDINGS, TRADE_CONFIG, formatMoney, formatMoneyShort } from '../core/config';
+import { BORDER_CONFIG, BUILDINGS, TRADE_CONFIG, formatMoney, formatMoneyShort } from '../core/config';
 import type { GameActions, GameState } from '../core/types';
 import type { GameStore } from '../core/store';
 import { delegate, esc, num, pct, qs, setClass } from './dom';
@@ -21,6 +21,7 @@ export interface TradePanelView {
 
 const AIRPORT_KEYS = ['airportTerminal', 'airCargoTerminal'];
 const PORT_KEYS = ['containerPort', 'portGate', 'portYard'];
+const BORDER_KEYS = ['roadBorderGate', 'railBorderGate'];
 
 function terminalKeys(state: GameState, keys: string[]): string[] {
   const present = new Set(state.buildings.map((b) => b.key));
@@ -66,6 +67,81 @@ export function createTradePanel(container: HTMLElement, store: GameStore, actio
             : `<button type="button" class="trade-upgrade" data-act="trade-upgrade" data-id="${building.id}" title="升級（${formatMoneyShort(cost)}）">升級 ${formatMoneyShort(cost)}</button>`
         }
       </div>`;
+  };
+
+  const renderMainland = (state: GameState): string => {
+    const mainland = state.mainland;
+    const gates = state.buildings.filter((b) => BORDER_KEYS.includes(b.key));
+    const derived = gates.map((b) => {
+      const kind = BUILDINGS[b.key]?.borderGate ?? (b.key === 'roadBorderGate' ? 'road' : 'rail');
+      const connected = Boolean(b.connected && b.active);
+      return {
+        name: BUILDINGS[b.key]?.name ?? (kind === 'road' ? '道路口岸' : '鐵路口岸'),
+        kind,
+        connected,
+        foodPerDay: connected ? (kind === 'road' ? BORDER_CONFIG.roadFoodPerDay : BORDER_CONFIG.railFoodPerDay) : 0,
+        buildingId: b.id,
+        x: b.x,
+        y: b.y,
+      };
+    });
+    const crossings = mainland?.crossings ?? derived;
+    const roadLinks = mainland?.roadLinks ?? derived.filter((c) => c.kind === 'road' && c.connected).length;
+    const railLinks = mainland?.railLinks ?? derived.filter((c) => c.kind === 'rail' && c.connected).length;
+    const foodPerDay =
+      mainland?.foodPerDay ?? state.stats.mainlandFoodPerDay ?? derived.reduce((sum, c) => sum + c.foodPerDay, 0);
+    const demand = Math.max(0, state.stats.population * 0.5);
+    const importCap = Math.round(demand * 0.4);
+    const share = demand > 0 ? foodPerDay / demand : 0;
+    const connectedCount = crossings.filter((c) => c.connected).length;
+
+    const rows = crossings
+      .map(
+        (crossing) => `
+        <div class="mainland-crossing">
+          <span class="mc-ico">${crossing.kind === 'road' ? ico('borderRoad') : ico('borderRail')}</span>
+          <span class="mc-name"><b>${esc(crossing.name)}</b><small>${crossing.kind === 'road' ? '道路口岸' : '鐵路口岸'} · ${crossing.x + 1}, ${crossing.y + 1}</small></span>
+          ${
+            crossing.connected
+              ? '<span class="st-status ok">已接駁</span>'
+              : '<span class="st-status bad">未接駁</span>'
+          }
+          <b class="mc-food${crossing.foodPerDay > 0 ? ' positive' : ' negative'}">+${num(crossing.foodPerDay)} food/日</b>
+          <button type="button" class="trade-focus" data-act="trade-focus" data-id="${crossing.buildingId}" title="鏡頭飛到口岸">${ico('target')}定位</button>
+        </div>`,
+      )
+      .join('');
+
+    return `
+      <section class="fin-block mainland-block">
+        <div class="block-head">
+          <h3>${ico('food')}內地供應</h3>
+          <span class="mini">道路／鐵路口岸 · 每日糧食支援（上限需求 40%）</span>
+        </div>
+        <div class="mainland-hero">
+          <div class="mainland-main">
+            <span class="fin-label">每日內地糧食支援</span>
+            <b class="fin-amount">+${num(foodPerDay)} <small>food/日</small></b>
+            <span class="fin-sub">佔全城需求 ${pct(share)} · 上限 ${num(importCap)}/日（本地農業仍需供應 ${num(Math.max(0, Math.round(demand - importCap)))}/日）</span>
+          </div>
+          <div class="mainland-stats">
+            <div class="fin-card"><span>道路口岸</span><b>${roadLinks} 接駁</b></div>
+            <div class="fin-card"><span>鐵路口岸</span><b>${railLinks} 接駁</b></div>
+            <div class="fin-card"><span>每日需求</span><b>${num(demand)} food</b></div>
+            <div class="fin-card"><span>天氣係數</span><b>8 號：道路 50% · 鐵路 90%</b></div>
+          </div>
+        </div>
+        <div class="mainland-list">${
+          rows ||
+          `<div class="station-empty">尚未興建邊境口岸。到建造 → 交通放置「道路口岸」（$8M，+${BORDER_CONFIG.roadFoodPerDay} food/日）或「鐵路口岸」（$9M，+${BORDER_CONFIG.railFoodPerDay} food/日）；必須喺邊境通道 ${BORDER_CONFIG.placementRadius} 格內，並接駁道路／鐵路。</div>`
+        }</div>
+        ${
+          connectedCount === 0 && crossings.length > 0
+            ? `<div class="util-warning">${ico('warn')}<span>口岸未接駁：道路口岸需貼路、鐵路口岸需貼軌並接入鐵路網；未接駁時 food = 0。</span></div>`
+            : ''
+        }
+        <p class="hint">內地供應最多只佔全城糧食需求 40%，其餘要由本地農田／食品廠供應；8 號風球道路口岸 ×0.5、鐵路口岸 ×0.9。</p>
+      </section>`;
   };
 
   const render = (state: GameState): void => {
@@ -153,6 +229,8 @@ export function createTradePanel(container: HTMLElement, store: GameStore, actio
         </section>
       </div>
 
+      ${renderMainland(state)}
+
       <div class="fin-block">
         <div class="block-head"><h3>${ico('chart')}營運提示</h3><span class="mini">貿易每日結算</span></div>
         <ul class="help-list compact">
@@ -216,6 +294,14 @@ export function createTradePanel(container: HTMLElement, store: GameStore, actio
       Math.round(state.finance.treasury),
       state.buildings.length,
       levels,
+      state.mainland
+        ? `${state.mainland.lastImportDay}:${state.mainland.roadLinks}:${state.mainland.railLinks}:${Math.round(state.mainland.foodPerDay)}`
+        : 'no-mainland',
+      state.buildings
+        .filter((b) => BORDER_KEYS.includes(b.key))
+        .map((b) => `${b.id}:${b.connected ? 1 : 0}:${b.active ? 1 : 0}`)
+        .join(','),
+      Math.round(state.stats.mainlandFoodPerDay ?? -1),
     ].join('|');
   };
 

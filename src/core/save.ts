@@ -1,15 +1,15 @@
 /**
  * 存檔系統：localStorage 自動存檔 + 3 個手動存檔格 + JSON 匯出／匯入（香港版）。
  *
- * v5（480×480 真實地理大地圖）：存檔改為「種子 + 真實地形重新生成 + 稀疏格變更（道路／行人路／分區）」，
- * 不再序列化 230,400 格地形。建築／市民／財政等照舊儲存。
- * 舊版 96×96／304×304／480×480 完整存檔因尺寸不同會被拒絕（提示重新開局）。
+ * v7（600×600 真實地理大地圖；Round 6）：存檔為「種子 + 真實地形重新生成 + 稀疏格變更（道路／行人路／分區／管道）＋railEdits」，
+ * 不再序列化 360,000 格地形。建築／市民／財政／路線／鐵路網等照舊儲存。
+ * 舊版 96×96／304×304／480×480 完整存檔因尺寸不同會被拒絕（提示重新開局）；同尺寸 v6 會升級（rail／border 預設空）。
  * 測試／SSR 環境沒有 localStorage 時，所有函式安全地回傳失敗。
  */
 
 import { GAME_VERSION, GRID_HEIGHT, GRID_WIDTH } from './config';
 import { createTransitState, displayYear } from './new-game';
-import type { GameState, SaveSlotInfo, Tile, ZoneType } from './types';
+import type { GameState, RailGrade, SaveSlotInfo, Tile, ZoneType } from './types';
 import { generateWorld } from '../world/worldgen';
 
 const PREFIX = 'victoria-harbour.save.';
@@ -21,6 +21,8 @@ export const MAX_SLOTS = 4;
 const ZONE_CODE: Record<ZoneType, number> = { residential: 1, commercial: 2, industrial: 3, farmland: 4 };
 const CODE_ZONE: (ZoneType | null)[] = [null, 'residential', 'commercial', 'industrial', 'farmland'];
 const PIPE_BITS = { water: 0b00100000, sewer: 0b01000000, power: 0b10000000 } as const;
+const RAIL_CODE: Record<RailGrade, number> = { surface: 0, elevated: 1, underground: 2 };
+const CODE_RAIL: (RailGrade | undefined)[] = ['surface', 'elevated', 'underground'];
 
 interface CompactSaveFile {
   format: 'hk-city-compact';
@@ -31,6 +33,8 @@ interface CompactSaveFile {
   gameMode: 'starter' | 'empty';
   /** 稀疏格變更：[tileIndex, packed] 成對 */
   tileEdits: number[];
+  /** 鐵路軌變更：[tileIndex, gradeCode] 成對（Round 6；0=surface 1=elevated 2=underground） */
+  railEdits?: number[];
   /** 存檔列表用快照（避免為列表重新生成 304×304 地形） */
   info: {
     slot: number;
@@ -59,11 +63,13 @@ function packTile(tile: Tile): number {
 /** 把完整 state 轉為精簡存檔 JSON 字串 */
 export function serializeCompact(state: GameState, slot = 0): string {
   const edits: number[] = [];
+  const railEdits: number[] = [];
   for (let i = 0; i < state.tiles.length; i++) {
     const tile = state.tiles[i];
     if (tile.road || tile.sidewalk || tile.zone || tile.waterPipe || tile.sewerPipe || tile.powerCable) {
       edits.push(i, packTile(tile));
     }
+    if (tile.rail) railEdits.push(i, RAIL_CODE[tile.rail]);
   }
   const { tiles: _tiles, ...rest } = state;
   const file: CompactSaveFile = {
@@ -74,6 +80,7 @@ export function serializeCompact(state: GameState, slot = 0): string {
     height: state.height,
     gameMode: state.gameMode,
     tileEdits: edits,
+    railEdits,
     info: {
       slot,
       cityName: state.cityName,
@@ -115,6 +122,13 @@ export function hydrateCompact(raw: unknown): GameState | null {
     tile.sewerPipe = (packed & PIPE_BITS.sewer) !== 0;
     tile.powerCable = (packed & PIPE_BITS.power) !== 0;
   }
+  const railEdits = file.railEdits ?? [];
+  for (let k = 0; k + 1 < railEdits.length; k += 2) {
+    const idx = railEdits[k];
+    const code = railEdits[k + 1];
+    const tile = tiles[idx];
+    if (tile) tile.rail = CODE_RAIL[code];
+  }
   const state = {
     ...(file.state as GameState),
     version: GAME_VERSION,
@@ -126,6 +140,7 @@ export function hydrateCompact(raw: unknown): GameState | null {
     tiles,
   } as GameState;
   for (const tile of tiles) tile.buildingId = -1;
+  state.railNetwork = undefined;
   for (const building of state.buildings) {
     for (let dy = 0; dy < building.h; dy++) {
       for (let dx = 0; dx < building.w; dx++) {

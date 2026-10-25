@@ -58,7 +58,7 @@ function addBuilding(state: GameState, overrides: BuildingOverrides): Building {
   return building;
 }
 
-const PIPE_OK_TERRAIN = new Set(['grass', 'urban', 'fertile', 'forest', 'hill']);
+const PIPE_OK_TERRAIN = new Set(['grass', 'urban', 'fertile', 'reclaimed']);
 
 /** 找一段連續 6 格可建平地（方便測試 source＋pipe＋住宅），無建築／無道路 */
 function findFlat(state: GameState, fromX = 0, fromY = 0): { x: number; y: number } {
@@ -288,7 +288,7 @@ describe('機場／貨櫃碼頭貿易結算', () => {
     expect(state.finance.incomeBreakdown.other).toBeGreaterThan(0);
   });
 
-  it('貨櫃碼頭：region 內 capacity 計足，區外打七折', () => {
+  it('貨櫃碼頭：region 內 capacity 計足，區外 ×0.9', () => {
     const state = makeEmptyState();
     // 找 containerPort region 內一格
     let inside: { x: number; y: number } | null = null;
@@ -317,12 +317,12 @@ describe('機場／貨櫃碼頭貿易結算', () => {
     const port = state.trade!.port;
     expect(port.teuCapacity).toBeGreaterThanOrEqual(45);
 
-    // 區外碼頭：只用 45×0.7
+    // 區外碼頭：只用 45×0.9
     const outsideState = makeEmptyState();
     const outside = findFlat(outsideState, 0);
     addBuilding(outsideState, { key: 'containerPort', x: outside.x, y: outside.y, w: 4, h: 3 });
     tickTrade(outsideState, { toast: () => {}, log: () => {} });
-    expect(outsideState.trade!.port.teuCapacity).toBeCloseTo(45 * 0.7, 2);
+    expect(outsideState.trade!.port.teuCapacity).toBeCloseTo(45 * 0.9, 2);
   });
 
   it('颱風 8 號機場關閉（收入 0）；升級扣庫房並提升 level', () => {

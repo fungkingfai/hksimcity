@@ -34,6 +34,7 @@
 
 import { BASE_MONTHLY_SALARY, BUILDINGS, MONTHS_PER_YEAR, RESOURCES, totalUpkeep } from '../core/config';
 import { pipeUpkeepMonthly } from './utilities';
+import { railUpkeepMonthly } from './rail';
 import type {
   Building,
   ExpenseKind,
@@ -321,7 +322,7 @@ function computeMonthlyExpenses(state: GameState): {
   const welfare = round2(seniors * WELFARE_ELDERLY + unemployed * WELFARE_UNEMPLOYED);
 
   // 基建：GDD §7.3 ROAD_UPKEEP = 0；Round 5 加地下管網每月維護（人口 <300 半價）
-  const infrastructure = round2(pipeUpkeepMonthly(state) * newSystemDiscount);
+  const infrastructure = round2((pipeUpkeepMonthly(state) + railUpkeepMonthly(state)) * newSystemDiscount);
 
   return {
     upkeep,
