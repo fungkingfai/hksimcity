@@ -22,8 +22,9 @@ import './css/start-screen.css';
 import './css/minimap.css';
 import './css/round5.css';
 import './css/round6.css';
+import './css/round8.css';
 
-import { BUILDINGS, RAIL_INFO, ROAD_COST, ZONES, formatMoney } from '../core/config';
+import { BUILDINGS, RAIL_INFO, ROAD_GRADE_INFO, ROAD_COST, ZONES, formatMoney } from '../core/config';
 import { applyUiMode, getUiMode } from '../core/device';
 import type { GameActions, GameState } from '../core/types';
 import type { GameStore } from '../core/store';
@@ -45,6 +46,7 @@ import { createUndergroundBar } from './underground-bar';
 import { createUtilityPanel } from './utility-panel';
 import { createTradePanel } from './trade-panel';
 import { toggleTradePanel, toggleUnderground } from './round5-helpers';
+import { cycleRoadGrade, roadGradeOf, toggleBuildings } from './round8-helpers';
 
 export interface GameUI {
   update(state: GameState): void;
@@ -108,8 +110,15 @@ export function createUI(root: HTMLElement, store: GameStore, actions: GameActio
   const isNarrow = (): boolean => mobileUi || window.innerWidth <= 980;
 
   const setPanelOpen = (panel: 'build' | 'info', open: boolean): void => {
-    if (isNarrow()) hud.classList.toggle(`is-${panel}-open`, open);
-    else hud.classList.toggle(`is-${panel}-collapsed`, !open);
+    if (isNarrow()) {
+      hud.classList.toggle(`is-${panel}-open`, open);
+      return;
+    }
+    hud.classList.toggle(`is-${panel}-collapsed`, !open);
+    if (panel === 'info') {
+      store.state.ui.showStats = open;
+      store.bumpUI();
+    }
   };
 
   const togglePanel = (panel: 'build' | 'info'): void => {
@@ -118,7 +127,12 @@ export function createUI(root: HTMLElement, store: GameStore, actions: GameActio
       hud.classList.toggle(`is-${panel}-open`, !isOpen);
       hud.classList.toggle('is-sheet-open', !isOpen);
     } else {
-      hud.classList.toggle(`is-${panel}-collapsed`);
+      const collapsed = hud.classList.contains(`is-${panel}-collapsed`);
+      hud.classList.toggle(`is-${panel}-collapsed`, !collapsed);
+      if (panel === 'info') {
+        store.state.ui.showStats = collapsed;
+        store.bumpUI();
+      }
     }
   };
 
@@ -170,10 +184,12 @@ export function createUI(root: HTMLElement, store: GameStore, actions: GameActio
         actions.setTool(store.state.ui.tool === 'zone:industrial' ? null : 'zone:industrial');
         break;
       case 'KeyN':
-        actions.setTool(store.state.ui.tool === 'zone:farmland' ? null : 'zone:farmland');
+        if (store.state.ui.tool === 'road') cycleRoadGrade(store, 'tunnel');
+        else actions.setTool(store.state.ui.tool === 'zone:farmland' ? null : 'zone:farmland');
         break;
       case 'KeyM':
-        actions.setTool(store.state.ui.tool === 'dezone' ? null : 'dezone');
+        if (store.state.ui.tool === 'road') cycleRoadGrade(store, 'elevated');
+        else actions.setTool(store.state.ui.tool === 'dezone' ? null : 'dezone');
         break;
       case 'KeyX':
         actions.setTool(store.state.ui.tool === 'demolish' ? null : 'demolish');
@@ -196,7 +212,7 @@ export function createUI(root: HTMLElement, store: GameStore, actions: GameActio
         break;
       }
       case 'KeyB':
-        togglePanel('build');
+        toggleBuildings(store, actions);
         break;
       case 'KeyG':
       case 'KeyJ':
@@ -229,7 +245,7 @@ export function createUI(root: HTMLElement, store: GameStore, actions: GameActio
   const updateHint = (state: GameState): void => {
     const ui = state.ui;
     const tool = ui.tool;
-    const key = `${ui.mode}|${tool ?? ''}|${mobileUi ? 'm' : 'd'}`;
+    const key = `${ui.mode}|${tool ?? ''}|${roadGradeOf(state)}|${mobileUi ? 'm' : 'd'}`;
     if (key === lastHintKey) return;
     lastHintKey = key;
 
@@ -269,10 +285,13 @@ export function createUI(root: HTMLElement, store: GameStore, actions: GameActio
       return;
     }
     if (tool === 'road') {
+      const grade = roadGradeOf(state);
+      const gradeInfo = ROAD_GRADE_INFO[grade];
+      const gradeName = gradeInfo?.label ?? '地面道路';
       hintIcon.innerHTML = ico('road');
       hintText.textContent = mobileUi
-        ? `鋪設馬路（已含行人路）：點擊地圖逐格鋪設 · 每格 ${formatMoney(ROAD_COST)}`
-        : `鋪設馬路（已含行人路）：按住左鍵拖曳連續鋪設 · 每格 ${formatMoney(ROAD_COST)} · 右鍵取消`;
+        ? `道路（${gradeName}）：由起點拖到終點自動鋪路 · ${formatMoney(gradeInfo?.cost ?? ROAD_COST)}/格 · 拖曳時 M 高架 / N 隧道`
+        : `道路（${gradeName}）：拖曳由起點到終點自動鋪路 · ${formatMoney(gradeInfo?.cost ?? ROAD_COST)}/格 · 拖曳時按 M 高架、N 隧道（再按返回地面）· 可穿山過海 · 右鍵取消`;
     } else if (tool === 'dezone') {
       hintIcon.innerHTML = ico('eraser');
       hintText.textContent = mobileUi
@@ -322,10 +341,10 @@ export function createUI(root: HTMLElement, store: GameStore, actions: GameActio
     mobileBar?.update(state);
     updateHint(state);
 
-    // 桌面版：城事面板開關
+    // 桌面版：城事面板開關（collapse/expand 同步 state.ui.showStats，避免每幀被還原）
     if (!mobileUi) {
       setClass(hud, 'is-info-hidden', !state.ui.showStats);
-      if (state.ui.showStats) hud.classList.remove('is-info-collapsed');
+      setClass(hud, 'is-info-collapsed', !state.ui.showStats);
     }
   };
 

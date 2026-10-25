@@ -341,3 +341,37 @@ interiors-dev 共用材質庫而不互相覆寫）。Lead 在開發中途同步�
 - 手機 `mobile-test.mjs`：**17 / 17**；桌面 UI `ui-click-test.mjs`：**21 / 21**（最終回歸）。
 - 版本 tag：`v0.7.0`；GitHub push 後 Cloudflare Workers Builds 自動部署。
 - 截圖：`docs/screenshots/` 更新（existing 真樓 overview/central、rail surface/elevated/underground、rail ghost、深圳河／口岸、MTR 列車、U 層、empty）。
+
+---
+
+# 第七輪改版：處理 GitHub issues #9–#16（Round 8）
+
+> 玩家第二輪 issues。版本：**GAME_VERSION 8／package 0.8.0／git tag v0.8.0**。
+
+## R8.1 Issue 對應與處理
+
+| Issue | 問題 | 實作 |
+|---|---|---|
+| **#9** | 左邊建造面板不能顯示全部內容 | build panel 重構：header 固定、`.build-body-scroll` 整體可滾動（自訂青→粉 scrollbar）、rail 區可摺疊、公共建築 tabs sticky；1280×800／457×1078 實測 26 種公共建築全部可達 |
+| **#10** | 現有城市馬路太多太密 | existing-city road cap 收緊；starter 總路 **3,322 格**（原 9,700+），主幹 45%＋**1,780 格 localRoad 窄街**；render 窄街 0.52 tile 深灰、無標線／路緣／燈；道路 components=1、333 棟 existing 100% 貼主路網；overview 83 draws／1.69M tris |
+| **#11** | 道路要可由起點拉至終點、穿山穿海（M 高架／N 隧道） | `RoadGrade` surface/elevated/tunnel；`placeRoad(...,grade)`（elevated $75k、tunnel $60k，可跨水／山、可升級）；`roadPathBetween` L 形；city-view 拖曳 start→end 預覽（綠/紅）、release `applyRoadPath`；M/N 切 grade；render 高架橋面＋柱、隧道走線＋入口龍門＋U 層隧道管；save `roadGradeEdits` |
+| **#12** | 地下管網要分開食水／污水／電力層，並看到流動 | `ui.pipeLayers {water,sewage,power}` 三層獨立 toggle；`ui.pipeFlow` 流動光點（沿管移動、按種類上色，≤4 draws）；U 層工具列＋公用面板 eye chips＋流水 toggle；U 關閉全隱藏 |
+| **#13** | 多一層顯示／不顯示建築，方便規劃 | topbar 新增建築 toggle、快捷鍵 **B**（原建造面板改 Tab）；`ui.showBuildings=false` 隱藏 buildings group（normal+LOD+ghost），道路／地形／標籤保留；UIState 持久化 |
+| **#14** | 深圳市區域只作參考、不能建設 | placement／zoning／road／pipe／rail／demolish 全部以 `isShenzhenSideTile` 拒絕（reason「深圳市範圍只作參考，不可建設」）；render 斜線 hatch overlay＋琥珀邊界＋label「深圳市（參考）· 不可建設」；hover 加強 |
+| **#15** | 城事面板縮退按鈕無反應 | 根因 `ui.ts update()` 每幀因 `showStats=true` 移除 collapsed class；修正 collapse/expand 同步 `state.ui.showStats`＋bumpUI，update 只跟 state；收起持久、handle 展開正常 |
+| **#16** | 船有時在陸上行 | 根因 ferry 只用兩點直線＋`isWaterLine` 0.5 格取樣漏判窄陸地；改 **水域 BFS 完整 path**（每格 water、3–400 格）、逐格推進、每次 update 全 path validate、失效回收重派；7 個 ferry tests（陸地屏障不得 spawn、20 日航行 0 次偏離水域） |
+
+## R8.2 版本／存檔
+
+- `GAME_VERSION` **7 → 8**；`package.json` **0.8.0**；git tag **v0.8.0**。
+- compact 存檔新增 `roadGradeEdits`（[tileIndex, gradeCode]；surface/elevated/tunnel）＋既有 `railEdits`；UIState 新增 `showBuildings`／`pipeLayers`／`pipeFlow`／`roadGrade`，經 state 自動保存。
+- 同尺寸 v7 存檔可升級（新欄位 default）；舊 96／304／480 存檔仍拒絕。
+
+## R8.3 驗收（Round 8）
+
+- tsc **0 error**；vitest **102 / 102**（9 files；新增 ferry 7、round8 6）；`npm run build` 成功。
+- Playwright `verify-hk.mjs`：**42 / 42 checks**（Round 8 追加：#9 scroll、#11 高架跨水、#12 分層、#13 建築圖層、#14 深圳、#15 collapse）。
+- `mobile-test.mjs` **17 / 17**；`ui-click-test.mjs` **21 / 21**（最終回歸；B 快捷鍵語義已更新）。
+- 1600×960 lite 穩定性：starter + U 層＋flow＋road 工具 20 秒，crashed=false、console errors=0。
+- render：overview 83 draws／1.69M tris；central 399／1.73M；U 層 423／1.82M；buildings-hidden 74／1.64M。
+- 截圖：`docs/screenshots/`（build-panel、info-collapsed、pipe-layers-ui、roads-local、buildings-hidden、pipe-water/sewage/power、shenzhen-overlay、road-drag-preview、road-elevated、road-tunnel）。

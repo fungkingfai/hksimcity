@@ -18,6 +18,7 @@ import {
   RAIL_INFO,
   RESOURCES,
   ROAD_COST,
+  ROAD_GRADE_INFO,
   TERRAIN_INFO,
   TRANSIT_INFO,
   ZONES,
@@ -32,6 +33,7 @@ import type { GameStore } from '../core/store';
 import { clamp, delegate, esc, hexColor, num, qs, qsa, setClass, setHidden, setText } from './dom';
 import { buildingGlyph, ico, sealHtml } from './icons';
 import { toggleUnderground, toggleUtilityPanel } from './round5-helpers';
+import { roadGradeOf } from './round8-helpers';
 
 export interface BuildPanelView {
   update(state: GameState): void;
@@ -193,17 +195,22 @@ function zoneTip(zone: ZoneType): string {
   `;
 }
 
-function toolTip(tool: string): string {
+function toolTip(tool: string, grade: keyof typeof ROAD_GRADE_INFO = 'surface'): string {
   if (tool === 'road') {
+    const gradeInfo = ROAD_GRADE_INFO[grade] ?? ROAD_GRADE_INFO.surface;
     return `
       <div class="tip-head">
         <span class="tip-icon tool">${ico('road')}</span>
-        <div class="tip-title"><b>馬路</b><em>工程 · 每格 ${formatMoney(ROAD_COST)}</em></div>
+        <div class="tip-title"><b>道路</b><em>工程 · ${esc(gradeInfo.label)} ${formatMoney(gradeInfo.cost)}/格</em></div>
       </div>
-      <p class="tip-desc">鋪設雙線馬路，<b>道路已整合行人路</b>；市民步行、貨車送貨、巴士與的士都在此行走。分區必須連接道路才會開發。</p>
+      <p class="tip-desc">由起點拖到終點<b>自動鋪路</b>；道路已整合行人路。拖曳期間按 <b>M</b> 升高架、<b>N</b> 升隧道，再按 M／N 返回地面。高架／隧道可跨水穿山。</p>
       <dl class="tip-rows">
-        ${row('操作', '按住左鍵拖曳連續鋪設')}
-        ${row('快捷鍵', 'R')}
+        ${row('操作', '按住左鍵由起點拖到終點')}
+        ${row('目前等級', `${gradeInfo.label} · ${formatMoney(gradeInfo.cost)}/格`)}
+        ${row('地面道路', `$${formatMoney(ROAD_GRADE_INFO.surface.cost)}/格`)}
+        ${row('高架橋', `$${formatMoney(ROAD_GRADE_INFO.elevated.cost)}/格 · 可跨水穿山`)}
+        ${row('隧道', `$${formatMoney(ROAD_GRADE_INFO.tunnel.cost)}/格 · 可跨水穿山`)}
+        ${row('快捷鍵', 'R 道路 · 拖曳時 M 高架 / N 隧道')}
         ${row('取消', '右鍵或 Esc')}
       </dl>
     `;
@@ -295,6 +302,7 @@ export function createBuildPanel(container: HTMLElement, store: GameStore, actio
       </div>
     </header>
 
+    <div class="build-body-scroll">
     <div class="zone-block">
       <div class="tools-label"><span>分區 ZONING</span><span class="tools-pop" data-k="demandHint">按需求劃區</span></div>
       <div class="zone-grid">
@@ -316,7 +324,7 @@ export function createBuildPanel(container: HTMLElement, store: GameStore, actio
       <div class="tool-row zone-tools">
         <button type="button" class="tool-card" data-act="tool" data-tool="road" data-tip="tool:road">
           <span class="tool-ico">${ico('road')}</span>
-          <span class="tool-meta"><b>馬路</b><small>含行人路 · ${formatMoneyShort(ROAD_COST)}/格</small></span>
+          <span class="tool-meta"><b>道路</b><small>拖曳自動鋪路 · ${formatMoneyShort(ROAD_COST)}/格起</small></span>
           <kbd>R</kbd>
         </button>
         <button type="button" class="tool-card" data-act="tool" data-tool="dezone" data-tip="tool:dezone">
@@ -333,7 +341,12 @@ export function createBuildPanel(container: HTMLElement, store: GameStore, actio
     </div>
 
     <div class="rail-block">
-      <div class="tools-label"><span>鐵路 RAIL</span><span class="tools-pop">地面 · 高架 · 地下</span></div>
+      <div class="tools-label">
+        <span>鐵路 RAIL</span>
+        <span class="tools-right"><span class="tools-pop">地面 · 高架 · 地下</span>
+          <button type="button" class="rail-collapse" data-act="rail-toggle" title="收起／展開鐵路工具" aria-expanded="true">${ico('chevronLeft')}</button>
+        </span>
+      </div>
       <div class="rail-grid">
         ${(['surface', 'elevated', 'underground'] as const)
           .map((grade) => {
@@ -371,6 +384,8 @@ export function createBuildPanel(container: HTMLElement, store: GameStore, actio
       <div class="build-list" data-k="list"></div>
     </div>
 
+    </div>
+
     <div class="build-tools">
       <button type="button" class="cancel-tool" data-act="tool" data-tool="none" hidden>
         ${ico('close')}<span>取消工具</span><kbd>Esc</kbd>
@@ -393,6 +408,9 @@ export function createBuildPanel(container: HTMLElement, store: GameStore, actio
   const undergroundBtn = qs<HTMLElement>(root, '[data-act="toggle-underground"]')!;
   const utilityBtn = qs<HTMLElement>(root, '[data-act="toggle-utility"]')!;
   const railButtons = Array.from(root.querySelectorAll<HTMLElement>('[data-tool^="rail:"]'));
+  const railBlock = qs<HTMLElement>(root, '.rail-block')!;
+  const railToggleBtn = qs<HTMLElement>(root, '[data-act="rail-toggle"]')!;
+  let railCollapsed = false;
   const zoneButtons = new Map<ZoneType, { btn: HTMLElement; demand: HTMLElement }>();
   for (const zone of ZONE_ORDER) {
     const btn = qs<HTMLElement>(root, `[data-zone="${zone}"]`);
@@ -429,7 +447,7 @@ export function createBuildPanel(container: HTMLElement, store: GameStore, actio
     if (!key) return;
     let html = tipCache.get(key);
     if (!html) {
-      if (key.startsWith('tool:')) html = toolTip(key.slice(5));
+      if (key.startsWith('tool:')) html = toolTip(key.slice(5), roadGradeOf(store.state));
       else if (key.startsWith('r:')) html = railTip(key.slice(2) as 'surface' | 'elevated' | 'underground' | 'remove');
       else if (key.startsWith('z:')) html = zoneTip(key.slice(2) as ZoneType);
       else html = buildTip(BUILDINGS[key.slice(2)]);
@@ -491,6 +509,13 @@ export function createBuildPanel(container: HTMLElement, store: GameStore, actio
         return;
       }
       actions.setTool(store.state.ui.tool === key ? null : key);
+      return;
+    }
+    if (act === 'rail-toggle') {
+      railCollapsed = !railCollapsed;
+      setClass(railBlock, 'collapsed', railCollapsed);
+      railToggleBtn.setAttribute('aria-expanded', String(!railCollapsed));
+      setClass(railToggleBtn, 'collapsed', railCollapsed);
       return;
     }
     if (act === 'toggle-zones') {
@@ -614,13 +639,18 @@ export function createBuildPanel(container: HTMLElement, store: GameStore, actio
     setClass(dezoneBtn, 'active', ui.tool === 'dezone');
     setClass(demolishBtn, 'active', ui.tool === 'demolish');
     for (const btn of railButtons) setClass(btn, 'active', ui.tool === btn.dataset.tool);
+    setClass(railBlock, 'collapsed', railCollapsed);
     setHidden(cancelBtn, !ui.tool);
 
     let hint = '選擇分區刷子或馬路，在地圖上拖曳';
     if (ui.tool) {
       const zone = zoneOfTool(ui.tool);
       if (zone) hint = `劃分${ZONES[zone].name}：拖曳連續劃區 · 每格 ${formatMoney(ZONES[zone].costPerTile)} · 右鍵取消`;
-      else if (ui.tool === 'road') hint = '鋪設馬路（已含行人路）· 拖曳連續鋪設 · 右鍵取消';
+      else if (ui.tool === 'road') {
+        const grade = roadGradeOf(state);
+        const gradeInfo = ROAD_GRADE_INFO[grade] ?? ROAD_GRADE_INFO.surface;
+        hint = `道路（${gradeInfo.label} · ${formatMoney(gradeInfo.cost)}/格）：由起點拖到終點自動鋪路 · 拖曳時 M 高架 / N 隧道（再按返回地面）· 右鍵取消`;
+      }
       else if (ui.tool === 'dezone') hint = '取消分區：拖曳清除色塊（退 50%）· 右鍵取消';
       else if (ui.tool === 'demolish') hint = '拆卸：點擊建築／道路 · 建築退還 30%';
       else if (ui.tool.startsWith('rail:')) {

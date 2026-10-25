@@ -360,3 +360,14 @@ createVehiclesView(state): VehiclesView
 - **#7**：`existing-city.ts` 由 LUHK landuse／roadHint／density 生成 572 棟 existing 真 `Building`＋60 公共設施；道路以最大 component 合併（components=1）；seed 400 居民；`Building.existing`；faux skyline 停用；render 距離 LOD（遠景 box、近景完整模型；starter overview 83 draws／1.98M tris）。
 - **#8**：手機開局畫面 `.ss-frame` flex + `.ss-scroll` + 固定 `.ss-foot` CTA（100dvh／safe-area）；iPhone 13 實測可入局。
 - 驗收：tsc 0、vitest **89/89**、build、verify **36/36**、mobile **17/17**、UI **21/21**；save v7。
+
+## 12. 第七輪改版：GitHub issues #9–#16（Round 8，GAME_VERSION 8）
+
+- **道路 grade（#11）**：`RoadGrade = surface | elevated | tunnel`；`Tile.roadGrade`；`ROAD_GRADE_INFO`（$15k／$75k／$60k）；`placeRoad(state,x,y,grade)` 可跨水山、可升級；`roadPathBetween` L 形；city-view 拖曳預覽、M/N 切 grade、`applyRoadPath`；render `roads.ts` 高架橋面＋柱、隧道口＋U 層隧道管；save `roadGradeEdits`。
+- **現有道路（#10）**：existing-city road cap 2,400＋starter 道路 total 3,322；`Tile.localRoad` render 窄街（0.52 tile 深灰、無標線）；道路 components=1、existing 建築 100% 貼主路網。
+- **管網分層（#12）**：`ui.pipeLayers` 三層 visible、`ui.pipeFlow` 流動光點（1 draw）；underground.ts ≤4 draws；公用面板 eye chips。
+- **建築圖層（#13）**：`ui.showBuildings`；city-view 隱藏 buildings group；topbar B toggle。
+- **深圳市參考區（#14）**：placement/zoning/road/pipe/rail/demolish 全部 block；`render/shenzhen-overlay.ts` hatch＋邊界＋label。
+- **城事縮退（#15）**：`ui.showStats` 同 `is-info-collapsed` 持久同步。
+- **渡輪（#16）**：water BFS path（3–400 格）、逐格推進、每次 validate、失效回收；ferry tests。
+- **UI（#9）**：build panel body scroll／rail collapse／sticky tabs。

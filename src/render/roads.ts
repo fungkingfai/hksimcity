@@ -127,6 +127,45 @@ export function createRoadsView(state: GameState): RoadsView {
     }),
   );
 
+  /** #10：existing 窄街專用（0.52 tile 闊、深灰、無標線） */
+  const localSlabGeo = track(new THREE.BoxGeometry(TILE * 0.52, 0.07, TILE * 0.52));
+  localSlabGeo.translate(0, -0.035, 0);
+  const localAsphaltMat = track(
+    new THREE.MeshLambertMaterial({ color: 0x50565a, map: asphaltTex ?? undefined }),
+  );
+
+  /** #11：高架橋面＋柱 */
+  const elevatedDeckGeo = track(new THREE.BoxGeometry(TILE * 0.96, 0.16, TILE * 0.96));
+  elevatedDeckGeo.translate(0, -0.08, 0);
+  const elevatedDeckMat = track(new THREE.MeshLambertMaterial({ color: 0x9aa1a4 }));
+  const elevatedColumnGeo = track(new THREE.BoxGeometry(0.32, 2.3, 0.32));
+  const elevatedColumnMat = track(new THREE.MeshLambertMaterial({ color: 0x7f8588 }));
+
+  /** #11：隧道（地面標線＋入口龍門＋U 層隧道管） */
+  const tunnelRouteGeo = track(new THREE.BoxGeometry(TILE * 0.5, 0.03, TILE * 0.5));
+  tunnelRouteGeo.translate(0, 0.015, 0);
+  const tunnelRouteMat = track(
+    new THREE.MeshBasicMaterial({ color: 0x1f2a30, transparent: true, opacity: 0.72, depthWrite: false }),
+  );
+  const tunnelPortalGeo = track(new THREE.BoxGeometry(TILE * 0.92, 2.2, 0.28));
+  const tunnelPortalMat = track(new THREE.MeshLambertMaterial({ color: 0x8b9094 }));
+  const tunnelDashGeo = track(new THREE.BoxGeometry(0.42, 0.05, 0.42));
+  const tunnelDashMat = track(
+    new THREE.MeshBasicMaterial({ color: 0x8fe3ff, transparent: true, opacity: 0.85, depthWrite: false, fog: false }),
+  );
+  const tunnelTubeGeo = track(new THREE.BoxGeometry(TILE * 0.42, 0.06, TILE * 0.88));
+  tunnelTubeGeo.translate(0, 0.03, 0);
+  const tunnelTubeMat = track(
+    new THREE.MeshBasicMaterial({
+      color: 0x7fd6ff,
+      transparent: true,
+      opacity: 0.85,
+      depthWrite: false,
+      depthTest: false,
+      fog: false,
+    }),
+  );
+
   /** 行人路整格板（玩家鋪設的 sidewalk） */
   const walkSlabGeo = track(new THREE.BoxGeometry(TILE * 0.995, 0.11, TILE * 0.995));
   walkSlabGeo.translate(0, -0.055, 0);
@@ -275,7 +314,9 @@ export function createRoadsView(state: GameState): RoadsView {
   // ─────────── 重建 ───────────
 
   let meshes: THREE.InstancedMesh[] = [];
+  let tunnelTubeMesh: THREE.InstancedMesh | null = null;
   const clearMeshes = (): void => {
+    tunnelTubeMesh = null;
     for (const m of meshes) {
       group.remove(m);
       m.dispose();
@@ -346,6 +387,13 @@ export function createRoadsView(state: GameState): RoadsView {
     }
 
     const asphalt: Slab[] = [];
+    const localAsphalt: Slab[] = [];
+    const elevatedDecks: Slab[] = [];
+    const elevatedColumns: Slab[] = [];
+    const tunnelRoute: Slab[] = [];
+    const tunnelDashes: Slab[] = [];
+    const tunnelPortals: Slab[] = [];
+    const tunnelTubes: Slab[] = [];
     const walkSlabsGrey: Slab[] = [];
     const walkSlabsRed: Slab[] = [];
     const stripsGrey: Strip[] = [];
@@ -425,6 +473,49 @@ export function createRoadsView(state: GameState): RoadsView {
       const intersection = nsRoad && ewRoad;
       const h = hash2d(tx, ty, seed + 9001);
 
+      const roadGrade = (tile as { roadGrade?: 'surface' | 'elevated' | 'tunnel' }).roadGrade ?? 'surface';
+      const isLocal = (tile as { localRoad?: boolean }).localRoad === true && roadGrade === 'surface';
+
+      // 高架：橋面 + 柱（可跨水／山）
+      if (roadGrade === 'elevated') {
+        elevatedDecks.push({ x: wx, z: wz, y: surfaceY + 2.25, rot: 0, shade: 0.9 + h * 0.16 });
+        if ((tx + ty) % 2 === 0) {
+          elevatedColumns.push({ x: wx, z: wz, y: surfaceY + 1.14, rot: 0, shade: 0.82 });
+        }
+        continue;
+      }
+
+      // 隧道：地面深色路線 + 出入口龍門；U 層顯示隧道管
+      if (roadGrade === 'tunnel') {
+        tunnelRoute.push({ x: wx, z: wz, y: surfaceY + 0.02, rot: 0, shade: 0.8 });
+        tunnelTubes.push({ x: wx, z: wz, y: surfaceY + 0.04, rot: 0, shade: 1 });
+        tunnelDashes.push({ x: wx, z: wz, y: surfaceY + 0.07, rot: 0, shade: 1 });
+        // 隧道口：任何鄰格唔係 tunnel（山／水／地面道路）就係入口/出口
+        const gradeAt = (dx: number, dy: number): string | null => {
+          const nx = tx + dx;
+          const ny = ty + dy;
+          if (nx < 0 || ny < 0 || nx >= s.width || ny >= s.height) return null;
+          const nt = s.tiles[ny * s.width + nx];
+          return nt.road ? (nt.roadGrade ?? 'surface') : null;
+        };
+        const ne = gradeAt(1, 0);
+        const nw = gradeAt(-1, 0);
+        const nn = gradeAt(0, -1);
+        const ns = gradeAt(0, 1);
+        const endpoint = ne !== 'tunnel' || nw !== 'tunnel' || nn !== 'tunnel' || ns !== 'tunnel';
+        if (endpoint) {
+          const horizontal = ne !== 'tunnel' || nw !== 'tunnel';
+          tunnelPortals.push({
+            x: wx,
+            z: wz,
+            y: surfaceY + 1.05,
+            rot: horizontal ? Math.PI / 2 : 0,
+            shade: 0.95,
+          });
+        }
+        continue;
+      }
+
       if (water) {
         // 過海隧道：深色管頂 + 兩側半透明管壁 + 黃虛線
         tunnelDecks.push({ x: wx, z: wz, y: 0.26, rot: 0, shade: 0.9 + h * 0.2 });
@@ -439,6 +530,10 @@ export function createRoadsView(state: GameState): RoadsView {
         continue;
       }
 
+      if (isLocal) {
+        localAsphalt.push({ x: wx, z: wz, y: surfaceY - 0.01, rot: 0, shade: 0.9 + h * 0.18 });
+        continue;
+      }
       asphalt.push({ x: wx, z: wz, y: surfaceY, rot: 0, shade: 0.92 + h * 0.16 });
 
       // ── 標線 ──
@@ -672,6 +767,49 @@ export function createRoadsView(state: GameState): RoadsView {
       meshes.push(mesh);
     };
     buildSlabs(asphalt, asphaltMat, 'road-asphalt', slabGeo);
+    buildSlabs(localAsphalt, localAsphaltMat, 'road-asphalt-local', localSlabGeo);
+    buildSlabs(elevatedDecks, elevatedDeckMat, 'road-elevated-decks', elevatedDeckGeo);
+    buildSlabs(elevatedColumns, elevatedColumnMat, 'road-elevated-columns', elevatedColumnGeo);
+    buildSlabs(tunnelRoute, tunnelRouteMat, 'road-tunnel-route', tunnelRouteGeo);
+    if (tunnelPortals.length > 0) {
+      const mesh = makeMesh(tunnelPortalGeo, tunnelPortalMat, tunnelPortals.length, 'road-tunnel-portals');
+      tunnelPortals.forEach((p, i) => {
+        dummy.position.set(p.x, p.y, p.z);
+        dummy.rotation.set(0, p.rot, 0);
+        dummy.scale.set(1, 1, 1);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(i, dummy.matrix);
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+      meshes.push(mesh);
+    }
+    if (tunnelDashes.length > 0) {
+      const mesh = makeMesh(tunnelDashGeo, tunnelDashMat, tunnelDashes.length, 'road-tunnel-dashes');
+      tunnelDashes.forEach((p, i) => {
+        dummy.position.set(p.x, p.y, p.z);
+        dummy.rotation.set(0, 0, 0);
+        dummy.scale.set(1, 1, 1);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(i, dummy.matrix);
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+      meshes.push(mesh);
+    }
+    // U 層隧道管（只在 showUnderground 時顯示；update 控制）
+    tunnelTubeMesh = null;
+    if (tunnelTubes.length > 0) {
+      tunnelTubeMesh = makeMesh(tunnelTubeGeo, tunnelTubeMat, tunnelTubes.length, 'road-tunnel-tubes');
+      tunnelTubes.forEach((p, i) => {
+        dummy.position.set(p.x, p.y, p.z);
+        dummy.rotation.set(0, p.rot, 0);
+        dummy.scale.set(1, 1, 1);
+        dummy.updateMatrix();
+        tunnelTubeMesh!.setMatrixAt(i, dummy.matrix);
+      });
+      tunnelTubeMesh.instanceMatrix.needsUpdate = true;
+      tunnelTubeMesh.visible = s.ui.showUnderground === true;
+      meshes.push(tunnelTubeMesh);
+    }
     buildSlabs(walkSlabsGrey, walkGreyMat, 'sidewalk-grey', walkSlabGeo);
     buildSlabs(walkSlabsRed, walkRedMat, 'sidewalk-red', walkSlabGeo);
 
@@ -857,10 +995,14 @@ export function createRoadsView(state: GameState): RoadsView {
     let count = 0;
     let sum = 0;
     for (let i = 0; i < s.tiles.length; i++) {
-      if (s.tiles[i].road) {
+      const t = s.tiles[i] as { road: boolean; sidewalk?: boolean; roadGrade?: string; localRoad?: boolean };
+      if (t.road) {
         count++;
         sum += i;
-      } else if (s.tiles[i].sidewalk) {
+        if (t.roadGrade === 'elevated') sum += 1_000_003;
+        else if (t.roadGrade === 'tunnel') sum += 2_000_003;
+        if (t.localRoad) sum += 3_000_001;
+      } else if (t.sidewalk) {
         count += 7919;
         sum += i * 3;
       }
@@ -875,6 +1017,7 @@ export function createRoadsView(state: GameState): RoadsView {
     group,
     update(s: GameState, dt: number): void {
       void dt;
+      if (tunnelTubeMesh) tunnelTubeMesh.visible = s.ui.showUnderground === true;
       // 路網變更偵測
       if (s.ui.revision !== lastRevision) {
         lastRevision = s.ui.revision;

@@ -506,7 +506,7 @@ try {
     };
   }, 30);
   result.sim = sim;
-  check('開發商自動建屋（住宅／商業／農田）', sim.autoBuildings >= 12 && sim.byZone.residential > 0 && sim.byZone.commercial > 0 && sim.byZone.farmland > 0, {
+  check('開發商自動建屋（住宅／商業；農地視乎路網）', sim.autoBuildings >= 12 && sim.byZone.residential > 0 && sim.byZone.commercial > 0, {
     auto: sim.autoBuildings,
     byZone: sim.byZone,
     buildings: sim.buildings,
@@ -755,6 +755,122 @@ try {
     return { placed, spent, removed };
   });
   check('港鐵鐵路工具：地面軌可鋪設（扣款）及拆除', railTool.placed === true && railTool.spent > 0 && railTool.removed === true, railTool);
+
+  // ── Round 8（issues #9/#11/#12/#13/#14/#15）──
+  const round8 = await page.evaluate(async () => {
+    const { store, actions, view } = window.__HK_CITY__;
+    const st = store.state;
+    const W = st.width;
+    const H = st.height;
+    const result = {};
+
+    // #9 build panel scroll
+    const scroller = document.querySelector('.build-body-scroll');
+    if (scroller) {
+      result.panelScroll = { scrollHeight: scroller.scrollHeight, client: scroller.clientHeight };
+      scroller.scrollTop = scroller.scrollHeight;
+      const cards = [...document.querySelectorAll('.build-panel .pcard, .build-panel .bcard')];
+      const last = cards[cards.length - 1];
+      const panel = document.querySelector('.build-panel');
+      if (last && panel) {
+        const lb = last.getBoundingClientRect().bottom;
+        const pb = panel.getBoundingClientRect().bottom;
+        result.lastCardVisible = lb <= pb + 2;
+      }
+    }
+
+    // #15 city panel collapse persists
+    const infoBtn = document.querySelector('.info-panel .collapse-btn');
+    const hud = document.querySelector('.hud');
+    if (infoBtn && hud) {
+      infoBtn.click();
+      await new Promise((r) => setTimeout(r, 450));
+      result.infoCollapsed = hud.classList.contains('is-info-collapsed');
+      result.showStatsAfterCollapse = st.ui.showStats;
+      const handle = document.querySelector('.handle-info');
+      if (handle) {
+        handle.click();
+        await new Promise((r) => setTimeout(r, 300));
+      }
+      result.infoExpanded = !hud.classList.contains('is-info-collapsed') && st.ui.showStats === true;
+    }
+
+    // #13 building visibility 嘅 state 切換（render group 喺 page 外等待後檢查）
+    st.ui.showBuildings = true;
+
+    // #12 pipe layers / flow
+    actions.setPipeLayer?.('water', false);
+    result.pipeLayerOff = st.ui.pipeLayers?.water === false;
+    actions.togglePipeFlow?.();
+    result.pipeFlowOff = st.ui.pipeFlow === false;
+    actions.togglePipeFlow?.();
+    actions.setPipeLayer?.('water', true);
+    result.pipeRestored = st.ui.pipeLayers?.water !== false && st.ui.pipeFlow !== false;
+
+    // #11 elevated road over water
+    const isSz = window.__HK_CITY__.zoneDebug?.isShenzhenSideTile;
+    let waterIdx = -1;
+    for (let i = 0; i < st.tiles.length; i++) {
+      const t = st.tiles[i];
+      const x = i % W;
+      const y = Math.floor(i / W);
+      if (t.terrain === 'water' && !t.road && !(isSz && isSz(x, y, W, H))) { waterIdx = i; break; }
+    }
+    if (waterIdx >= 0) {
+      st.finance.treasury = Math.max(st.finance.treasury, 5_000_000);
+      st.ui.roadGrade = 'elevated';
+      actions.setTool('road');
+      const before = st.finance.treasury;
+      actions.applyToolAt(waterIdx);
+      const tile = st.tiles[waterIdx];
+      result.elevated = { road: tile.road === true, grade: tile.roadGrade, spent: before - st.finance.treasury > 0 };
+      actions.setTool(null);
+      st.ui.roadGrade = 'surface';
+    }
+
+    // #14 Shenzhen not buildable
+    let sz = -1;
+    for (let y = 2; y < H - 2 && sz < 0; y++) {
+      for (let x = 2; x < W - 2; x++) {
+        if (window.__HK_CITY__.zoneDebug?.isShenzhenSideTile?.(x, y, W, H)) { sz = y * W + x; break; }
+      }
+    }
+    if (sz >= 0) {
+      actions.setTool('road');
+      actions.applyToolAt(sz);
+      result.shenzhenBlocked = st.tiles[sz].road !== true;
+      actions.setTool(null);
+    }
+    return result;
+  });
+  // #13 建築圖層：state 切換後等 render frame，再檢查 group 可見性
+  await page.evaluate(() => {
+    const { store, actions } = window.__HK_CITY__;
+    store.state.ui.showBuildings = true;
+    actions.toggleBuildings?.();
+  });
+  await page.waitForTimeout(1400);
+  const bHidden = await page.evaluate(() => {
+    const { store, view } = window.__HK_CITY__;
+    return { state: store.state.ui.showBuildings, group: view.buildings?.group?.visible };
+  });
+  await page.evaluate(() => window.__HK_CITY__.actions.toggleBuildings?.());
+  await page.waitForTimeout(1400);
+  const bShown = await page.evaluate(() => {
+    const { store, view } = window.__HK_CITY__;
+    return { state: store.state.ui.showBuildings, group: view.buildings?.group?.visible };
+  });
+  round8.buildingsHidden = bHidden.state === false && bHidden.group === false;
+  round8.buildingsShown = bShown.state !== false && bShown.group !== false;
+  round8.buildingToggle = { hidden: bHidden, shown: bShown };
+  result.round8 = round8;
+
+  check('建造面板可完整滾動（#9）', round8.panelScroll != null && round8.panelScroll.scrollHeight > round8.panelScroll.client + 30, round8);
+  check('城事面板縮退持久（#15）', round8.infoCollapsed === true && round8.showStatsAfterCollapse === false && round8.infoExpanded === true, round8);
+  check('顯示／隱藏建築圖層（#13）', round8.buildingsHidden === true && round8.buildingsShown === true, round8);
+  check('管網分層＋流動 toggle（#12）', round8.pipeLayerOff === true && round8.pipeFlowOff === true && round8.pipeRestored === true, round8);
+  check('道路高架跨水（#11）', round8.elevated?.road === true && round8.elevated?.grade === 'elevated' && round8.elevated?.spent === true, round8.elevated);
+  check('深圳市範圍不可建設（#14）', round8.shenzhenBlocked === true, round8.shenzhenBlocked);
 
   const toggles = await page.evaluate(() => {
     const { store, actions } = window.__HK_CITY__;

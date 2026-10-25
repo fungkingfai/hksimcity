@@ -14,7 +14,7 @@
  */
 
 import { BUILDINGS } from '../core/config';
-import type { Building, GameState, ZoneType } from '../core/types';
+import type { Building, GameState, Tile, ZoneType } from '../core/types';
 import { HK_MAP_DATA } from './hk-map-data.generated';
 import { BORDER_CROSSINGS, designToTileFloat, isShenzhenSideTile } from './border';
 
@@ -309,9 +309,16 @@ function densifySelectedRoads(state: GameState): number {
     const t = tiles[i];
     return !t.road && !t.buildingId && WALKABLE.has(t.terrain);
   };
-  const setRoad = (i: number): void => {
+  const setRoad = (i: number, a?: number, b?: number): void => {
     if (tiles[i].road) return;
     tiles[i].road = true;
+    // 補窿格預設係窄街；如果兩邊都係主幹（localRoad=false）就維持闊路
+    const ta = a != null ? tiles[a] : null;
+    const tb = b != null ? tiles[b] : null;
+    const bothTrunk =
+      !!ta && (ta as Tile & { localRoad?: boolean }).localRoad === false &&
+      !!tb && (tb as Tile & { localRoad?: boolean }).localRoad === false;
+    (tiles[i] as Tile & { localRoad?: boolean }).localRoad = !bothTrunk;
     added++;
   };
   for (let pass = 0; pass < 2; pass++) {
@@ -320,8 +327,8 @@ function densifySelectedRoads(state: GameState): number {
       for (let x = 0; x < width; x++) {
         const i = y * width + x;
         if (!tiles[i].road) continue;
-        if (x + 2 < width && tiles[i + 2].road && walkable(i + 1)) setRoad(i + 1);
-        if (y + 2 < height && tiles[(y + 2) * width + x].road && walkable((y + 1) * width + x)) setRoad((y + 1) * width + x);
+        if (x + 2 < width && tiles[i + 2].road && walkable(i + 1)) setRoad(i + 1, i, i + 2);
+        if (y + 2 < height && tiles[(y + 2) * width + x].road && walkable((y + 1) * width + x)) setRoad((y + 1) * width + x, i, (y + 2) * width + x);
       }
     }
     // 對角缺口：兩條正交路各自有路但斜角相鄰 → 補一格令 4-neigh 連通
@@ -333,8 +340,8 @@ function densifySelectedRoads(state: GameState): number {
         const right = y * width + x + 1;
         const down = (y + 1) * width + x;
         if (tiles[right].road || tiles[down].road) continue;
-        if (walkable(right)) setRoad(right);
-        else if (walkable(down)) setRoad(down);
+        if (walkable(right)) setRoad(right, a, b);
+        else if (walkable(down)) setRoad(down, a, b);
       }
     }
   }
@@ -386,6 +393,7 @@ export function connectExistingRoadComponents(
       for (const ti of add) {
         if (!state.tiles[ti].road) {
           state.tiles[ti].road = true;
+          (state.tiles[ti] as Tile & { localRoad?: boolean }).localRoad = true;
           totalAdded++;
         }
       }
@@ -523,6 +531,7 @@ function connectBuildingsToMainNetwork(
     for (const ti of add) {
       if (!state.tiles[ti].road) {
         state.tiles[ti].road = true;
+        (state.tiles[ti] as Tile & { localRoad?: boolean }).localRoad = true;
         added++;
       }
     }
@@ -890,13 +899,19 @@ export function generateExistingBuildings(
     hintComps.push(list);
   }
   hintComps.sort((a, b) => b.length - a.length);
+  // #10：starter 道路唔好太密。existing 生成路 cap 收緊到 2,400 格（加 starter 小鎮
+  // 同接駁後總數約 2,800–3,400）；其中頭 45% 當主幹（闊路），其餘做窄街
+  // `localRoad=true`（render 用窄身深灰街，唔再成片黑）。
+  const roadCap = Math.min(maxRoads, 2400);
+  const trunkBudget = Math.round(roadCap * 0.45);
   let selectedRoads = 0;
   for (const comp of hintComps) {
-    if (selectedRoads >= maxRoads) break;
-    if (selectedRoads + comp.length > maxRoads) continue; // 揀細啲 component 填滿 cap
+    if (selectedRoads >= roadCap) break;
+    if (selectedRoads + comp.length > roadCap) continue; // 揀細啲 component 填滿 cap
     for (const i of comp) {
       if (tiles[i].road) continue;
       tiles[i].road = true;
+      (tiles[i] as Tile & { localRoad?: boolean }).localRoad = selectedRoads >= trunkBudget;
       selectedRoads++;
     }
   }

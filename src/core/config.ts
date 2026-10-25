@@ -18,11 +18,12 @@ import type {
   TransitMode,
   Weather,
   ZoneType,
+  RoadGrade,
 } from './types';
 
 // ─────────────────────────── 世界常數 ───────────────────────────
 
-export const GAME_VERSION = 7;
+export const GAME_VERSION = 8;
 
 /** 香港地圖：600×600 格（由 CSDI／地政總署真實地理數據生成；每格 112m，約舊版 96×96 的 39 倍面積） */
 export const GRID_WIDTH = 600;
@@ -61,6 +62,16 @@ export const ROAD_COST = 15_000;
 export const SIDEWALK_COST = 5_000;
 export const ROAD_UPKEEP = 0;
 export const DEMOLISH_REFUND_RATE = 0.3;
+
+/** Round 8／issue #11：道路等級（地面／高架／隧道） */
+export const ROAD_GRADE_INFO: Record<
+  RoadGrade,
+  { label: string; cost: number; upkeep: number; crossWater: boolean; crossMountain: boolean }
+> = {
+  surface: { label: '地面道路', cost: ROAD_COST, upkeep: 0, crossWater: false, crossMountain: false },
+  elevated: { label: '高架橋', cost: 75_000, upkeep: 0, crossWater: true, crossMountain: true },
+  tunnel: { label: '隧道', cost: 60_000, upkeep: 0, crossWater: true, crossMountain: true },
+};
 
 /** 薪金（每月，港幣）：受僱市民的基準月薪 */
 export const BASE_MONTHLY_SALARY = 18_000;

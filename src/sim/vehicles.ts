@@ -82,8 +82,12 @@ const RECYCLE_CHANCE = 0.24;
 const NIGHT_TRAFFIC_FACTOR = 0.32;
 const EVENING_TRAFFIC_FACTOR = 0.72;
 
-/** 渡輪船身長度（格）：渡輪計算 pathProgress 用 */
-const FERRY_APPROACH_TILES = 1;
+/** 渡輪航道 BFS 上限（格）；超過 400 格視為太遠，唔派船 */
+const MAX_FERRY_PATH_TILES = 400;
+/** 渡輪最短航道（格）；太短就唔算過海航線 */
+const MIN_FERRY_PATH_TILES = 3;
+/** 水域 BFS 最多探索節點（防止喺巨型地圖亂探） */
+const WATER_BFS_VISIT_LIMIT = 40000;
 
 /** 生成用的 BFS 擴散上限（避免大 map 全搜） */
 const BFS_VISIT_LIMIT = 3200;
@@ -151,6 +155,11 @@ interface VehiclesRuntime {
   spawnAccumulator: number;
   /** 上一幀的車輛目標總數（除數用） */
   targetTotal: number;
+  /** 渡輪航道 BFS 重用 buffer */
+  waterStamp: Int32Array | null;
+  waterParent: Int32Array | null;
+  waterQueue: Int32Array | null;
+  waterToken: number;
 }
 
 const runtimes = new WeakMap<GameState, VehiclesRuntime>();
@@ -167,6 +176,10 @@ function runtimeOf(state: GameState): VehiclesRuntime {
       bfsQueue: null,
       spawnAccumulator: 0,
       targetTotal: 0,
+      waterStamp: null,
+      waterParent: null,
+      waterQueue: null,
+      waterToken: 0,
     };
     runtimes.set(state, rt);
   }
@@ -622,26 +635,102 @@ function pierWaterTiles(state: GameState, building: Building): number[] {
   return result;
 }
 
-/** 由 a 到 b 的直線航路是否全程水域（每 0.5 格取樣） */
-function isWaterLine(state: GameState, a: number, b: number): boolean {
-  const ax = tileCenterX(state, a);
-  const ay = tileCenterY(state, a);
-  const bx = tileCenterX(state, b);
-  const by = tileCenterY(state, b);
-  const distance = Math.hypot(bx - ax, by - ay);
-  if (distance < 3) return false;
-  const steps = Math.ceil(distance / 0.5);
-  for (let i = 1; i < steps; i++) {
-    const t = i / steps;
-    const tx = Math.floor(ax + (bx - ax) * t);
-    const ty = Math.floor(ay + (by - ay) * t);
-    if (!isWaterAt(state, tx, ty)) return false;
+/** 航道全部格都係水？（spawn 前／每次重用都驗） */
+function isWaterPathValid(state: GameState, path: number[]): boolean {
+  if (path.length < MIN_FERRY_PATH_TILES) return false;
+  for (const tile of path) {
+    if (state.tiles[tile]?.terrain !== 'water') return false;
   }
   return true;
 }
 
-/** 找一對可通航的渡輪碼頭水域航線；找不到回傳 null */
-function findFerryRoute(state: GameState, rt: VehiclesRuntime): [number, number] | null {
+/**
+ * 水域 4 鄰接 BFS：由 starts（碼頭 A 對開水域）搵最近可達 goals（碼頭 B 對開水域）。
+ * 只可行 water tile；回傳包含頭尾嘅完整 tile path（最短），搵唔到／超過 maxTiles 回傳 null。
+ * 用 runtime buffer（stamp/parent/queue）避免每次 allocation。
+ */
+function findWaterPath(
+  state: GameState,
+  rt: VehiclesRuntime,
+  starts: number[],
+  goals: number[],
+  maxTiles: number,
+): number[] | null {
+  const n = state.tiles.length;
+  if (!rt.waterStamp || rt.waterStamp.length !== n) {
+    rt.waterStamp = new Int32Array(n);
+    rt.waterParent = new Int32Array(n);
+    rt.waterQueue = new Int32Array(n);
+    rt.waterToken = 0;
+  }
+  const stamp = rt.waterStamp;
+  const parent = rt.waterParent as Int32Array;
+  const queue = rt.waterQueue as Int32Array;
+  rt.waterToken += 1;
+  if (rt.waterToken > 0x3fffffff) {
+    stamp.fill(0);
+    rt.waterToken = 1;
+  }
+  const token = rt.waterToken;
+
+  const goalSet = new Set<number>();
+  for (const goal of goals) {
+    if (state.tiles[goal]?.terrain === 'water') goalSet.add(goal);
+  }
+  if (goalSet.size === 0) return null;
+
+  let head = 0;
+  let tail = 0;
+  for (const start of starts) {
+    if (stamp[start] === token) continue;
+    if (state.tiles[start]?.terrain !== 'water') continue;
+    stamp[start] = token;
+    parent[start] = -1;
+    queue[tail++] = start;
+  }
+  if (tail === 0) return null;
+
+  const width = state.width;
+  const height = state.height;
+  let visited = 0;
+  while (head < tail && visited < WATER_BFS_VISIT_LIMIT) {
+    const cur = queue[head++];
+    visited++;
+    if (goalSet.has(cur)) {
+      const path: number[] = [];
+      let node = cur;
+      while (node !== -1) {
+        path.push(node);
+        node = parent[node];
+      }
+      path.reverse();
+      return path.length >= MIN_FERRY_PATH_TILES && path.length <= maxTiles ? path : null;
+    }
+    const x = cur % width;
+    const y = (cur / width) | 0;
+    const neighbors = [
+      y > 0 ? cur - width : -1,
+      y < height - 1 ? cur + width : -1,
+      x > 0 ? cur - 1 : -1,
+      x < width - 1 ? cur + 1 : -1,
+    ];
+    for (const next of neighbors) {
+      if (next < 0 || stamp[next] === token) continue;
+      if (state.tiles[next]?.terrain !== 'water') continue;
+      stamp[next] = token;
+      parent[next] = cur;
+      queue[tail++] = next;
+    }
+  }
+  return null;
+}
+
+/**
+ * 找一對可通航的渡輪碼頭航道：由碼頭 A 對開水域 BFS 到碼頭 B 對開水域，
+ * 保證**整條 path 每格都係 water**（唔會再出現船喺陸地／馬路上）。
+ * 碼頭對由遠至近試（遠航線較有維港氣勢）；BFS 超過 400 格 skip。
+ */
+function findFerryRoute(state: GameState, rt: VehiclesRuntime): number[] | null {
   const piers: Building[] = [];
   for (const building of state.buildings) {
     const transit = BUILDINGS[building.key]?.transit;
@@ -649,8 +738,8 @@ function findFerryRoute(state: GameState, rt: VehiclesRuntime): [number, number]
   }
   if (piers.length < 2) return null;
   const waterTiles = piers.map((pier) => pierWaterTiles(state, pier));
-  // 先試碼頭對之間較遠的航線，讓小輪橫渡維港更有氣勢
-  const pairs: { a: Building; b: Building; dist: number }[] = [];
+
+  const pairs: { a: number; b: number; dist: number }[] = [];
   for (let i = 0; i < piers.length; i++) {
     for (let j = i + 1; j < piers.length; j++) {
       if (waterTiles[i].length === 0 || waterTiles[j].length === 0) continue;
@@ -660,21 +749,16 @@ function findFerryRoute(state: GameState, rt: VehiclesRuntime): [number, number]
         pi.x + pi.w / 2 - (pj.x + pj.w / 2),
         pi.y + pi.h / 2 - (pj.y + pj.h / 2),
       );
-      pairs.push({ a: pi, b: pj, dist });
+      pairs.push({ a: i, b: j, dist });
     }
   }
   pairs.sort((a, b) => b.dist - a.dist);
-  const rng = rt.rng;
   for (const pair of pairs) {
-    const ai = piers.indexOf(pair.a);
-    const bi = piers.indexOf(pair.b);
-    const aTiles = waterTiles[ai];
-    const bTiles = waterTiles[bi];
-    for (let attempt = 0; attempt < 10; attempt++) {
-      const a = randomOf(rng, aTiles);
-      const b = randomOf(rng, bTiles);
-      if (isWaterLine(state, a, b)) return [a, b];
-    }
+    const path = findWaterPath(state, rt, waterTiles[pair.a], waterTiles[pair.b], MAX_FERRY_PATH_TILES);
+    if (!path) continue;
+    if (!isWaterPathValid(state, path)) continue;
+    // 一半機會反向航行（兩岸出發方向都有船）
+    return rt.rng() < 0.5 ? path : path.slice().reverse();
   }
   return null;
 }
@@ -683,16 +767,16 @@ function spawnFerryVehicle(state: GameState, rt: VehiclesRuntime): Vehicle | nul
   if (state.vehicles.length >= MAX_TRAFFIC_VEHICLES) return null;
   if (state.transit.suspended || state.clock.weather === 'storm') return null;
   const route = findFerryRoute(state, rt);
-  if (!route) return null;
+  if (!route || !isWaterPathValid(state, route)) return null;
   const rng = rt.rng;
-  const [a, b] = route;
+  const path = route.slice();
   const vehicle: Vehicle = {
     id: state.nextVehicleId++,
     kind: 'ferry',
-    x: tileCenterX(state, a),
-    y: tileCenterY(state, a),
+    x: tileCenterX(state, path[0]),
+    y: tileCenterY(state, path[0]),
     angle: 0,
-    path: [a, b],
+    path,
     pathProgress: 0,
     speed: VEHICLE_SPEED.ferry * (0.9 + rng() * 0.2),
     color: FERRY_GREEN_WHITE,
@@ -1212,21 +1296,25 @@ function updateRailTrain(state: GameState, vehicle: Vehicle, gameMinutes: number
   return true;
 }
 
-/** 更新一艘渡輪；回傳 false 代表應回收（靠岸／颱風停航） */
+/** 更新一艘渡輪；回傳 false 代表應回收（颱風停航／航道失效） */
 function updateFerryVehicle(state: GameState, vehicle: Vehicle, gameMinutes: number): boolean {
   if (state.transit.suspended || state.clock.weather === 'storm') return false;
-  if (vehicle.path.length < 2) return false;
-  const a = vehicle.path[0];
-  const b = vehicle.path[1];
-  const distance = Math.hypot(
-    tileCenterX(state, b) - tileCenterX(state, a),
-    tileCenterY(state, b) - tileCenterY(state, a),
-  );
-  if (distance < 3) return false;
-  vehicle.pathProgress += (vehicle.speed * gameMinutes) / Math.max(1, distance);
-  if (vehicle.pathProgress >= 1) {
-    // 到岸：調頭回航（來回維港兩岸），並更換乘客
-    vehicle.path = [b, a];
+  const path = vehicle.path;
+  const last = path.length - 1;
+  if (last < 1) return false;
+  // 每次重用航道都驗一次：玩家／地圖若改動水域就回收（下一幀按新航道重派）
+  if (!isWaterPathValid(state, path)) return false;
+
+  const seg = clamp(Math.floor(vehicle.pathProgress), 0, last - 1);
+  if (state.tiles[path[seg]]?.terrain !== 'water' || state.tiles[path[seg + 1]]?.terrain !== 'water') {
+    return false;
+  }
+
+  // 沿 tile path 推進（船速較慢；按遊戲分鐘）
+  vehicle.pathProgress += Math.max(0.0001, vehicle.speed) * gameMinutes;
+  if (vehicle.pathProgress >= last) {
+    // 到岸：調頭回航（雙向航道），並更換乘客
+    vehicle.path.reverse();
     vehicle.pathProgress = 0;
     vehicle.load = 20 + Math.floor(Math.random() * 130);
     updateVehiclePose(state, vehicle);

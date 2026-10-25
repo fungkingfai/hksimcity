@@ -1,7 +1,7 @@
 {
   "name": "hksimcity",
-  "version": "0.7.0",
-  "description": "《維港之城》— 香港城市建造模擬遊戲（three.js，600×600 真實地理大地圖、分區／管網／鐵路／機場碼頭、可進入建築）",
+  "version": "0.8.0",
+  "description": "《維港之城》— 香港城市建造模擬遊戲（three.js，600×600 真實地理大地圖、分區／管網／鐵路／道路高架隧道／深圳邊境、可進入建築）",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 5273",

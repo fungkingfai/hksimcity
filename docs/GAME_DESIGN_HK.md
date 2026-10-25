@@ -1,6 +1,6 @@
 # 《維港之城》遊戲設計文件（GDD）
 
-> 文件版本：1.0（2026-10-21）｜撰寫：game-designer
+> 文件版本：1.1（2026-10-25；Round 8 v0.8.0）｜撰寫：game-designer
 > 專案：`hk-city/`（由 `huaxia-city/` 分支的 three.js + TypeScript + Vite 城市建造遊戲，香港版）
 > 依據：`hk-city/src/core/types.ts`、`hk-city/src/core/config.ts`（現有 72×72 地圖、22 種建築、8 種資源的引擎骨架）、`huaxia-city/docs/ARCHITECTURE.md`、`huaxia-city/docs/GAME_DESIGN.md`，以及 `hk-city/docs/RESEARCH_HK.md`（同類遊戲＋香港研究，引用代號 R-XXX）。
 >
@@ -180,6 +180,8 @@ Round 4 不再用 Round 3 的「7 區矩形」程序化分區；地圖上的香�
 15. **現有樓群（issue #7）**：starter 會把 spawn 附近 250–400 座 density 樓群轉為真正 `Building`（`existing:true`、zone、居民／職位、道路接駁）；faux density 在 `tile.buildingId>=0` 自動隱藏；empty 完全不變。詳見 `ROUND6_ISSUES.md` §5。
 
 ### 2.5 道路規則（整合行人路）
+
+**Round 8（#10／#11）道路分級**：`Tile.roadClass`（arterial／street／alley）＋`Tile.roadGrade`（surface／elevated／tunnel）；路面造價：地面 $15k／格、高架 $75k、隧道 $60k；高架／隧道可跨海穿山（隧道可跨水／山，MVP 唔可跨建築）。玩家可拖曳起點→終點拉 L 形路，拖曳中 **M** 轉高架、**N** 轉隧道；詳見 `ROUND8_ISSUES.md` §3 與 `UI_SPEC_HK.md` §24。
 
 | 規則 | 內容 |
 |---|---|
@@ -1119,18 +1121,18 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
 
 ---
 
-## 12. 存檔與版本（v7 精簡格式，600×600 真實地圖）
+## 12. 存檔與版本（v8 精簡格式，v0.8.0 道路分級）
 
 | 項目 | 內容 |
 |---|---|
-| `GAME_VERSION` | **7**（Round 6；`config.ts` 現為 6，待 Lead bump） |
+| `GAME_VERSION` | **8**（v0.8.0；`config.ts` 現為 7，待 Lead bump） |
 | 存檔 key | localStorage 前綴 `victoria-harbour.save.`；slot 0 自動、slot 1–3 手動 |
-| 格式 | **`hk-city-compact`**：`{ format, version:7, seed, width:600, height:600, gameMode, tileEdits:number[], railEdits:number[], info:{...}, state:Omit<GameState,'tiles'> }` |
-| 稀疏格 | `tileEdits` 記道路／行人路／分區／管線；**`railEdits=[index,gradeCode,...]`**（0 無／1 地面／2 高架／3 地下）；地形由 seed＋生成檔重新解碼 |
+| 格式 | **`hk-city-compact`**：`{ format, version:8, seed, width:600, height:600, gameMode, tileEdits:number[], railEdits:number[], **roadGradeEdits:number[]**, info:{...}, state:Omit<GameState,'tiles'> }` |
+| 稀疏格 | `tileEdits` 記道路／行人路／分區／管線（含 roadClass bits）；`railEdits` 記鐵路 grade；**`roadGradeEdits=[index,code]`**（0 surface／1 elevated／2 tunnel）；地形由 seed＋生成檔重生 |
 | 還原 | 用 `seed` 重新 `generateWorld(seed,600,600,{starterRoads: gameMode==='starter'})` → 套 tileEdits／railEdits → 由 buildings 重建 `buildingId` → 補 spawn／gameMode／railNetwork |
 | 大小 | 約 **80–140KB**（完整 360,000 格 JSON 會爆 localStorage 配額） |
 | 存檔列表 | 用 `info` 快照（城市名／人口／庫房／日期／地圖 600×600），不重新解碼地圖，避免 1–2 秒卡 |
-| 兼容性 | 只接受 **600×600、version 7**；96／304／480（v2–v5）／600 v6 舊存檔拒絕（提示重新開局） |
+| 兼容性 | 只接受 **600×600、version 8**；v7 舊檔 hydrate 時 water+road → tunnel、其餘 surface；舊 v2–v7 拒絕 |
 | 讀檔後 | `ui.mode='city'`、退出室內、清除工具、重算連通性、UI 重繪（`store.on('reset')`） |
 
 **已定稿 state 欄位**：同 Round 3（clock／finance／stats／gameMode／spawn／zoneDemand／vehicles／transit／Tile.zone／Building.auto/zone／UIState.showZones/showStartScreen／citizen.salary/commuteMode 等），另加 **`Tile.density`／`Tile.buildingHeight`**（真實樓群視覺；只 render 用，不需 sparse save——由地形數據重新生成）。
@@ -1213,7 +1215,7 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
 
 | 常數 | 值 | 說明 |
 |---|---|---|
-| `GAME_VERSION` | **7**（Round 6；`config.ts` 現為 6，待 Lead bump） |
+| `GAME_VERSION` | **8**（v0.8.0；`config.ts` 現為 7，待 Lead bump） |
 | `GRID_WIDTH`／`GRID_HEIGHT` | **600／600** | 360,000 格 |
 | `TILE_SIZE` | 2 | 每格世界 2 單位 |
 | `MAP_SCALE` | **6.25**（600/96） | 霧／天空／相機距離／deco 密度 |
@@ -1456,6 +1458,85 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
 - MVP：#5 三 grade＋網絡／鐵路 tab／save v7；#4 四通道＋兩種口岸；#6 進口 60／120＋40% cap；#7 existing 250–400＋道路。
 - P2：列車班次／轉乘、沙頭角／深圳灣鐵路、邊境擠塞事件、existing 升級／專屬模型、口岸排隊。
 - 風險：數據未重生（#4/#7 fallback）；rail 與 mtr 覆蓋雙重計算；existing 令 starter 人口／upkeep 爆升；500 棟效能；v6→v7 兼容。
+
+## 20. Round 8 GitHub Issues（#9–#16，v0.8.0／save v8）
+
+> 完整 UX、路徑規則、契約、驗收、截圖名見 **`ROUND8_ISSUES.md`**；本章只列玩法／系統定位。
+
+### 20.1 #9 左建造面板
+
+- 桌面 panel 改 full-height flex：fixed 分區 header＋rail compact 2×2 chips＋**sticky 公共建築 category tabs**＋唯一 scroll body。
+- Breakpoints：≥1440 width 360、1280–1439 336、1024–1279 300；≤980 左側 drawer；≤768 手機 bottom sheet；457×1078 用 drawer、tabs 可橫向 scroll。
+- 驗收：1280×800、457×1078、390×844；截圖 `round8-build-panel-*.png`。
+
+### 20.2 #10 現有道路密度／窄街
+
+- starter 現有區道路由 5,200 cap → **1,900–2,400 格**；三級：arterial 300–420（闊 3.2、兩邊行人路）、street 900–1,200（2.2、單邊）、alley 500–700（1.4、冇標線）。
+- 道路 `Tile.roadClass`；建築貼任何 class 都算 connected；巴士只行 arterial／street；alley 慢速。
+- 生成：roadHint 最大 component → arterial；medium → street；building 附近補 alley；BFS 保持連通；existing 572 棟 ≥95% 貼路。
+
+### 20.3 #11 道路拉線＋高架／隧道
+
+- Drag 起點→終點 L 形（|dx|≥|dy| 先橫後豎，Shift 切換）；preview 綠／紅＋成本；放開才扣錢；ESC／右鍵取消；最長 120 格。
+- 拖曳中 **M** surface↔elevated、**N** surface↔tunnel；成本 $75k／$60k per tile；高架／隧道可跨海／山，MVP 不可跨建築。
+- Save v8 `roadGradeEdits`；現有 `HK_TUNNELS`（water+road）遷移為 tunnel；載具 elevated +1.2、tunnel 地下 render。
+- Mobile：tap start→tap end＋底部 grade／M／N／確認。
+
+### 20.4 #12 地下管網三層＋流動
+
+- `UIState.pipeLayers` 三層 eye toggle（水／污水／電）＋`pipeFlow`；U 開關；工具選 pipe 自動開對應層。
+- 每層 flow overlay 沿 source→user 方向；每層 ≤5 draw calls（三層 ≤15）；隱藏層 skip；存 save v8。
+- UI：地下工具列 eye chips＋「全部」＋flow toggle；手機橫向 scroll。
+
+### 20.5 #13 建築顯示圖層
+
+- Topbar eye＋快捷 **B** 隱藏／顯示全部建築（保留地形／道路／分區／車輛）；`Tab` 改開建造面板（原 B）。
+- 隱藏時不可選建築；interior 強制顯示；empty no-op；`UIState.showBuildings` 存 save v8。
+
+### 20.6 #14 深圳市參考區
+
+- 深圳河以北＝深圳市參考區，不可建設：placement／zoning／road（surface／elevated／tunnel）／pipe／rail 全部 block；hover／red preview／toast「深圳屬參考區，不可建設」。
+- 視覺：北岸 overlay（淡紅斜線）＋邊界線＋label「深圳（參考區）」＋minimap 暗色；口岸只可香港側 5 格內。
+- Empty 一樣 block；existing-city 已 skip 深圳側；mask O(1) cache。
+
+### 20.7 #15 城事縮退持久
+
+- `UIState.infoCollapsed` 新 state；collapse 只改 state／class，`update()` **唔可以**自動 remove class；handle 44px、aria-expanded；save v8 持久；新局 default 展開；手機 sheet 不受影響。
+
+### 20.8 #16 船在陸上根因
+
+- 根因：`isWaterLine` 只沿中心線 0.5 格 sample、冇 hull clearance；ferry path 只有兩點、船身 1.24×2.6 格 overhang 陸地；冇 BFS 全水域路徑。
+- 修法：`findWaterPath` 水格 BFS（4-neigh／8-neigh corner check）、path 每格 hull 半寬 1 格 clearance、spawn 前 validate、地圖變更／hydrate 重算；`Vehicle.path` 用多點水路徑；render 沿 path 平滑、`WATER_SURFACE_Y`、唔切角。
+- 測試：合成陸地 barrier → no ferry；真實維港 → 正常；填海 → ferry 移除／重找；截圖 `round8-ferry-water.png`。
+
+### 20.9 版本與契約（v0.8.0）
+
+| 項目 | 內容 |
+|---|---|
+| `GAME_VERSION` | **8**（現 7，待 bump） |
+| Save v8 | `roadGradeEdits`、roadClass bits、UIState 新 flags；舊 v7 遷移：water+road→tunnel |
+| `Tile` | `roadGrade?: RoadGrade`、`roadClass?: RoadClass` |
+| `UIState` | `showBuildings`、`pipeLayers`、`pipeFlow`、`roadGrade`（已加骨架）、`infoCollapsed`（新） |
+| `GameActions` | `applyRoadPath`、`toggleBuildings`、`setPipeLayer`、`togglePipeFlow`（骨架已加）、`setRoadGrade`（新） |
+| 文件 | 全部 Round 8 docs 標 **v0.8.0**；`ROUND8_ISSUES.md` 主規格 |
+
+### 20.10 MVP／P2 與風險
+
+- MVP：#9 panel、#10 三級道路、#11 drag＋M/N＋save v8、#12 三層＋flow、#13 B toggle、#14 深圳 block、#15 collapse、#16 water BFS。
+- P2：曲線路／交流道、道路 grade 升級、管網透明度／箭頭、建築 ghost、深圳動畫、渡輪航線編輯、面板自訂。
+- 風險：B 快捷遷移；v7 道路 grade 遷移；道路密度減少令 existing 貼路不足；高架／隧道穿建築規則；flow 效能；深圳 mask；collapse state；ferry BFS 成本。
+
+### 17.7 Round 8（v0.8.0）驗收
+
+- [ ] 建造面板 1280×800／457×1078／手機都可完整操作（tabs sticky、scroll、rail compact）。
+- [ ] existing 道路 ≤2,400 格、三級 hierarchy、572 棟 ≥95% 貼路；視覺唔再過密。
+- [ ] 道路 drag L 形＋M／N 高架隧道；成本／地形限制／save v8 roadGradeEdits；車輛高度正確。
+- [ ] 管網三層 eye toggle＋flow 動畫＋U；每層 ≤5 draws；save 保留。
+- [ ] 建築圖層 B 隱藏／顯示；interior／empty 特例；Tab 開建造面板。
+- [ ] 深圳參考區所有工具 block＋overlay／label／提示；empty 一樣。
+- [ ] 城事 collapse 持久、reload 保留、新局展開、handle 可再開。
+- [ ] 船唔會喺陸地；water BFS＋clearance；填海後重算。
+- [ ] `tsc`／tests／Playwright 8 個截圖齊；版本 v0.8.0／save v8。
 
 ## 附錄 A：數值速查（分區版，以 config 為準）
 

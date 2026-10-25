@@ -1,0 +1,288 @@
+/**
+ * Round 8 UI（issues #9/#11/#12/#13/#15）：
+ * #9 建造面板改為 header 固定＋body 整塊 scroll（rail 可摺疊、tabs sticky）；
+ * #11 道路 grade badge 樣式；#12 管網分層 eye chips；#13 topbar 建築圖層。
+ */
+
+/* ─────────────── #9 建造面板：body scroll ─────────────── */
+
+.build-body-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(36, 224, 255, 0.5) rgba(4, 9, 18, 0.45);
+}
+
+.build-body-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.build-body-scroll::-webkit-scrollbar-track {
+  background: rgba(4, 9, 18, 0.45);
+  border-radius: 999px;
+}
+
+.build-body-scroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(36, 224, 255, 0.7), rgba(255, 61, 127, 0.55));
+  box-shadow: 0 0 8px rgba(36, 224, 255, 0.35);
+  border: 1px solid rgba(4, 9, 18, 0.6);
+}
+
+.build-body-scroll .build-scroll {
+  flex: 0 0 auto;
+  min-height: 0;
+  overflow: visible;
+}
+
+/* 公共建築 tabs：喺 body scroll 內 sticky，scroll 到卡時仍然見到分類 */
+.build-body-scroll .build-tabs-wrap {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  background: linear-gradient(180deg, rgba(9, 18, 34, 0.985), rgba(7, 14, 28, 0.94));
+  backdrop-filter: blur(12px) saturate(130%);
+  -webkit-backdrop-filter: blur(12px) saturate(130%);
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3);
+}
+
+/* 鐵路區可摺疊 */
+.tools-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rail-collapse {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  color: var(--ink-faint);
+  border-radius: 5px;
+  border: 1px solid var(--line-soft);
+  background: rgba(234, 244, 255, 0.04);
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.rail-collapse .ico {
+  width: 11px;
+  height: 11px;
+  transition: transform 0.18s ease;
+  transform: rotate(-90deg);
+}
+
+.rail-collapse:hover {
+  color: var(--cyan-hi);
+  border-color: var(--line-strong);
+  background: rgba(36, 224, 255, 0.1);
+}
+
+.rail-block.collapsed .rail-grid,
+.rail-block.collapsed .rail-hint {
+  display: none;
+}
+
+.rail-block.collapsed {
+  padding-bottom: 2px;
+}
+
+.rail-collapse.collapsed .ico {
+  transform: rotate(90deg);
+}
+
+/* 道路 grade badge（#11） */
+.road-grade-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  border-radius: 999px;
+  color: var(--cyan-hi);
+  border: 1px solid rgba(36, 224, 255, 0.3);
+  background: rgba(36, 224, 255, 0.08);
+}
+
+/* ─────────────── #12 管網分層 ─────────────── */
+
+.pipe-layer-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.pipe-layer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 30%;
+  min-width: 0;
+  padding: 6px 8px;
+  text-align: left;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-soft);
+  background: rgba(234, 244, 255, 0.035);
+  transition: border-color 0.16s, background 0.16s, opacity 0.16s;
+}
+
+.pipe-layer[aria-pressed='true'] {
+  border-color: color-mix(in srgb, var(--util, #24e0ff) 55%, transparent);
+  background: color-mix(in srgb, var(--util, #24e0ff) 11%, transparent);
+}
+
+.pipe-layer[aria-pressed='false'] {
+  opacity: 0.5;
+}
+
+.pipe-layer .pl-eye {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  border-radius: 6px;
+  color: var(--util, #24e0ff);
+  background: color-mix(in srgb, var(--util, #24e0ff) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--util, #24e0ff) 30%, transparent);
+}
+
+.pipe-layer .pl-eye .ico {
+  width: 13px;
+  height: 13px;
+}
+
+.pipe-layer[aria-pressed='false'] .pl-eye {
+  filter: grayscale(1);
+}
+
+.pipe-layer small {
+  display: block;
+  font-size: 8px;
+  color: var(--ink-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+.pipe-layer b {
+  display: block;
+  font-size: 10px;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+.pipe-layer-text {
+  min-width: 0;
+}
+
+.pipe-flow-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  flex: 1 1 100%;
+  height: 26px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: var(--ink-dim);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-soft);
+  background: rgba(234, 244, 255, 0.035);
+}
+
+.pipe-flow-btn[aria-pressed='true'] {
+  color: var(--cyan-hi);
+  border-color: rgba(36, 224, 255, 0.4);
+  background: rgba(36, 224, 255, 0.1);
+  box-shadow: 0 0 12px rgba(36, 224, 255, 0.14);
+}
+
+.pipe-flow-btn .ico {
+  width: 12px;
+  height: 12px;
+  animation: pipeFlowPulse 2.2s ease-in-out infinite;
+}
+
+@keyframes pipeFlowPulse {
+  0%,
+  100% {
+    transform: translateX(-1px);
+    opacity: 0.7;
+  }
+  50% {
+    transform: translateX(1px);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pipe-flow-btn .ico {
+    animation: none;
+  }
+}
+
+/* ─────────────── 手機：body scroll 保持 ─────────────── */
+
+.hud.is-mobile-ui .build-body-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.hud.is-mobile-ui .build-body-scroll .build-tabs-wrap {
+  background: linear-gradient(180deg, rgba(9, 18, 34, 0.99), rgba(7, 14, 28, 0.96));
+}
+
+.hud.is-mobile-ui .pipe-layer {
+  flex: 1 1 46%;
+}
+
+.hud.is-mobile-ui .pipe-flow-btn {
+  min-height: 28px;
+}
+
+/* ─────────────── 頂欄：Round 8 多一個建築圖層控制，窄屏收窄避免溢出 ─────────────── */
+
+@media (max-width: 1500px) {
+  .tb-controls {
+    gap: 4px;
+  }
+  .tb-controls .zone-view-btn {
+    width: 22px;
+    height: 22px;
+  }
+  .tb-controls .zone-view-btn .ico {
+    width: 12px;
+    height: 12px;
+  }
+  .tb-controls .speed-group button {
+    width: 26px;
+  }
+}
+
+@media (max-width: 1320px) {
+  .tb-actions .top-btn {
+    width: 32px;
+    height: 32px;
+  }
+  .tb-controls .speed-group button {
+    width: 24px;
+  }
+  .tb-controls .zone-view-btn {
+    width: 21px;
+    height: 21px;
+  }
+}

@@ -1,6 +1,6 @@
 # 《維港之城》介面規格（UI_SPEC_HK.md）
 
-> 文件版本：1.0（2026-10-21）｜撰寫：game-designer
+> 文件版本：1.1（2026-10-25；Round 8 v0.8.0）｜撰寫：game-designer
 > 專案：`hk-city/`（three.js + TypeScript + Vite 城市建造遊戲，香港版）
 > 依據：`hk-city/docs/GAME_DESIGN_HK.md`、`hk-city/src/core/types.ts`、`hk-city/src/core/config.ts`（2026-10-21 定稿）、`hk-city/docs/RESEARCH_HK.md`
 > 用途：可直接交給 **ui-dev** 實作桌面版與手機版；所有數值／顏色／文案與 config 對齊。
@@ -426,9 +426,9 @@
 - 自動存檔 slot 0（唯讀）＋手動 slot 1–3：
   - 顯示城市名、人口、日期、庫房、真實存檔時間、**地圖 600×600**；空槽顯示「空」。
   - 操作：保存／讀取／刪除（刪除需確認）。
-- **v7 精簡格式**：存檔 = seed＋稀疏道路／行人路／分區變更＋完整 state（不含 360,000 格地形），約 **80–140KB**；還原時重新解碼 600 真實地形；存檔列表用 `info` 快照，不重新解碼地圖。
+- **v8 精簡格式**：存檔 = seed＋稀疏道路／行人路／分區變更＋完整 state（不含 360,000 格地形），約 **80–140KB**；還原時重新解碼 600 真實地形；存檔列表用 `info` 快照，不重新解碼地圖。
 - 底部：匯出存檔（下載 JSON，`hk-city-compact`）、匯入存檔（file input，`.json`）、新遊戲（輸入 seed＋選模式，需確認）。
-- 版本／尺寸檢查：只接受 **600×600、version 7**；96／304／480 舊檔 → 明確提示「此存檔為舊版／舊地圖，無法載入」。
+- 版本／尺寸檢查：只接受 **600×600、version 8**；96／304／480 舊檔 → 明確提示「此存檔為舊版／舊地圖，無法載入」。
 - 存檔操作不可在 8 號風球／載入中執行；匯入時顯示進度（重新生成地形 1.5–2 秒）。
 - 讀檔／新遊戲後：`ui.mode='city'`、退出室內、清除工具、UI 同步重繪。
 
@@ -559,7 +559,7 @@
 - [ ] **minimap**（右下 600×600 真實地形）可點擊／拖曳跳轉、視野框、全圖／市中心／分區 toggle；手機 132px 可摺疊。
 - [ ] 快捷 **O 全圖／P 市中心／L 分區** 生效；相機可 zoom out 至 ~1,625、far ~3,750。
 - [ ] 開局畫面顯示 **600×600 · 360,000 格 · CSDI 真實地理（水塘／土地利用）** badge；empty 文案「完全空地」。
-- [ ] 存檔面板顯示地圖規模、v7 精簡格式、80–160KB；舊 96／304／480／600 v6 檔有拒絕提示。
+- [ ] 存檔面板顯示地圖規模、v8 精簡格式、80–160KB；舊 96／304／480／600 v6–v7 檔有拒絕提示。
 - [ ] 城事面板：概況 9 區塊、問題 chips、建築卡（狀態／庫存／服務／收入／入內／拆卸）。
 - [ ] 財政面板：3 滑桿（15%／16.5%／5%）、7 收入、6 支出、8 個月報表、賣地與煙花按鈕（含冷卻）。
 - [ ] 交通面板：4 模式分擔、載客、通勤、車費、站點列表、颱風停航停駛。
@@ -645,7 +645,7 @@
 - [ ] 交通面板路線 tab 可建 2–12 站路線、Undo、完成、錯誤狀態、車數／票價 slider、盈虧即時顯示。
 - [ ] 機場面板可簽客運／貨運航線、暫停／刪除、統計／噪音顯示；碼頭面板可簽船線、四項吞吐瓶頸、擠塞警告。
 - [ ] 新分類建築卡只在合法區域可放（機場／葵青），錯誤提示清楚。
-- [ ] 600×600、save v7、舊 96／304／480／600 v6 檔拒絕提示；無 console error。
+- [ ] 600×600、save v8、舊 96／304／480／600 v6–v7 檔拒絕提示；無 console error。
 
 ## 23. Round 6 UI 補充（鐵路／深圳河口岸／內地糧食／現有樓宇）
 
@@ -693,11 +693,70 @@
 ### 23.5 Round 6 驗收
 
 - [ ] 鐵路三 grade 可鋪、成本正確、跨海限制、最長 80 格、車站接駁 warning、孤立 ×0.35。
-- [ ] 交通面板鐵路 tab 顯示網絡／乘客／維護；U 層可睇地下鐵路；save v7 railEdits。
+- [ ] 交通面板鐵路 tab 顯示網絡／乘客／維護；U 層可睇地下鐵路；save v8 railEdits。
 - [ ] 深圳河／北岸視覺；4 口岸卡只可在通道 5 格內、接駁判定、food 顯示。
 - [ ] 貿易面板內地 tab、城事食品卡本地＋進口、40% 上限。
 - [ ] existing 建築 badge、可拆、城事統計；empty 完全不變。
 - [ ] 已修 #1 電車站、#2 貨櫃碼頭非葵涌、#3 外海冇三條路、#8 手機開局。
+
+## 24. Round 8 UI 補充（#9 建造面板／#11 道路拉線／#12 管網層／#13 建築圖層／#15 城事／#14 深圳區）
+
+> 完整契約、驗收、截圖名見 `ROUND8_ISSUES.md`；版本 **v0.8.0／save v8**。
+
+### 24.1 #9 建造面板重新設計
+
+- Panel：`display:flex; flex-direction:column; min-height:0; overflow:hidden`；高度由 topbar 到 viewport 底（扣除 warning／padding）。
+- 結構：**fixed 分區／道路 header** → **rail compact 2×2 chips（default 收起，≤96px）** → **sticky category tabs** → **唯一 scroll body**（`overflow-y:auto; min-height:0`）。
+- 寬度：≥1440 360px；1280–1439 336px；1024–1279 300px；≤980 左側 drawer（overlay＋Esc 關）；≤768 手機 bottom sheet（70dvh）。
+- 457×1078：drawer 寬 min(90vw,420px)，tabs 可橫向 scroll，scroll body 全高。
+- 驗收截圖：`round8-build-panel-1280x800.png`、`round8-build-panel-457x1078.png`、`round8-build-panel-mobile.png`。
+
+### 24.2 #11 道路拉線＋M／N（工具 UI）
+
+- 道路工具列加 3 個 grade chips：地面 $15k／高架 $75k／隧道 $60k；選中顯示 `ui.roadGrade`。
+- 拖曳：起點→終點；preview L 形（|dx|≥|dy| 先橫後豎，Shift 切方向）；綠色合法／紅色非法；顯示「N 格 × $X = $Y」。
+- 拖曳中：**M** = 高架（再按回地面）、**N** = 隧道（再按回地面；非拖曳時 M／N 仍係 dezone／農業區快捷，只有道路 drag 進行中先 context 優先）；UI hint「放開鋪設 · M 高架 · N 隧道 · Esc 取消」。
+- 放開才扣錢；ESC／右鍵取消；成本不足 toast；最長 120 格。
+- Mobile：tap 起點 → tap 終點；底部 action bar grade chips／M／N／確認／取消，唔用 drag（避免同 pan 衝突）。
+- 截圖：`round8-road-drag-elevated.png`、`round8-road-drag-tunnel.png`。
+
+### 24.3 #12 管網三層圖層
+
+- 地下工具列（`U` 開）加三粒 eye chip：水／污水／電＋「全部」；右側 flow toggle（`pipeFlow`）。
+- 每層獨立顯示；flow overlay 沿 source→user 方向捲動；未接駁建築紅框；source 光環。
+- 選 pipe 工具自動開對應 layer；隱藏 layer 仍可鋪（提示）；每層 ≤5 draw calls。
+- 手機：chips 橫向 scroll；截圖 `round8-pipe-layers.png`。
+
+### 24.4 #13 建築圖層 toggle
+
+- Topbar 加眼睛 icon；快捷 **`B`** 顯示／隱藏建築；**建造面板快捷改 `Tab`**（原 B）。
+- 隱藏時所有 building mesh／existing layers／minimap 建築點隱藏；保留地形／道路／分區／車輛；interior 強制顯示、empty no-op。
+- 隱藏時點建築 → toast「建築圖層已隱藏（B 顯示）」；UIState 存 save v8。
+- 截圖：`round8-building-layer-off.png`。
+
+### 24.5 #15 城事縮退
+
+- `UIState.infoCollapsed`；collapse 只改 state／class，`update()` 不自動移除；handle 44px＋aria-expanded；save v8 持久；新局 default 展開；showStats=false 時面板隱藏、重開保留 collapsed。
+- 驗收：1280×800 按 chevron 收合→唔反彈；reload 保留；手機 sheet 不受影響；截圖 `round8-city-collapse.png`。
+
+### 24.6 #14 深圳參考區 UI
+
+- 地圖北岸 overlay（淡紅／暗灰斜線）＋深圳河邊界線＋label「深圳（參考區）」；minimap 北岸暗色。
+- 道路／分區／建築／管網／鐵路工具 hover 深圳 → 紅色 preview＋toast「深圳屬參考區，不可建設」；放置失敗 reason。
+- 口岸卡只可香港側 5 格內；empty 一樣顯示／block；截圖 `round8-shenzhen-reference.png`。
+
+### 24.7 #16 渡輪 render
+
+- 船沿水域 BFS path 移動，唔切角；y = WATER_SURFACE_Y；唔會 overhang 陸地；hover「渡輪 · 維港航線」。
+- 截圖：`round8-ferry-water.png`。
+
+### 24.8 Round 8 驗收
+
+- [ ] 建造面板 1280×800／457×1078／手機完整可用（#9）。
+- [ ] 道路 drag＋M／N＋L 形＋成本；save v8 roadGradeEdits（#11）。
+- [ ] 管網三層 eye＋flow；B 建築圖層、Tab 建造面板（#12／#13）。
+- [ ] 深圳參考區 block＋overlay；城事 collapse 持久；渡輪唔上岸（#14／#15／#16）。
+- [ ] v0.8.0／save v8；`tsc`／Playwright 8 截圖；help 更新快捷。
 
 ## 附錄 A：操作（桌面，以 `ui.ts` 實作為準）
 
@@ -722,7 +781,8 @@
 | `U` | 地下層開關（水／污水／電／鐵路） |
 | `O` | 拉遠至全圖（minimap「全圖」） |
 | `P` | 返回市中心（spawn） |
-| `B` | 開關建造面板 |
+| `Tab` | 開關建造面板（v0.8.0 由 B 遷移） |
+| `B` | 顯示／隱藏建築圖層 |
 | `N`（交通面板內） | 新增巴士／小巴路線（全局 `N` 仍是農業區） |
 | `G`／`J` | 統計面板 |
 | `T` | 交通面板 |

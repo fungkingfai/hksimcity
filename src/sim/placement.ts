@@ -43,13 +43,22 @@ import {
   BUILDINGS,
   DEMOLISH_REFUND_RATE,
   ROAD_COST,
+  ROAD_GRADE_INFO,
   SIDEWALK_COST,
   TERRAIN_INFO,
   ZONES,
 } from '../core/config';
-import type { Building, GameState, PlaceResult, ResourceKey, TerrainType, ZoneType } from '../core/types';
+import type {
+  Building,
+  GameState,
+  PlaceResult,
+  ResourceKey,
+  RoadGrade,
+  TerrainType,
+  ZoneType,
+} from '../core/types';
 import { HK_DESIGN_SIZE, HK_REGIONS } from '../world/worldgen';
-import { isNearBorderCrossing, tileToDesignFloat } from '../world/border';
+import { isNearBorderCrossing, isShenzhenSideTile, tileToDesignFloat } from '../world/border';
 import { addCargo } from './logistics-inventory';
 import {
   invalidatePathCache,
@@ -174,6 +183,41 @@ function noteBuildingTiles(state: GameState, tiles: number[], filled: boolean): 
   const index = tileIndexIfAny(state);
   if (!index) return;
   for (const idx of tiles) index.building[idx] = filled ? 1 : 0;
+}
+
+// ─────────────────────────── 深圳市範圍（Issue #14） ───────────────────────────
+
+/**
+ * 深圳市範圍（深圳河以北）只作地圖參考，香港玩家不可建設。
+ * 回傳 null 代表可建設，否則回傳香港用語原因。
+ */
+const SHENZHEN_REASON = '深圳市範圍只作參考，不可建設';
+
+function shenzhenSideReason(state: GameState, x: number, y: number): string | null {
+  return isShenzhenSideTile(x, y, state.width, state.height) ? SHENZHEN_REASON : null;
+}
+
+/** 建築 footprint（或中心）是否觸及深圳側 */
+function footprintTouchesShenzhen(
+  state: GameState,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+): boolean {
+  for (let dy = 0; dy < h; dy++) {
+    for (let dx = 0; dx < w; dx++) {
+      if (isShenzhenSideTile(x + dx, y + dy, state.width, state.height)) return true;
+    }
+  }
+  const cx = Math.floor(x + w / 2);
+  const cy = Math.floor(y + h / 2);
+  return isShenzhenSideTile(cx, cy, state.width, state.height);
+}
+
+/** 道路實際等級（頂層省略 surface） */
+export function roadGradeOf(tile: { roadGrade?: RoadGrade }): RoadGrade {
+  return tile.roadGrade ?? 'surface';
 }
 
 // ─────────────────────────── 地形規則 ───────────────────────────
@@ -490,6 +534,10 @@ export function canPlaceBuilding(state: GameState, key: string, x: number, y: nu
     return { ok: false, reason: '超出地圖範圍', cost: def.cost };
   }
 
+  if (footprintTouchesShenzhen(state, x, y, w, h)) {
+    return { ok: false, reason: SHENZHEN_REASON, cost: def.cost };
+  }
+
   const tiles = buildingFootprintTiles(state, x, y, w, h);
   if (!tiles.length) return { ok: false, reason: '超出地圖範圍', cost: def.cost };
 
@@ -583,31 +631,126 @@ export function placeBuilding(state: GameState, key: string, x: number, y: numbe
 
 // ─────────────────────────── 道路與行人路 ───────────────────────────
 
-export function placeRoad(state: GameState, x: number, y: number): PlaceResult {
+export function placeRoad(
+  state: GameState,
+  x: number,
+  y: number,
+  grade: RoadGrade = 'surface',
+): PlaceResult {
+  const info = ROAD_GRADE_INFO[grade] ?? ROAD_GRADE_INFO.surface;
   if (x < 0 || y < 0 || x >= state.width || y >= state.height) {
-    return { ok: false, reason: '超出地圖範圍', cost: ROAD_COST };
+    return { ok: false, reason: '超出地圖範圍', cost: info.cost };
   }
+  const shenzhen = shenzhenSideReason(state, x, y);
+  if (shenzhen) return { ok: false, reason: shenzhen, cost: info.cost };
   const tile = state.tiles[y * state.width + x];
-  if (tile.road) return { ok: false, reason: '此處已有馬路', cost: ROAD_COST };
-  if (tile.buildingId >= 0) return { ok: false, reason: '此處已有建築', cost: ROAD_COST };
-  if (!terrainBuildable(tile.terrain)) {
-    return { ok: false, reason: `不可在${terrainName(tile.terrain)}上鋪路`, cost: ROAD_COST };
+  if (tile.buildingId >= 0) return { ok: false, reason: '此處已有建築', cost: info.cost };
+
+  // 已有道路：同級 → 失敗；不同級 → 升級／改建（扣差價）
+  if (tile.road) {
+    const existing = roadGradeOf(tile);
+    if (existing === grade) {
+      return { ok: false, reason: `此處已是${info.label}`, cost: info.cost };
+    }
+    const existingInfo = ROAD_GRADE_INFO[existing] ?? ROAD_GRADE_INFO.surface;
+    const upgradeCost = Math.max(0, info.cost - existingInfo.cost);
+    if (state.finance.treasury < upgradeCost) {
+      return { ok: false, reason: '庫房不足，無法升級道路', cost: upgradeCost };
+    }
+    tile.roadGrade = grade === 'surface' ? undefined : grade;
+    if (upgradeCost > 0) {
+      state.finance.treasury -= upgradeCost;
+      state.finance.expenseThisMonth += upgradeCost;
+      state.finance.expenseBreakdown.infrastructure =
+        (state.finance.expenseBreakdown.infrastructure ?? 0) + upgradeCost;
+    }
+    // 道路走線不變，唔需要清 path cache／重算連通；只 bump revision 令 render／UI 更新
+    bumpWorldRevision();
+    return { ok: true, cost: upgradeCost };
   }
-  if (state.finance.treasury < ROAD_COST) return { ok: false, reason: '庫房不足，無法鋪路', cost: ROAD_COST };
+
+  // 地形限制：地面道路只可建於可建地；高架可跨水／山／沙（可建橋）
+  // 隧道可穿山過海（任何地形），但兩者都不可跨已有建築（上面已檢查）。
+  if (grade === 'surface' && !terrainBuildable(tile.terrain)) {
+    return { ok: false, reason: `不可在${terrainName(tile.terrain)}上鋪路`, cost: info.cost };
+  }
+  if (state.finance.treasury < info.cost) {
+    return { ok: false, reason: '庫房不足，無法鋪路', cost: info.cost };
+  }
 
   tile.road = true;
   // 馬路兩側自動鋪設行人路邊（同一格 sidewalk 供行人尋路／渲染）
   tile.sidewalk = true;
+  tile.roadGrade = grade === 'surface' ? undefined : grade;
   noteRoadTile(state, y * state.width + x, true);
-  state.finance.treasury -= ROAD_COST;
-  state.finance.expenseThisMonth += ROAD_COST;
+  state.finance.treasury -= info.cost;
+  state.finance.expenseThisMonth += info.cost;
   state.finance.expenseBreakdown.infrastructure =
-    (state.finance.expenseBreakdown.infrastructure ?? 0) + ROAD_COST;
+    (state.finance.expenseBreakdown.infrastructure ?? 0) + info.cost;
   // 新增道路：保留仍有效嘅 cached path，只清「無路」快取（大幅減少拖曳鋪路卡頓）
   notifyRoadAdded();
   updateConnectedBuildings(state);
   bumpWorldRevision();
-  return { ok: true, cost: ROAD_COST };
+  return { ok: true, cost: info.cost };
+}
+
+/**
+ * 起點→終點 L 形道路走線（供 main.ts `applyRoadPath` 及 city-view 預覽用）：
+ *   先橫後豎為首選；若其中一格 invalid（越界／深圳市範圍）就 fallback 先豎後橫。
+ * 回傳由起點到終點嘅連續格座標（包含 endpoints、唔重複）。
+ */
+export function roadPathBetween(
+  state: GameState,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+): { x: number; y: number }[] {
+  const inside = (x: number, y: number): boolean =>
+    x >= 0 && y >= 0 && x < state.width && y < state.height;
+  const valid = (x: number, y: number): boolean =>
+    inside(x, y) && !isShenzhenSideTile(x, y, state.width, state.height);
+  const horizontalFirst = (): { x: number; y: number }[] => {
+    const points: { x: number; y: number }[] = [];
+    const stepX = Math.sign(x1 - x0);
+    for (let x = x0; ; x += stepX) {
+      points.push({ x, y: y0 });
+      if (x === x1) break;
+      if (stepX === 0) break;
+    }
+    if (y0 !== y1) {
+      const stepY = Math.sign(y1 - y0);
+      for (let y = y0 + stepY; ; y += stepY) {
+        points.push({ x: x1, y });
+        if (y === y1) break;
+      }
+    }
+    return points;
+  };
+  const verticalFirst = (): { x: number; y: number }[] => {
+    const points: { x: number; y: number }[] = [];
+    const stepY = Math.sign(y1 - y0);
+    for (let y = y0; ; y += stepY) {
+      points.push({ x: x0, y });
+      if (y === y1) break;
+      if (stepY === 0) break;
+    }
+    if (x0 !== x1) {
+      const stepX = Math.sign(x1 - x0);
+      for (let x = x0 + stepX; ; x += stepX) {
+        points.push({ x, y: y1 });
+        if (x === x1) break;
+      }
+    }
+    return points;
+  };
+  const path1 = horizontalFirst();
+  const path2 = verticalFirst();
+  const invalid1 = path1.filter((p) => !valid(p.x, p.y)).length;
+  const invalid2 = path2.filter((p) => !valid(p.x, p.y)).length;
+  if (invalid1 === 0) return path1;
+  if (invalid2 === 0) return path2;
+  return invalid2 < invalid1 ? path2 : path1;
 }
 
 /** 鋪設行人專用路（$5,000／格）。行人可走；車輛不可走。 */
@@ -615,6 +758,8 @@ export function placeSidewalk(state: GameState, x: number, y: number): PlaceResu
   if (x < 0 || y < 0 || x >= state.width || y >= state.height) {
     return { ok: false, reason: '超出地圖範圍', cost: SIDEWALK_COST };
   }
+  const shenzhen = shenzhenSideReason(state, x, y);
+  if (shenzhen) return { ok: false, reason: shenzhen, cost: SIDEWALK_COST };
   const tile = state.tiles[y * state.width + x];
   if (tile.road) return { ok: false, reason: '此處是馬路，路邊已有行人路', cost: SIDEWALK_COST };
   if (tile.sidewalk) return { ok: false, reason: '此處已有行人路', cost: SIDEWALK_COST };
@@ -668,6 +813,8 @@ export function paintZone(state: GameState, x: number, y: number, zone: ZoneType
   if (x < 0 || y < 0 || x >= state.width || y >= state.height) {
     return { ok: false, reason: '超出地圖範圍', cost };
   }
+  const shenzhen = shenzhenSideReason(state, x, y);
+  if (shenzhen) return { ok: false, reason: shenzhen, cost };
   const tile = state.tiles[y * state.width + x];
   if (tile.zone === zone) return { ok: false, reason: `此處已是${zoneDef.name}`, cost };
   if (tile.road) return { ok: false, reason: '此處是馬路', cost };
@@ -697,6 +844,8 @@ export function eraseZone(state: GameState, x: number, y: number): ZoneOpResult 
   if (x < 0 || y < 0 || x >= state.width || y >= state.height) {
     return { ok: false, reason: '超出地圖範圍', cost: 0, refund: 0 };
   }
+  const shenzhen = shenzhenSideReason(state, x, y);
+  if (shenzhen) return { ok: false, reason: shenzhen, cost: 0, refund: 0 };
   const tile = state.tiles[y * state.width + x];
   if (!tile.zone) return { ok: false, reason: '此處未劃分區', cost: 0, refund: 0 };
   const zone = tile.zone;
@@ -723,6 +872,7 @@ export function canAutoPlaceBuilding(state: GameState, key: string, x: number, y
   if (!def || !def.zone) return false;
   const [w, h] = def.size;
   if (x < 0 || y < 0 || x + w > state.width || y + h > state.height) return false;
+  if (footprintTouchesShenzhen(state, x, y, w, h)) return false;
   const tiles = buildingFootprintTiles(state, x, y, w, h);
   if (!tiles.length) return false;
 
@@ -843,14 +993,20 @@ export function demolishAt(
   if (x < 0 || y < 0 || x >= state.width || y >= state.height) {
     return { ok: false, reason: '超出地圖範圍', refund: 0 };
   }
+  const shenzhen = shenzhenSideReason(state, x, y);
+  if (shenzhen) return { ok: false, reason: shenzhen, refund: 0 };
   const tile = state.tiles[y * state.width + x];
   if (tile.buildingId >= 0) {
     const refund = demolishBuildingById(state, tile.buildingId);
     return { ok: true, refund };
   }
   if (tile.road) {
-    const refund = streetRefund(ROAD_COST);
+    const grade = roadGradeOf(tile);
+    const refund = streetRefund(ROAD_GRADE_INFO[grade]?.cost ?? ROAD_COST);
     tile.road = false;
+    tile.roadGrade = undefined;
+    // 高架／隧道喺非可建地（水面／山）上，拆路時連行人路一併清走，避免「空中行人路」
+    if (grade !== 'surface') tile.sidewalk = false;
     noteRoadTile(state, y * state.width + x, false);
     recordRefund(state, refund);
     invalidatePathCache();
@@ -893,6 +1049,7 @@ export function demolishBuildingById(state: GameState, id: number): number {
   const index = state.buildings.findIndex((b) => b.id === id);
   if (index < 0) return 0;
   const building = state.buildings[index];
+  if (footprintTouchesShenzhen(state, building.x, building.y, building.w, building.h)) return 0;
   const def = BUILDINGS[building.key];
   // 自動開發建築由開發商出資，玩家清拆冇退款；手動 ploppable 建築照舊退 30%
   const refund = building.auto ? 0 : Math.floor((def?.cost ?? 0) * DEMOLISH_REFUND_RATE);
