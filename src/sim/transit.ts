@@ -45,6 +45,7 @@ import type {
   TransitMode,
 } from '../core/types';
 import { pickCommuteMode } from './citizen-common';
+import { hkoClockSignal, hkoClockTyphoonName } from './hko-climate';
 import { findPathBetweenBuildings, roadAccessTiles } from './pathfinding';
 import { worldRevisionOf } from './placement';
 import { computeRailNetwork, getRailStats, tickRail, type RailTickSummary } from './rail';
@@ -545,13 +546,20 @@ export function recordTransitRide(state: GameState, mode: TransitMode): void {
 
 // ─────────────────────────── 每日結算 ───────────────────────────
 
-/** 颱風信號：八號風球＝8；其他警告文字含三號／一號風球時對應回傳，否則 0 */
+/**
+ * 颱風信號（Round 9／issue #18）：讀 HKO clock.typhoonSignal（1/3/8/9/10），
+ * 舊存檔冇欄位時 fallback 解析 warning 文字；完全冇資料而天氣係 storm → 8。
+ */
 export function typhoonSignalFor(state: GameState): number {
-  if (state.clock.weather === 'storm') return 8;
-  const warning = state.clock.warning ?? '';
-  if (warning.includes('三號') || warning.includes('3號')) return 3;
-  if (warning.includes('一號') || warning.includes('1號')) return 1;
-  return 0;
+  return hkoClockSignal(state.clock);
+}
+
+/** 由風球級數轉交通容量係數（1/3 號減班仍有服務；8 號或以上局部停駛） */
+function typhoonTransitFactor(signal: number): number {
+  if (signal >= 8) return 0;
+  if (signal === 3) return 0.55;
+  if (signal === 1) return 0.8;
+  return 1;
 }
 
 /** 在職市民人數（tickPopulation 之後呼叫，數字最新） */
@@ -596,15 +604,17 @@ export function tickTransit(state: GameState, ctx: SimContext): void {
   const railTick = tickRail(state, ctx);
   const railActive = railTick.connectedStations > 0 && railTick.length > 0;
   const coverage = computeTransitCoverage(state, true);
-  const stormy = clock.weather === 'storm';
+  const typhoonSignal = typhoonSignalFor(state);
+  const suspended = typhoonSignal >= 8;
   const wasSuspended = transit.suspended;
 
-  // ── 颱風：渡輪停航／復航（time.ts 亦會同步此欄位；本檔只補交通訊息） ──
-  transit.suspended = stormy;
-  if (stormy && !wasSuspended && clock.totalDays - rt.lastStormLogDay >= 2) {
+  // ── 颱風：渡輪 8 號或以上停航／復航（time.ts 亦會同步此欄位；本檔只補交通訊息） ──
+  transit.suspended = suspended;
+  if (suspended && !wasSuspended && clock.totalDays - rt.lastStormLogDay >= 2) {
     rt.lastStormLogDay = clock.totalDays;
-    ctx.log('八號風球吹襲，天星小輪全線停航，巴士及電車減班，市民提早回家。', 'warn');
-  } else if (!stormy && wasSuspended) {
+    const name = hkoClockTyphoonName(clock) ?? '八號烈風或暴風信號';
+    ctx.log(`${name}吹襲，天星小輪全線停航，巴士及電車減班，市民提早回家。`, 'warn');
+  } else if (!suspended && wasSuspended) {
     ctx.log('風球除下，天星小輪復航，維港航線逐步回復正常。', 'good');
   }
 
@@ -795,8 +805,10 @@ export function tickTransit(state: GameState, ctx: SimContext): void {
   } else if (employed > 0) {
     avgCommute = walkMinutes;
   }
-  // 颱風／大霧時通勤時間延長（顯示用）
-  if (stormy) avgCommute *= 1.25;
+  // 颱風／大霧時通勤時間延長（顯示用；1/3 號較輕，8 號或以上最嚴重）
+  if (typhoonSignal >= 8) avgCommute *= 1.25;
+  else if (typhoonSignal > 0) avgCommute *= 1.08;
+  else if (clock.weather === 'storm') avgCommute *= 1.15;
 
   // ── 更新 stats（systems-dev 的 updateStats 可直接沿用） ──
   stats.transitCoverage = Math.round(coverage.overall * 1000) / 1000;
@@ -1325,8 +1337,9 @@ export function tickTransitLines(state: GameState, ctx: SimContext): TransitLine
   rt.lineLastDay = clock.totalDays;
 
   const weather = clock.weather;
-  const stormy = weather === 'storm';
   const weatherFactor = lineWeatherFactor(state);
+  const typhoonSignal = typhoonSignalFor(state);
+  const typhoonFactor = typhoonTransitFactor(typhoonSignal);
   const isWeekend = clock.weekday === 0 || clock.weekday === 6;
   const demandDayFactor = isWeekend ? LINE_WEEKEND_DEMAND : 1;
   const cfg = TRANSIT_LINE_CONFIG;
@@ -1358,14 +1371,16 @@ export function tickTransitLines(state: GameState, ctx: SimContext): TransitLine
     const { residents, jobs } = lineServedPopulation(state, line);
     const potential = residents * 0.55 + jobs * 0.75;
     const capacityRaw = lineDailyCapacity(line);
-    const capacity = stormy ? 0 : capacityRaw * weatherFactor;
+    const capacity = capacityRaw * weatherFactor * typhoonFactor;
     const headway = lineHeadwayMinutes(line, path.length);
-    const attractiveness = stormy
-      ? 0
-      : lineFareAttractiveness(line.fare) *
-        lineHeadwayAttractiveness(headway) *
-        Math.max(0.25, weatherFactor) *
-        demandDayFactor;
+    const attractiveness =
+      typhoonFactor <= 0
+        ? 0
+        : lineFareAttractiveness(line.fare) *
+          lineHeadwayAttractiveness(headway) *
+          Math.max(0.25, weatherFactor) *
+          typhoonFactor *
+          demandDayFactor;
     const ridership = Math.max(0, Math.round(Math.min(potential * attractiveness, capacity * 0.9)));
     const fares = Math.round(ridership * line.fare);
     const costs = line.vehicleCount * cfg.dailyCostPerVehicle[line.mode];
@@ -1431,7 +1446,7 @@ export function resetTransitLineMonthly(state: GameState): void {
 export function getTransitLineStats(state: GameState): TransitLineStats {
   const cfg = TRANSIT_LINE_CONFIG;
   const weatherFactor = lineWeatherFactor(state);
-  const stormy = state.clock.weather === 'storm';
+  const typhoonFactor = typhoonTransitFactor(typhoonSignalFor(state));
   const rows: TransitLineStatsRow[] = [];
   let totalRidership = 0;
   let totalRevenue = 0;
@@ -1443,7 +1458,7 @@ export function getTransitLineStats(state: GameState): TransitLineStats {
     const path = lineRoadPath(state, line);
     const routeTiles = path?.length ?? 0;
     const capacityRaw = lineDailyCapacity(line);
-    const capacity = stormy ? 0 : capacityRaw * weatherFactor;
+    const capacity = capacityRaw * weatherFactor * typhoonFactor;
     const ridership = line.ridershipToday ?? 0;
     const fares = Math.round(ridership * line.fare);
     const costs = line.suspended ? 0 : line.vehicleCount * cfg.dailyCostPerVehicle[line.mode];

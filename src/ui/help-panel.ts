@@ -238,6 +238,7 @@ export function createHelpPanel(container: HTMLElement, store: GameStore, action
           <ul>
             <li><b>道路（R）</b>：由起點拖到終點<b>自動鋪路</b>；地面道路 <b>$15,000/格</b>、高架橋 <b>$75,000/格</b>、隧道 <b>$60,000/格</b>（已整合行人路）。</li>
             <li><b>道路等級</b>：拖曳期間按 <b>M</b> 升高架、<b>N</b> 升隧道，再按 M／N 返回地面；高架／隧道可穿山過海。</li>
+            <li><b>道路街區（#17）</b>：道路會圍繞街區（block）形成地塊，建築物沿街排列；規劃時留意街區尺度與行人路網。</li>
             <li><b>取消分區（M，非道路工具時）</b>：清除分區色塊，已建成建築不受影響。</li>
             <li><b>拆卸（X）</b>：拆除建築（退還 30%）、道路或分區。</li>
             <li><b>分區色塊（L）</b>：顯示／隱藏分區顏色，方便規劃。</li>
@@ -366,6 +367,25 @@ export function createHelpPanel(container: HTMLElement, store: GameStore, action
             .map((season) => `${SEASON_INFO[season].emoji}${SEASON_INFO[season].name}（${SEASON_INFO[season].months}）`)
             .join(' · ')}</p>
           ${weatherTable()}
+        </section>
+
+        <section class="help-block">
+          <h3>${ico('storm')}天文台氣候與警告（HKO）</h3>
+          <ul>
+            <li>警告橫幅／頂欄 chip 支援 <b>1／3／8 號風球（東北／西北／東南／西南）／9／10 號</b>、<b>黃／紅／黑暴雨</b>、雷暴、山泥傾瀉、酷熱／寒冷／大霧；8 號或以上會彈全屏警示（可 dismiss）。</li>
+            <li>信號愈高警示愈嚴重：1／3 號為較輕提示；8 號全屏紅色警示；9／10 號更強紅色警示，全港停工停課、交通大受影響。</li>
+            <li>城事面板「天文台氣候」卡顯示<b>香港天文台 1961–2020 年</b>每月平均發出警告信號日數（1+／3+／8+／9–10）、當前月份、颱風季節提示與現時信號。</li>
+            <li>官方資料：<a class="help-link" href="https://www.hko.gov.hk/tc/informtc/tcStatTable6a.htm" target="_blank" rel="noopener">香港天文台 1961–2020 年熱帶氣旋警告信號月平均日數</a></li>
+          </ul>
+        </section>
+
+        <section class="help-block">
+          <h3>${ico('city')}香港特色建築（CSDI 3D-BIT00）</h3>
+          <ul>
+            <li>部分真實地標／建築使用<b>香港地理空間數據共享平台（CSDI）／地政總署 3D-BIT00</b> 三維建築模型，而非程序生成模型。</li>
+            <li>選取有 3D 模型的建築時，城事面板會顯示「<b>CSDI 3D-BIT00</b>」badge 同來源說明，方便分辨真實掃描模型。</li>
+            <li>CSDI 開放數據：<a class="help-link" href="https://csdi.hk/tc/" target="_blank" rel="noopener">香港地理空間數據共享平台 CSDI</a></li>
+          </ul>
         </section>
 
         <section class="help-block">

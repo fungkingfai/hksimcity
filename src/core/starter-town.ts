@@ -14,6 +14,7 @@
 
 import { BUILDINGS, STARTER_TOWN } from './config';
 import { generateExistingBuildings } from '../world/existing-city';
+import { place3dLandmarks } from '../world/hk-3d-landmarks';
 import { layStarterPipes } from '../sim/utilities';
 import { createCitizen, getCitizenCache } from '../sim/citizen-common';
 import type { Building, GameState, ZoneType } from './types';
@@ -667,6 +668,9 @@ export function buildStarterTown(state: GameState): {
     maxRoads: 5200,
     minSpawnDistance: 20,
   });
+  // Issue #20／Round 9：加入 CSDI 3D-BIT00 真實建築模型（existing landmark）
+  const landmarkStats = place3dLandmarks(state);
+
   // Issue #7／Round 5：現有道路亦要接駁公用管網（覆蓋現有樓宇）
   const pipeCounts = layStarterPipes(state);
 
@@ -711,6 +715,7 @@ export function buildStarterTown(state: GameState): {
   const zoneTotal =
     zoneCounts.residential + zoneCounts.commercial + zoneCounts.industrial + zoneCounts.farmland;
   void existingStats;
+  void landmarkStats;
   void pipeCounts;
   state.log.push({
     id: state.nextLogId++,

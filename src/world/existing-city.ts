@@ -393,7 +393,7 @@ export function connectExistingRoadComponents(
       for (const ti of add) {
         if (!state.tiles[ti].road) {
           state.tiles[ti].road = true;
-          (state.tiles[ti] as Tile & { localRoad?: boolean }).localRoad = true;
+          (state.tiles[ti] as Tile & { localRoad?: boolean }).localRoad = false;
           totalAdded++;
         }
       }
@@ -854,72 +854,125 @@ export function generateExistingBuildings(
   const maxRoads = Math.max(0, options.maxRoads ?? 3000);
   const minSpawnDistance = Math.max(0, options.minSpawnDistance ?? 20);
 
-  // ── 1. 道路：用 landuse 41/42 roadHint 鋪真實主要道路 ──
-  // 先以 roadHint 本身嘅 4-neigh 連通分量為單位，優先保留最大嘅真實道路網，
-  // 避免「按 density 抽樣」造成 800+ 段碎片（connectivity 亦會快好多）。
-  const hintSet = new Uint8Array(width * height);
-  const hintTiles: number[] = [];
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const i = y * width + x;
-      if (!roadHintAt(layers, i)) continue;
-      const t = tiles[i];
-      if (t.road || t.buildingId >= 0) continue;
-      if (!BUILDABLE.has(t.terrain)) continue;
-      if (isShenzhenSideTile(x, y, width, height)) continue;
-      if (Math.hypot(x - spawn.x, y - spawn.y) < Math.max(12, minSpawnDistance - 8)) continue;
-      hintSet[i] = 1;
-      hintTiles.push(i);
-    }
-  }
-  // roadHint components（4-neigh）
-  const hintComp = new Int32Array(width * height).fill(-1);
-  const hintComps: number[][] = [];
-  for (const seed of hintTiles) {
-    if (hintComp[seed] >= 0) continue;
-    const id = hintComps.length;
-    const list: number[] = [];
-    const queue: number[] = [seed];
-    hintComp[seed] = id;
-    for (let head = 0; head < queue.length; head++) {
-      const cur = queue[head];
-      list.push(cur);
-      const x = cur % width;
-      const y = (cur - x) / width;
-      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
-        const nx = x + dx;
-        const ny = y + dy;
-        if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
-        const ni = ny * width + nx;
-        if (!hintSet[ni] || hintComp[ni] >= 0) continue;
-        hintComp[ni] = id;
-        queue.push(ni);
+  // ── 1. 道路：規劃街區（#17）──
+  // 唔再用 roadHint 逐格抽樣（造成 checkerboard 街道海）；改為喺已發展市區
+  // 鋪「3×3 block + 1 格道路」嘅規劃街區：路只喺 block 邊界，主幹每 2 個 block
+  // 一條（闊路），其餘窄街；block 內部留返畀 existing 樓／公園。
+  const BLOCK = 3;
+  const PERIOD = BLOCK + 1; // 4：3×3 block + 1 格道路
+  const blockCandidates: { bx: number; by: number; score: number; x0: number; y0: number }[] = [];
+  for (let by = 0; (by + 1) * PERIOD < height; by++) {
+    for (let bx = 0; (bx + 1) * PERIOD < width; bx++) {
+      const x0 = bx * PERIOD + 1;
+      const y0 = by * PERIOD + 1;
+      if (Math.hypot(x0 + 1 - spawn.x, y0 + 1 - spawn.y) < minSpawnDistance) continue;
+      let land = 0;
+      let developed = 0;
+      let densitySum = 0;
+      for (let dy = 0; dy < BLOCK; dy++) {
+        for (let dx = 0; dx < BLOCK; dx++) {
+          const tx = x0 + dx;
+          const ty = y0 + dy;
+          const t = tiles[ty * width + tx];
+          if (isShenzhenSideTile(tx, ty, width, height)) continue;
+          if (!BUILDABLE.has(t.terrain)) continue;
+          land++;
+          const lu = layers.landuse[ty * width + tx];
+          const zone = ZONE_BY_LU[lu];
+          const density = t.density ?? 0;
+          if (density >= 8 || zone) developed++;
+          else if (lu >= 1 && lu <= 11) developed++;
+          densitySum += density;
+        }
+      }
+      if (land >= 5 && developed >= 4) {
+        blockCandidates.push({
+          bx,
+          by,
+          x0,
+          y0,
+          score: developed * 10 + densitySum / 9 + land * 0.5,
+        });
       }
     }
-    hintComps.push(list);
   }
-  hintComps.sort((a, b) => b.length - a.length);
-  // #10：starter 道路唔好太密。existing 生成路 cap 收緊到 2,400 格（加 starter 小鎮
-  // 同接駁後總數約 2,800–3,400）；其中頭 45% 當主幹（闊路），其餘做窄街
-  // `localRoad=true`（render 用窄身深灰街，唔再成片黑）。
-  const roadCap = Math.min(maxRoads, 2400);
-  const trunkBudget = Math.round(roadCap * 0.45);
+  // 以 block 相鄰關係分成 cluster（同一 cluster 先鋪成連續街區）
+  const blockKey = (bx: number, by: number): number => by * (Math.ceil(width / PERIOD) + 2) + bx;
+  const candidateByKey = new Map<number, number>();
+  blockCandidates.forEach((b, i) => candidateByKey.set(blockKey(b.bx, b.by), i));
+  const blockCluster = new Int32Array(blockCandidates.length).fill(-1);
+  const clusters: number[][] = [];
+  for (let i = 0; i < blockCandidates.length; i++) {
+    if (blockCluster[i] >= 0) continue;
+    const id = clusters.length;
+    const list: number[] = [];
+    const queue = [i];
+    blockCluster[i] = id;
+    while (queue.length) {
+      const cur = queue.pop()!;
+      list.push(cur);
+      const b = blockCandidates[cur];
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+        const nk = candidateByKey.get(blockKey(b.bx + dx, b.by + dy));
+        if (nk == null || blockCluster[nk] >= 0) continue;
+        blockCluster[nk] = id;
+        queue.push(nk);
+      }
+    }
+    clusters.push(list);
+  }
+  clusters.sort((a, b) => {
+    const sa = a.reduce((sum, idx) => sum + blockCandidates[idx].score, 0);
+    const sb = b.reduce((sum, idx) => sum + blockCandidates[idx].score, 0);
+    return sb - sa;
+  });
+  const roadSet = new Uint8Array(width * height);
+  const localSet = new Uint8Array(width * height);
+  const roadCap = Math.min(maxRoads, 1400);
   let selectedRoads = 0;
-  for (const comp of hintComps) {
+  const collectBoundary = (b: { bx: number; by: number }, trunkX: boolean, trunkY: boolean): number[] => {
+    const out: number[] = [];
+    const push = (tx: number, ty: number): void => {
+      if (tx < 0 || ty < 0 || tx >= width || ty >= height) return;
+      const i = ty * width + tx;
+      if (roadSet[i] || tiles[i].road || tiles[i].buildingId >= 0) return;
+      if (isShenzhenSideTile(tx, ty, width, height)) return;
+      out.push(i);
+    };
+    for (let k = 0; k < PERIOD; k++) {
+      push(b.bx * PERIOD + k, b.by * PERIOD);
+      push(b.bx * PERIOD + k, b.by * PERIOD + PERIOD);
+      push(b.bx * PERIOD, b.by * PERIOD + k);
+      push(b.bx * PERIOD + PERIOD, b.by * PERIOD + k);
+    }
+    void trunkX;
+    void trunkY;
+    return out;
+  };
+  for (const cluster of clusters) {
     if (selectedRoads >= roadCap) break;
-    if (selectedRoads + comp.length > roadCap) continue; // 揀細啲 component 填滿 cap
-    for (const i of comp) {
-      if (tiles[i].road) continue;
-      tiles[i].road = true;
-      (tiles[i] as Tile & { localRoad?: boolean }).localRoad = selectedRoads >= trunkBudget;
-      selectedRoads++;
+    const blocks = cluster.slice().sort((a, b) => blockCandidates[b].score - blockCandidates[a].score);
+    for (const bi of blocks) {
+      if (selectedRoads >= roadCap) break;
+      const b = blockCandidates[bi];
+      const trunkX = b.bx * PERIOD % 8 === 0;
+      const trunkY = b.by * PERIOD % 8 === 0;
+      const pending = collectBoundary(b, trunkX, trunkY);
+      if (pending.length === 0) continue;
+      if (selectedRoads + pending.length > roadCap) continue;
+      for (const i of pending) {
+        roadSet[i] = 1;
+        if (!(trunkX || trunkY)) localSet[i] = 1;
+      }
+      selectedRoads += pending.length;
     }
   }
+  for (let i = 0; i < roadSet.length; i++) {
+    if (!roadSet[i] || tiles[i].road) continue;
+    tiles[i].road = true;
+    (tiles[i] as Tile & { localRoad?: boolean }).localRoad = localSet[i] === 1;
+  }
   result.roads += selectedRoads;
-
-    // 補窿：將抽樣道路連返連續（減少 component 數，令現有樓宇真係通勤到）
-  const densified = densifySelectedRoads(state);
-  result.roads += densified;
 
   // ── 2. 候選樓宇：貼路 + landuse zone + density 高 + 遠離 spawn 小鎮 ──
   interface Candidate {

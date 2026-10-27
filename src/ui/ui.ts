@@ -23,6 +23,7 @@ import './css/minimap.css';
 import './css/round5.css';
 import './css/round6.css';
 import './css/round8.css';
+import './css/round9.css';
 
 import { BUILDINGS, RAIL_INFO, ROAD_GRADE_INFO, ROAD_COST, ZONES, formatMoney } from '../core/config';
 import { applyUiMode, getUiMode } from '../core/device';

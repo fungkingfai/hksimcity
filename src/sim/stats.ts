@@ -31,6 +31,7 @@
 
 import { BUILDINGS, TRANSIT_SPEED } from '../core/config';
 import type { Building, GameState, ResourceKey, ZoneType } from '../core/types';
+import { hkoClockSignal } from './hko-climate';
 import { computeUtilitySnapshot } from './utilities';
 import { amenityBonus, baseDevelopmentScore, zoneDemandOf } from './zoning';
 import { tileIndexOf, worldRevisionOf, ZONE_CODE_NAMES, zoneRevisionOf } from './placement';
@@ -189,14 +190,13 @@ export function estimateAvgCommute(state: GameState): number {
 }
 
 /** 由 clock.warning 與天氣推算颱風信號（0／1／3／8） */
+/**
+ * 颱風信號（Round 9／issue #18）：優先讀 HKO clock.typhoonSignal（1/3/8/9/10）；
+ * 舊存檔先 fallback 解析 warning 文字；storm 而冇資料時視為 8 號。
+ * 與 transit.typhoonSignalFor 共用 hko-climate.hkoClockSignal，避免兩處唔一致。
+ */
 export function typhoonSignalOf(state: GameState): number {
-  if (state.clock.weather === 'storm') return 8;
-  const warning = state.clock.warning;
-  if (!warning) return 0;
-  if (/8\s*號|八號|八號風球/.test(warning)) return 8;
-  if (/3\s*號|三號/.test(warning)) return 3;
-  if (/1\s*號|一號/.test(warning)) return 1;
-  return 0;
+  return hkoClockSignal(state.clock);
 }
 
 // ─────────────────────────── 交通估算快取 ───────────────────────────
