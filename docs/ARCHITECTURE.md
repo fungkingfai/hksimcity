@@ -371,3 +371,10 @@ createVehiclesView(state): VehiclesView
 - **城事縮退（#15）**：`ui.showStats` 同 `is-info-collapsed` 持久同步。
 - **渡輪（#16）**：water BFS path（3–400 格）、逐格推進、每次 validate、失效回收；ferry tests。
 - **UI（#9）**：build panel body scroll／rail collapse／sticky tabs。
+
+## 13. 第八輪改版：GitHub issues #17–#20（Round 9，GAME_VERSION 9）
+
+- **#17**：`existing-city.ts` planned block grid（3×3 block、1 格 perimeter road、4-block 主幹）；`Tile.localRoad` 窄街 render；總路 3,020、components=1。
+- **#18**：`sim/hko-climate.ts` embed HKO Table 6a；`time.ts` 按月抽 1/3/8/9/10 signal＋雨警告；`stats/transit` 讀 `clock.typhoonSignal`；UI HKO card。
+- **#19**：`render/airport-traffic.ts` 10 架飛機 pool（approach/takeoff/stand）＋跑道燈；terrain 整合；颱風停飛。
+- **#20**：`tools/build-3d-landmarks.py` CSDI 3D-BIT00 Range/ZIP→3DS parser→81 landmarks；`world/hk-3d-landmarks.ts` 放 existing Building.model3d；`render/models/hk-3d-landmarks.ts` custom geometry；UI CSDI badge。

@@ -11,8 +11,8 @@ import { RAIL_INFO } from '../src/core/config';
 const ctx = { toast: () => {}, log: () => {} };
 
 describe('Round 6 issues 整合', () => {
-  it('版本為 8；starter 有真正 existing 樓群、口岸、內地糧食支援', () => {
-    expect(GAME_VERSION).toBe(8);
+  it('版本為 9；starter 有真正 existing 樓群、口岸、內地糧食支援', () => {
+    expect(GAME_VERSION).toBe(9);
     const state = createGameState(20261021, 'starter');
     const existing = state.buildings.filter((b) => b.existing);
     expect(existing.length).toBeGreaterThan(150);

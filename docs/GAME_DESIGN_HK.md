@@ -1,6 +1,6 @@
 # 《維港之城》遊戲設計文件（GDD）
 
-> 文件版本：1.1（2026-10-25；Round 8 v0.8.0）｜撰寫：game-designer
+> 文件版本：1.2（2026-10-27；Round 9 v0.9.0）｜撰寫：game-designer
 > 專案：`hk-city/`（由 `huaxia-city/` 分支的 three.js + TypeScript + Vite 城市建造遊戲，香港版）
 > 依據：`hk-city/src/core/types.ts`、`hk-city/src/core/config.ts`（現有 72×72 地圖、22 種建築、8 種資源的引擎骨架）、`huaxia-city/docs/ARCHITECTURE.md`、`huaxia-city/docs/GAME_DESIGN.md`，以及 `hk-city/docs/RESEARCH_HK.md`（同類遊戲＋香港研究，引用代號 R-XXX）。
 >
@@ -861,6 +861,8 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
 | **1 號風球** | `weather='storm'` 且 `typhoonSignal=1`（強度 < 0.5） | 預警；觀光 −20% |
 | **3 號風球** | `typhoonSignal=3`（強度 0.5–0.8） | 學校停課；渡輪減班；農業搶收 |
 | **8 號風球** | `typhoonSignal=8`（強度 > 0.8） | 停工停課；渡輪停航、電車停駛、港鐵露天段停駛、地盤停工；物流 ×0.35；幸福 −8（已含 weather） |
+| **9／10 號風球** | Round 9 HKO 擴展（`typhoonSignal=9/10`） | 8 號效果＋公共交通完全停駛／全市停工停市；詳見 §21.2、`ROUND9_ISSUES.md` §2 |
+| **暴雨黃／紅／黑** | Round 9 新 `rainstormWarning` | 交通減速、學校／地盤停工、水浸／山泥傾瀉事件；可與風球並存 |
 | 黃／紅／黑雨 | `weather='rain'` 且 `weatherIntensity` 0.4–0.6／0.6–0.8／>0.8 | 黑雨：物流 ×0.4、低窪水浸、山泥傾瀉風險 |
 | 酷熱 | 夏季、晴、`tempC ≥ 33` | 生產效率 −10%、電力需求 +25%、火災風險 +50% |
 | 寒冷 | 冬季、`tempC ≤ 10` | 長者死亡風險 ×1.5、農業 −20%（已含季節） |
@@ -1121,18 +1123,18 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
 
 ---
 
-## 12. 存檔與版本（v8 精簡格式，v0.8.0 道路分級）
+## 12. 存檔與版本（v9 精簡格式，v0.9.0 HKO 天氣）
 
 | 項目 | 內容 |
 |---|---|
-| `GAME_VERSION` | **8**（v0.8.0；`config.ts` 現為 7，待 Lead bump） |
+| `GAME_VERSION` | **9**（v0.9.0；`config.ts` 現為 8，待 Lead bump） |
 | 存檔 key | localStorage 前綴 `victoria-harbour.save.`；slot 0 自動、slot 1–3 手動 |
-| 格式 | **`hk-city-compact`**：`{ format, version:8, seed, width:600, height:600, gameMode, tileEdits:number[], railEdits:number[], **roadGradeEdits:number[]**, info:{...}, state:Omit<GameState,'tiles'> }` |
-| 稀疏格 | `tileEdits` 記道路／行人路／分區／管線（含 roadClass bits）；`railEdits` 記鐵路 grade；**`roadGradeEdits=[index,code]`**（0 surface／1 elevated／2 tunnel）；地形由 seed＋生成檔重生 |
+| 格式 | **`hk-city-compact`**：`{ format, version:9, seed, width:600, height:600, gameMode, tileEdits:number[], railEdits:number[], roadGradeEdits:number[], info:{...}, state:Omit<GameState,'tiles'> }` |
+| 稀疏格 | `tileEdits` 記道路／行人路／分區／管線（含 roadClass bits）；`railEdits`／`roadGradeEdits` 記 grade；`state.typhoon`（信號／暴雨／剩餘時間）入 state；地形由 seed＋生成檔重生 |
 | 還原 | 用 `seed` 重新 `generateWorld(seed,600,600,{starterRoads: gameMode==='starter'})` → 套 tileEdits／railEdits → 由 buildings 重建 `buildingId` → 補 spawn／gameMode／railNetwork |
 | 大小 | 約 **80–140KB**（完整 360,000 格 JSON 會爆 localStorage 配額） |
 | 存檔列表 | 用 `info` 快照（城市名／人口／庫房／日期／地圖 600×600），不重新解碼地圖，避免 1–2 秒卡 |
-| 兼容性 | 只接受 **600×600、version 8**；v7 舊檔 hydrate 時 water+road → tunnel、其餘 surface；舊 v2–v7 拒絕 |
+| 兼容性 | 只接受 **600×600、version 9**；v8 舊檔拒絕（提示重新開局）；typhoon 狀態入 save |
 | 讀檔後 | `ui.mode='city'`、退出室內、清除工具、重算連通性、UI 重繪（`store.on('reset')`） |
 
 **已定稿 state 欄位**：同 Round 3（clock／finance／stats／gameMode／spawn／zoneDemand／vehicles／transit／Tile.zone／Building.auto/zone／UIState.showZones/showStartScreen／citizen.salary/commuteMode 等），另加 **`Tile.density`／`Tile.buildingHeight`**（真實樓群視覺；只 render 用，不需 sparse save——由地形數據重新生成）。
@@ -1215,7 +1217,7 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
 
 | 常數 | 值 | 說明 |
 |---|---|---|
-| `GAME_VERSION` | **8**（v0.8.0；`config.ts` 現為 7，待 Lead bump） |
+| `GAME_VERSION` | **9**（v0.9.0；`config.ts` 現為 8，待 Lead bump） |
 | `GRID_WIDTH`／`GRID_HEIGHT` | **600／600** | 360,000 格 |
 | `TILE_SIZE` | 2 | 每格世界 2 單位 |
 | `MAP_SCALE` | **6.25**（600/96） | 霧／天空／相機距離／deco 密度 |
@@ -1513,7 +1515,7 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
 
 | 項目 | 內容 |
 |---|---|
-| `GAME_VERSION` | **8**（現 7，待 bump） |
+| `GAME_VERSION` | **9**（v0.9.0；`config.ts` 現為 8，待 Lead bump） |
 | Save v8 | `roadGradeEdits`、roadClass bits、UIState 新 flags；舊 v7 遷移：water+road→tunnel |
 | `Tile` | `roadGrade?: RoadGrade`、`roadClass?: RoadClass` |
 | `UIState` | `showBuildings`、`pipeLayers`、`pipeFlow`、`roadGrade`（已加骨架）、`infoCollapsed`（新） |
@@ -1537,6 +1539,63 @@ const festival = 舉辦煙花當日 FESTIVAL_COST ($800,000)            // 即�
 - [ ] 城事 collapse 持久、reload 保留、新局展開、handle 可再開。
 - [ ] 船唔會喺陸地；water BFS＋clearance；填海後重算。
 - [ ] `tsc`／tests／Playwright 8 個截圖齊；版本 v0.8.0／save v8。
+
+## 21. Round 9 GitHub Issues（#17–#20，v0.9.0／save v9）
+
+> 完整規格、HKO 數據、抽取流程、契約、驗收見 **`ROUND9_ISSUES.md`**；本章只列 GDD 層面的玩法定位。
+
+### 21.1 #17 規劃街區（Block Grid）
+
+- 現有城鎮由「roadHint 抽樣鋪路」改為 **block grid**：arterial（主幹，闊 3.2）包 superblock 10×10；street（街區路，2.2）包 block 6×6／pocket 4×4；alley（後巷，1.4）只在 block 內，唔穿出街。
+- `Tile.blockId`＋`roadClass`；全 starter 道路 **1,400–2,000 格**（arterial 220–320／street 800–1,100／alley 400–600）；existing 樓宇 **300–500 棟**（由 572 下調），每棟貼 street／alley ≥95%。
+- 交通：巴士只行 arterial／street，站在 block 角；管網沿道路，alley 只分支；城事顯示街區／道路／樓宇統計。
+- 驗收：1920×1080 街區 aerial screenshot、道路唔再連成片。
+
+### 21.2 #18 HKO 颱風／暴雨
+
+- 用 **HKO 1961–2020 表 6a** 月平均信號日數（1+/3+/8+/9-10）；遊戲 1 月＝7 日，月度事件機率 ≈ HKO 月日數 / 7；年度對照 17.52／9.38／2.42／0.43 日。
+- 信號：1／3／8（NE／NW／SE／SW）／9／10；暴雨黃／紅／黑；狀態機 1→3→8→9/10→降級；每月最多 1 個 active TC；事件 2–5 遊戲日。
+- 影響：交通逐步停駛（8+ 渡輪全停、巴士減班、地鐵地下段維持）、機場 8+ 關閉、碼頭 8+ 停裝卸、地盤停工、市民幸福／留家、災害事件；topbar 信號 chip＋HKO 文案。
+- 資料：`TyphoonState`／`TyphoonSignal`／`RainstormWarning`；`sim/typhoon.ts`；save v9；HKO 來源連結見 `ROUND9_ISSUES.md` §2。
+
+### 21.3 #19 機場航班／飛機動畫
+
+- 由「2 架靜態飛機」改為 **active flights**：flightsPerDay = ceil(passengers/180)+ceil(cargoTons/40)（cap 320）；同時最多 12–20 架；2 跑道 arrival→landing→gate、gate→takeoff→climb；3 機型（narrow／wide／cargo）×3–4 塗裝；LOD、aircraft draw calls ≤8。
+- 颱風 8+ grounded（停飛、飛機留 gate）；1/3 延誤；暴雨延誤；機場面板顯示 flights/day／active aircraft。
+- `AirTrafficState`／`AirportFlight`；`render/air-traffic.ts`；sim `tickAirTraffic` 用 trade 的 passengers／cargo。
+
+### 21.4 #20 CSDI 3D-BIT00 香港特色建築
+
+- 由 LandsD 3D-BIT00（約 2,054 個 750×600m 3DS tiles，HK1980 座標、Building ID）抽取 **80–150 座**高樓（中環／尖沙咀／觀塘／銅鑼灣／旺角等），簡化成 3 級 LOD（LOD0 ≤8k tris／LOD1 ≤1.5k／LOD2 box），總 tris ≤600k、draw calls ≤8、cap 120。
+- 抽取用 HTTP Range ZIP central directory → 選 tile → parse 3DS chunks 0x4110（vertices）／0x4120（faces）→ HK1980→96 design；只 commit 簡化 generated 檔，原始數據不入 repo；授權 CSDI／LandsD。
+- **唔改模擬玩法**：sim 用現有 `officeTower` 等 key／`stats.landmark3dCount`；3D landmark 只視覺（可選 empty 顯示）；render LOD／夜間玻璃發光；驗收中環天際線截圖。
+
+### 21.5 共通契約（v0.9.0）
+
+| 項目 | 內容 |
+|---|---|
+| `GAME_VERSION` | **9**（現 8，待 Lead bump） |
+| Save v9 | `typhoon`＋新 UIState；舊 v8 拒絕；airport flights／3D landmark 可重生 |
+| `Tile` | `blockId?: number`（#17）；roadClass／roadGrade（Round8） |
+| `GameState` | `typhoon?: TyphoonState`、`airTraffic?: AirTrafficState`、`landmarks3d?`（P2） |
+| `GameStats` | `typhoonSignal`（擴展 9/10）、`rainstormWarning`、`airportFlights?`、`activeAircraft?`、`landmark3dCount?` |
+| `GameActions` | 冇新玩家操作（天氣自動）；UI 只顯示 |
+| `UIState` | `showWeatherPanel?`（P2）；topbar 用 stats |
+| Render | `air-traffic.ts`、`landmarks3d.ts`、topbar 信號 chip、block debug（P2） |
+
+### 21.6 MVP／P2 與風險
+
+- MVP：#17 block grid＋道路 1,400–2,000＋300–500 棟；#18 HKO 表＋信號／暴雨／影響；#19 航班動畫＋密度＋颱風；#20 80–120 座 3D landmark＋LOD。
+- P2：玩家規劃街區、天氣面板／預報、航空公司 schedule、landmark 遊覽／旅遊加成、MTR 分段停駛、災害動畫。
+- 風險：HKO 機率節奏、8 號太頻密、天氣疊加、街區太規則、existing 減少變空、飛機效能、3D 數據授權／座標、save v9 兼容。
+
+### 17.8 Round 9（v0.9.0）驗收
+
+- [ ] starter 有 block grid（arterial／street／alley）、道路 ≤2,000 格、existing 300–500 棟 ≥95% 貼路；截圖 `round9-block-grid.png`。
+- [ ] HKO 月表 12 個月＋1/3/8NE/NW/SE/SW/9/10＋暴雨黃紅黑；狀態機、影響、topbar、save v9 正常；截圖 `round9-typhoon-signal8.png`／`round9-rainstorm-black.png`。
+- [ ] 機場 active flights 12–20 架、2 跑道、3 機型、8 號停飛、LOD ≤8 draws；截圖 `round9-airport-traffic.png`。
+- [ ] 3D-BIT00 80–150 座 landmark、3 LOD、≤600k tris、位置正確、授權註明；截圖 `round9-3d-bit00-landmarks.png`。
+- [ ] `tsc`／tests／Playwright 全部通過；版本 v0.9.0／save v9。
 
 ## 附錄 A：數值速查（分區版，以 config 為準）
 

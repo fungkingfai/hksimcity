@@ -25,6 +25,7 @@ import { hash2d } from '../core/rng';
 import type { GameState, Season, TerrainType, Tile, Weather } from '../core/types';
 import { HK_LANDMARKS, HK_REGIONS } from '../world/worldgen';
 import { TILE, tileWorld } from './coords';
+import { createAirportTrafficView, type AirportTrafficView } from './airport-traffic';
 import {
   addInstancePhase,
   addSwayAttribute,
@@ -1571,6 +1572,13 @@ export function createTerrainView(state: GameState): TerrainView {
     }
   }
 
+  // Round 9／#19：機場密集起降（只在 airportDecor 顯示時一齊顯示；parent visibility 控制）
+  let airportTraffic: AirportTrafficView | null = null;
+  {
+    airportTraffic = createAirportTrafficView(state);
+    airportDecor.add(airportTraffic.group);
+  }
+
   // ───────────── 9. 維港船隻 ─────────────
 
   interface Boat {
@@ -2205,12 +2213,15 @@ export function createTerrainView(state: GameState): TerrainView {
       // starter 照舊顯示；empty 由玩家建成相關建築後才出現。
       const hasKeys = (keys: readonly string[]): boolean => s.buildings.some((b) => keys.includes(b.key));
       airportDecor.visible = s.gameMode === 'starter' || hasKeys(['airportTerminal', 'airCargoTerminal']);
+      airportTraffic?.update(s, dt);
       const showPortDecor = s.gameMode === 'starter' || hasKeys(['containerPort', 'portGate', 'portYard']);
       for (const layer of layers) {
         if (layer.kind === 'container') layer.mesh.visible = showPortDecor && layer.list.length > 0;
       }
     },
     dispose(): void {
+      airportTraffic?.dispose();
+      airportTraffic = null;
       for (const d of disposables) d.dispose();
       disposables.length = 0;
       group.clear();

@@ -15,6 +15,7 @@ import { delegate, happinessTone, num, qs, setClass, setText } from './dom';
 import { formatClockHK, formatDateCompactHK, formatDateHK } from './format';
 import { ico } from './icons';
 import { showBuildings, toggleBuildings } from './round8-helpers';
+import { resolveHkoWarning, typhoonAlertCopy } from './hko';
 
 export interface TopbarView {
   update(state: GameState): void;
@@ -30,70 +31,6 @@ const WX_EMOJI: Record<string, string> = {
   fog: '🌫',
   snow: '❄',
 };
-
-type WarnLevel = 'sig8' | 'sig3' | 'sig1' | 'blackrain' | 'rain' | 'hot' | 'cold' | 'fog' | 'other';
-
-interface WarnInfo {
-  level: WarnLevel;
-  title: string;
-  effects: string;
-  icon: string;
-  dismissible: boolean;
-}
-
-/** 由天文台警告文字＋天氣／風球推算橫幅內容 */
-function resolveWarning(state: GameState): WarnInfo | null {
-  const { clock, stats } = state;
-  const text = clock.warning ?? '';
-  const signal = Math.max(clock.weather === 'storm' ? 8 : 0, stats.typhoonSignal ?? 0);
-
-  if (signal >= 8) {
-    return {
-      level: 'sig8',
-      title: text || '八號烈風或暴風信號',
-      effects: '停工停課 · 渡輪停航 · 電車停駛 · 貨運受阻',
-      icon: '🌀',
-      dismissible: false,
-    };
-  }
-  if (signal === 3) {
-    return {
-      level: 'sig3',
-      title: text || '三號強風信號',
-      effects: '學校停課 · 渡輪減班 · 戶外工程放緩',
-      icon: '💨',
-      dismissible: false,
-    };
-  }
-  if (signal === 1) {
-    return {
-      level: 'sig1',
-      title: text || '一號戒備信號',
-      effects: '熱帶氣旋接近 · 請留意天氣',
-      icon: '🌬',
-      dismissible: true,
-    };
-  }
-  if (/黑.*雨/.test(text)) {
-    return { level: 'blackrain', title: text, effects: '部分道路水浸 · 物流受阻', icon: '⛈', dismissible: true };
-  }
-  if (/暴雨/.test(text) || (clock.weather === 'rain' && text)) {
-    return { level: 'rain', title: text || '暴雨警告', effects: '路面濕滑 · 行車與行人放慢', icon: '🌧', dismissible: true };
-  }
-  if (/酷熱/.test(text)) {
-    return { level: 'hot', title: text, effects: '注意補水 · 用電高峰期', icon: '🥵', dismissible: true };
-  }
-  if (/寒冷/.test(text) || clock.weather === 'snow') {
-    return { level: 'cold', title: text || '寒冷天氣警告', effects: '關顧長者 · 注意保暖', icon: '🥶', dismissible: true };
-  }
-  if (/霧/.test(text) || clock.weather === 'fog') {
-    return { level: 'fog', title: text || '大霧警告', effects: '渡輪或停航 · 能見度低', icon: '🌫', dismissible: true };
-  }
-  if (text) {
-    return { level: 'other', title: text, effects: WEATHER_INFO[clock.weather]?.hint ?? '', icon: '⚠', dismissible: true };
-  }
-  return null;
-}
 
 export function createTopbar(container: HTMLElement, store: GameStore, actions: GameActions): TopbarView {
   const mobileUi = getUiMode() === 'mobile';
@@ -237,9 +174,14 @@ export function createTopbar(container: HTMLElement, store: GameStore, actions: 
   const wbTimer = $('[data-k="wbTimer"]');
   const wbClose = $('[data-act="dismiss-warning"]');
   const typhoonAlert = $('[data-k="typhoonAlert"]');
+  const taBox = typhoonAlert.querySelector<HTMLElement>('.ta-box')!;
+  const taTitle = typhoonAlert.querySelector<HTMLElement>('h2')!;
+  const taBody = typhoonAlert.querySelector<HTMLElement>('p')!;
+  const taIcon = typhoonAlert.querySelector<HTMLElement>('.ta-icon')!;
 
   let dismissedKey = '';
   let typhoonAlertShown = false;
+  let lastTyphoonAlertKey = '';
 
   const offClick = delegate(root, 'click', '[data-act]', (node) => {
     switch (node.dataset.act) {
@@ -353,16 +295,18 @@ export function createTopbar(container: HTMLElement, store: GameStore, actions: 
     }
 
     // ── 天文台警告：頂欄 chip + 全寬橫幅 ──
-    const warn = resolveWarning(state);
-    const typhoon = warn?.level === 'sig8';
+    const warn = resolveHkoWarning(state);
+    const typhoon = Boolean(warn && warn.signal >= 8);
+    const typhoonLevel = warn && warn.signal >= 10 ? 'sig10' : warn?.signal === 9 ? 'sig9' : 'sig8';
     const warningKey = warn ? `${warn.level}|${warn.title}` : '';
     if (warningKey !== lastWarningKey) {
       lastWarningKey = warningKey;
       if (warn) {
         warningBtn.hidden = false;
         setText(warningTextEl, warn.title);
-        setClass(warningBtn, 'is-typhoon', warn.level === 'sig8');
-        setClass(warningBtn, 'is-severe', warn.level === 'sig8' || warn.level === 'sig3');
+        setClass(warningBtn, 'is-typhoon', warn.signal >= 8);
+        setClass(warningBtn, 'is-severe', warn.severity >= 2);
+        warningBtn.dataset.level = warn.level;
         warningBtn.dataset.warnKey = warningKey;
         warningBtn.title = `${warn.title}｜${warn.effects}`;
       } else {
@@ -377,7 +321,7 @@ export function createTopbar(container: HTMLElement, store: GameStore, actions: 
     if (typhoon !== lastTyphoon) {
       lastTyphoon = typhoon;
       setClass(root, 'is-typhoon', typhoon);
-      // 首次踏入八號風球：全屏警示（每次風球除下後可再彈）
+      // 首次踏入八號或以上：全屏警示（每次風球除下後可再彈）
       if (typhoon && !typhoonAlertShown) {
         typhoonAlertShown = true;
         typhoonAlert.hidden = false;
@@ -387,12 +331,25 @@ export function createTopbar(container: HTMLElement, store: GameStore, actions: 
         typhoonAlert.hidden = true;
       }
     }
+    if (warn && typhoon && typhoonLevel) {
+      const copy = typhoonAlertCopy(warn.signal, warn.direction);
+      const alertKey = `${typhoonLevel}|${copy.title}|${warn.signal}`;
+      if (alertKey !== lastTyphoonAlertKey) {
+        lastTyphoonAlertKey = alertKey;
+        typhoonAlert.className = `typhoon-alert level-${copy.level}`;
+        taBox.className = `ta-box level-${copy.level}`;
+        taIcon.textContent = warn.icon;
+        setText(taTitle, copy.title);
+        setText(taBody, copy.body);
+        typhoonAlert.setAttribute('aria-label', copy.title);
+      }
+    }
 
     const bannerKey = warn ? `${warningKey}|${Math.round(clock.weatherMinutesLeft / 30)}` : '';
     if (bannerKey !== lastBannerKey) {
       lastBannerKey = bannerKey;
       const dismissed = Boolean(warn && dismissedKey === warningKey);
-      if (warn && (!dismissed || warn.level === 'sig8')) {
+      if (warn && (!dismissed || warn.severity >= 3)) {
         banner.hidden = false;
         hud?.classList.add('has-warning');
         banner.className = `warning-banner level-${warn.level}`;

@@ -45,6 +45,15 @@ import {
   setText,
 } from './dom';
 import { formatShortDateHK, formatMinutes, seasonNameHK, displayYear } from './format';
+import {
+  HKO_SOURCE_LABEL,
+  HKO_SOURCE_URL,
+  HKO_TC_WARNING_DAYS,
+  currentTyphoonSignal,
+  hkoMonth,
+  hkoSeasonNote,
+  resolveHkoWarning,
+} from './hko';
 import { ico, personPill, resourceChips, sealHtml } from './icons';
 import { toggleTradePanel, toggleUnderground, toggleUtilityPanel } from './round5-helpers';
 
@@ -335,6 +344,9 @@ export function createInfoPanel(container: HTMLElement, store: GameStore, action
           </div>
         </div>
 
+        <div class="section-label">天文台氣候 <span class="mini">HKO 1961–2020</span></div>
+        <div class="hko-card" data-k="hkoCard"></div>
+
         <div class="section-label">全城庫存</div>
         <div class="res-wrap" data-k="resWrap"></div>
 
@@ -381,6 +393,7 @@ export function createInfoPanel(container: HTMLElement, store: GameStore, action
   const ridershipEl = qs<HTMLElement>(root, '[data-k="ridership"]')!;
   const typhoonEl = qs<HTMLElement>(root, '[data-k="typhoon"]')!;
   const seasonEl = qs<HTMLElement>(root, '[data-k="season"]')!;
+  const hkoCardEl = qs<HTMLElement>(root, '[data-k="hkoCard"]')!;
   const needFoodEl = qs<HTMLElement>(root, '[data-k="needFood"]')!;
   const needFoodBar = qs<HTMLElement>(root, '[data-k="needFoodBar"]')!;
   const needGoodsEl = qs<HTMLElement>(root, '[data-k="needGoods"]')!;
@@ -460,6 +473,7 @@ export function createInfoPanel(container: HTMLElement, store: GameStore, action
   // ── 概況（逐幀更新，全部先比對） ──
   let lastCity = '';
   let lastDate = '';
+  let lastHkoSig = '';
   let lastExistingCount = -1;
   let lastMainlandFood = -1;
   let lastHappy = Number.NaN;
@@ -664,8 +678,10 @@ export function createInfoPanel(container: HTMLElement, store: GameStore, action
       Math.round(stats.transitCoverage * 100),
       Math.round(stats.avgCommute),
       Math.round(stats.ridership),
-      stats.typhoonSignal,
+      currentTyphoonSignal(state),
       clock.season,
+      clock.month,
+      hkoSeasonNote(clock.month),
     ].join('|');
     if (metricsSig !== lastMetricsSig) {
       lastMetricsSig = metricsSig;
@@ -680,10 +696,40 @@ export function createInfoPanel(container: HTMLElement, store: GameStore, action
       setMetric(transitBar, transitVal, stats.transitCoverage);
       setText(commuteEl, stats.avgCommute > 0 ? formatMinutes(stats.avgCommute) : '—');
       setText(ridershipEl, `${num(stats.ridership)} 人次`);
-      const signal = clock.weather === 'storm' ? Math.max(8, stats.typhoonSignal) : stats.typhoonSignal;
+      const signal = currentTyphoonSignal(state);
       setText(typhoonEl, signal > 0 ? `${signal} 號風球` : '無');
       setClass(typhoonEl, 'danger', signal >= 8);
       setText(seasonEl, `${seasonNameHK(clock.season)} · ${WEATHER_INFO[clock.weather].name}`);
+      const warn = resolveHkoWarning(state);
+      const month = hkoMonth(clock.month);
+      const hkoSig = `${clock.month}|${signal}|${warn?.level ?? ''}|${warn?.title ?? ''}|${clock.warning ?? ''}|${clock.weather}|${Math.round(clock.tempC)}`;
+      if (hkoSig !== lastHkoSig) {
+        lastHkoSig = hkoSig;
+        setHtml(
+          hkoCardEl,
+          `
+          <div class="hko-now">
+            <span class="hko-now-label">${month.label}平均警告日數</span>
+            <b class="${signal >= 8 ? 'danger' : signal > 0 ? 'warn' : ''}">${signal > 0 ? `${signal} 號風球${warn?.direction ? `（${warn.direction}）` : ''}` : '無風球警告'}</b>
+          </div>
+          <div class="hko-current">
+            <div><span>1 號或以上</span><b>${month.onePlus ? month.onePlus.toFixed(2) : '—'} 日</b></div>
+            <div><span>3 號或以上</span><b>${month.threePlus ? month.threePlus.toFixed(2) : '—'} 日</b></div>
+            <div><span>8 號或以上</span><b>${month.eightPlus ? month.eightPlus.toFixed(2) : '—'} 日</b></div>
+            <div><span>9／10 號</span><b>${month.nineTen ? month.nineTen.toFixed(2) : '—'} 日</b></div>
+          </div>
+          <div class="hko-month-grid">
+            ${HKO_TC_WARNING_DAYS.map(
+              (entry) => `<span class="hko-month${entry.month === clock.month ? ' current' : ''}">
+                <b>${entry.label}</b><small>1+ ${entry.onePlus || '—'}</small><em>8+ ${entry.eightPlus || '—'}</em>
+              </span>`,
+            ).join('')}
+          </div>
+          <p class="hko-note">${esc(hkoSeasonNote(clock.month))} · 現時${esc(WEATHER_INFO[clock.weather].name)} ${Math.round(clock.tempC)}°C</p>
+          <p class="hko-source">資料來源：<a href="${HKO_SOURCE_URL}" target="_blank" rel="noopener">${esc(HKO_SOURCE_LABEL)}</a></p>
+          `,
+        );
+      }
     }
 
     // 全城庫存
@@ -746,6 +792,7 @@ export function createInfoPanel(container: HTMLElement, store: GameStore, action
     return [
       b.id,
       def.key,
+      (b as unknown as { model3d?: unknown }).model3d != null ? 1 : 0,
       b.existing ? 1 : 0,
       b.connected ? 1 : 0,
       b.active ? 1 : 0,
@@ -787,6 +834,7 @@ export function createInfoPanel(container: HTMLElement, store: GameStore, action
       );
     }
 
+    const model3d = (b as unknown as { model3d?: unknown }).model3d;
     const notes = defNoteRows(def)
       .map((rowItem) => `<div class="note-row"><span>${esc(rowItem.label)}</span><b>${esc(rowItem.value)}</b></div>`)
       .join('');
@@ -828,6 +876,11 @@ export function createInfoPanel(container: HTMLElement, store: GameStore, action
           <div class="sel-meta">
             <span class="badge">${esc(CATEGORY_INFO[def.category].name)}</span>
             ${
+              model3d != null
+                ? '<span class="badge model3d-badge">CSDI 3D-BIT00</span>'
+                : ''
+            }
+            ${
               b.auto || b.zone
                 ? `<span class="badge zone-badge" style="--zone:${(b.zone ? ZONES[b.zone] : null)?.colorHex ?? '#24e0ff'}">${b.zone ? esc(ZONES[b.zone].name) : ''}自動開發</span>`
                 : ''
@@ -837,6 +890,11 @@ export function createInfoPanel(container: HTMLElement, store: GameStore, action
         </div>
       </div>
       <p class="sel-desc">${esc(def.desc)}</p>
+      ${
+        model3d != null
+          ? `<p class="sel-model-note">${ico('city')}真實建築模型：香港地理空間數據共享平台（CSDI）／地政總署 3D-BIT00 三維建築模型。</p>`
+          : ''
+      }
       ${
         b.existing
           ? `<p class="sel-existing-note">${ico('info')}開局已有的真實樓宇：已有居民／員工運作，可拆卸（退還 0%）；重建後會變成新樓。</p>`

@@ -104,6 +104,9 @@ try {
         power: Number(st.utilities.power.coverage.toFixed(2)),
       },
       existing: st.buildings.filter((b) => b.existing).length,
+      landmarks3d: st.buildings.filter((b) => b.model3d !== undefined).length,
+      roads: st.tiles.filter((t) => t.road).length,
+      localRoads: st.tiles.filter((t) => t.localRoad).length,
       borderGates: st.buildings.filter((b) => b.key === 'roadBorderGate' || b.key === 'railBorderGate').length,
       railTiles: st.tiles.filter((t) => t.rail).length,
       mainlandFood: st.stats.mainlandFoodPerDay ?? 0,
@@ -120,6 +123,16 @@ try {
     'starter 現有樓群／深圳河口岸／內地糧食支援（Round 6）',
     starter.existing >= 150 && starter.borderGates >= 2 && starter.mainlandGatesConnected >= 1 && starter.mainlandFood > 0,
     { existing: starter.existing, gates: starter.borderGates, connected: starter.mainlandGatesConnected, food: starter.mainlandFood, rail: starter.railTiles },
+  );
+  check(
+    'starter 規劃街區：道路 2,000–3,500 格（#17）',
+    starter.roads >= 2000 && starter.roads <= 3500 && starter.localRoads > 0,
+    { roads: starter.roads, localRoads: starter.localRoads },
+  );
+  check(
+    'starter CSDI 3D-BIT00 landmark（#20）',
+    starter.landmarks3d >= 20,
+    { landmarks3d: starter.landmarks3d },
   );
   check(
     'starter 預建地下管網：水／污水／電力覆蓋',
@@ -871,6 +884,50 @@ try {
   check('管網分層＋流動 toggle（#12）', round8.pipeLayerOff === true && round8.pipeFlowOff === true && round8.pipeRestored === true, round8);
   check('道路高架跨水（#11）', round8.elevated?.road === true && round8.elevated?.grade === 'elevated' && round8.elevated?.spent === true, round8.elevated);
   check('深圳市範圍不可建設（#14）', round8.shenzhenBlocked === true, round8.shenzhenBlocked);
+
+  // ── Round 9（#18 HKO 氣候卡／#19 機場／#20 3D landmark badge）──
+  const round9 = await page.evaluate(async () => {
+    const { store, actions } = window.__HK_CITY__;
+    const st = store.state;
+    const result = {};
+    const info = document.querySelector('.info-panel');
+    const hko = document.querySelector('.hko-card');
+    result.hkoText = (hko?.textContent ?? '').trim().length;
+    result.hkoSource = !!hko?.querySelector('a[href*="hko.gov.hk"]');
+    // 3D landmark badge
+    const lm = st.buildings.find((b) => b.model3d !== undefined);
+    if (lm) {
+      actions.select(lm.y * st.width + lm.x);
+      await new Promise((r) => setTimeout(r, 350));
+      result.landmarkSelected = true;
+      result.landmarkBadge = !!document.querySelector('.model3d-badge');
+      result.infoText = (info?.textContent ?? '').includes('CSDI 3D-BIT00');
+    }
+    // airport traffic group（如有 airportTerminal）
+    const terminal = st.buildings.find((b) => b.key === 'airportTerminal');
+    const scene = window.__HK_CITY__.view.cityScene;
+    const traffic = scene?.getObjectByName('airport-traffic');
+    result.hasAirportTerminal = !!terminal;
+    result.airportTrafficGroup = !!traffic;
+    if (traffic) {
+      let visibleMeshes = 0;
+      traffic.traverse((o) => { if (o.isInstancedMesh && o.visible) visibleMeshes++; });
+      result.airportInstancedMeshes = visibleMeshes;
+    }
+    return result;
+  });
+  result.round9 = round9;
+  check('HKO 天文台氣候卡（#18）', round9.hkoText > 10 && round9.hkoSource === true, round9);
+  check(
+    'CSDI 3D landmark 選取 badge（#20）',
+    round9.landmarkSelected !== true || (round9.landmarkBadge === true && round9.infoText === true),
+    round9,
+  );
+  check(
+    '機場飛機 traffic group（#19）',
+    !round9.hasAirportTerminal || (round9.airportTrafficGroup === true && (round9.airportInstancedMeshes ?? 0) >= 2),
+    round9,
+  );
 
   const toggles = await page.evaluate(() => {
     const { store, actions } = window.__HK_CITY__;

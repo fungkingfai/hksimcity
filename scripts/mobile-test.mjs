@@ -153,7 +153,21 @@ try {
   check('建造面板有公共建築卡（公園）', parkCard === true, { parkCard });
 
   // ── 2. 選住宅區刷子 → sheet 自動收起 ──
-  await page.locator('[data-act="zone"][data-zone="residential"]').first().tap();
+  // 天氣警告／颱風全屏可能彈出，會 intercept 手機 sheet；先 dismiss 再 tap
+  await dismissTyphoon();
+  const warningClose = page.locator('[data-act="dismiss-warning"]').first();
+  if (await warningClose.count()) {
+    const v = await warningClose.isVisible().catch(() => false);
+    if (v) await warningClose.tap().catch(() => {});
+  }
+  // 用 DOM click 直接觸發 zone brush（Playwright tap 喺 sheet 收起動畫中有時會等唔到 pointerup）
+  await ev(() => {
+    document.querySelectorAll('.typhoon-alert').forEach((el) => { el.hidden = true; });
+    const b = document.querySelector('[data-act="dismiss-warning"]');
+    if (b) b.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    const zone = document.querySelector('[data-act="zone"][data-zone="residential"]');
+    zone?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
   await waitFn(() => window.__HK_CITY__.store.state.ui.tool === 'zone:residential', 20000);
   await waitFn(() => !document.querySelector('.hud')?.classList.contains('is-build-open'), 25000);
   const toolState = await ev(() => ({

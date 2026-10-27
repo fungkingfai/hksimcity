@@ -23,7 +23,7 @@ import type {
 
 // ─────────────────────────── 世界常數 ───────────────────────────
 
-export const GAME_VERSION = 8;
+export const GAME_VERSION = 9;
 
 /** 香港地圖：600×600 格（由 CSDI／地政總署真實地理數據生成；每格 112m，約舊版 96×96 的 39 倍面積） */
 export const GRID_WIDTH = 600;

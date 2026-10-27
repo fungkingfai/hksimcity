@@ -26,6 +26,14 @@ import type { Building, GameState, TerrainType } from '../core/types';
 import { buildingAnchor, buildingWorldCenter, TILE, tileWorld } from './coords';
 import { MaterialLibrary } from './models/materials';
 import { createPrototypeFactory, PROTOTYPE_KEYS, type PrototypeFactory } from './models/building-prototypes';
+import {
+  createHk3dLandmarkMesh,
+  hk3dLandmarkStats,
+  releaseHk3dLandmarks,
+  retainHk3dLandmarks,
+  setHk3dNightMode,
+} from './models/hk-3d-landmarks';
+import { tileTopY } from './world-utils';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 export interface BuildingsView {
@@ -170,6 +178,24 @@ function roadYaw(s: GameState, bx: number, by: number, w: number, h: number): nu
 
 function buildingYaw(s: GameState, key: string, bx: number, by: number, w: number, h: number): number {
   return WATER_FACING.has(key) ? waterYaw(s, bx, by, w, h) : roadYaw(s, bx, by, w, h);
+}
+
+/**
+ * 3D landmark（真實 CSDI 模型）所在格的地形頂面高度。
+ * 普通 prototype 建築一律用 GROUND_Y；現有真實樓宇按地形高度放，避免半山樓浮空／入地。
+ */
+function landmarkGroundY(s: GameState, building: Building): number {
+  const tx = Math.min(s.width - 1, Math.max(0, Math.floor(building.x + building.w / 2)));
+  const ty = Math.min(s.height - 1, Math.max(0, Math.floor(building.y + building.h / 2)));
+  const tile = s.tiles[ty * s.width + tx];
+  if (!tile) return GROUND_Y;
+  return Math.max(0.05, tileTopY(tile));
+}
+
+/** 建築是否使用 CSDI 真實 3D 模型（Round 9／issue #20）。 */
+function landmarkIndexFor(building: Building): number | null {
+  const idx = building.model3d;
+  return typeof idx === 'number' && Number.isFinite(idx) && idx >= 0 ? idx : null;
 }
 
 // ─────────────────────────── 夜景燈火配色 ───────────────────────────
@@ -349,6 +375,18 @@ export function createBuildingsView(state: GameState): BuildingsView {
   const instances = new Map<number, BuildingInstance>();
   let elapsed = 0;
 
+  // Round 9／issue #20：CSDI 真實 3D landmark renderer（幾何快取由 refcount 管理）
+  retainHk3dLandmarks();
+  try {
+    const lm = hk3dLandmarkStats();
+    if (lm.models > 0) {
+      // eslint-disable-next-line no-console
+      console.info(`[buildings] 3D landmark 模型：${lm.source}（${lm.models} 個，最多 ${1500} tris/棟）`);
+    }
+  } catch {
+    /* 測試環境可能無 console */
+  }
+
   // 開發期核對：config 的每個建築 key 都要有原型（只警告，不阻塞）
   try {
     const missing = Object.keys(BUILDINGS).filter((key) => !PROTOTYPE_KEYS.includes(key));
@@ -406,12 +444,14 @@ export function createBuildingsView(state: GameState): BuildingsView {
   };
   let nightMode = isNightClock(state.clock);
   lib.setNightMode(nightMode);
+  setHk3dNightMode(nightMode);
 
   /** 只在日／夜狀態切換時更新共用材質與所有光暈可見度。 */
   const applyNightMode = (night: boolean): void => {
     if (night === nightMode) return;
     nightMode = night;
     lib.setNightMode(night);
+    setHk3dNightMode(night); // 3D landmark 窗光（shader uniform）
     for (const inst of instances.values()) {
       if (inst.glow) inst.glow.visible = night;
     }
@@ -506,18 +546,34 @@ export function createBuildingsView(state: GameState): BuildingsView {
 
   const addBuilding = (s: GameState, building: Building): void => {
     const proto = factory.get(building.key, building.id);
-    const model = proto.root.clone(true);
-    // 量度模型高度（LOD box 用；喺設定 position/rotation 之前量）
-    let modelHeight = 2;
-    try {
-      const box = new THREE.Box3().setFromObject(model);
-      modelHeight = Math.max(1.2, box.max.y);
-    } catch {
-      /* 量度失敗用 default */
+    const landmarkIndex = landmarkIndexFor(building);
+    const landmark = landmarkIndex != null ? createHk3dLandmarkMesh(landmarkIndex) : null;
+    let model: THREE.Group;
+    let parts: AnimPart[];
+    let modelHeight: number;
+    if (landmark) {
+      // 真實 CSDI 3D 模型：1 mesh、base y=0、唔自動轉向（幾何本身係真實座標方位）
+      model = new THREE.Group();
+      model.name = `landmark:${building.id}`;
+      model.add(landmark.mesh);
+      modelHeight = Math.max(0.6, landmark.height);
+      parts = [];
+    } else {
+      model = proto.root.clone(true);
+      // 量度模型高度（LOD box 用；喺設定 position/rotation 之前量）
+      modelHeight = 2;
+      try {
+        const box = new THREE.Box3().setFromObject(model);
+        modelHeight = Math.max(1.2, box.max.y);
+      } catch {
+        /* 量度失敗用 default */
+      }
+      parts = collectAnimParts(model, building);
     }
     const center = buildingWorldCenter(s, building);
-    model.position.set(center.x, GROUND_Y, center.z);
-    const yaw = buildingYaw(s, building.key, building.x, building.y, building.w, building.h);
+    const groundY = landmark ? landmarkGroundY(s, building) : GROUND_Y;
+    model.position.set(center.x, groundY, center.z);
+    const yaw = landmark ? 0 : buildingYaw(s, building.key, building.x, building.y, building.w, building.h);
     model.rotation.y = yaw;
     model.userData.buildingId = building.id;
     model.traverse((obj) => {
@@ -525,8 +581,9 @@ export function createBuildingsView(state: GameState): BuildingsView {
     });
 
     // 夜間地面暖光暈（不設 buildingId，raycast 停用，避免影響點選）
+    // 真實 3D landmark 本身有窗光 shader，唔再加光暈（控制夜間 draw call ≤150）。
     let glow: THREE.Mesh | null = null;
-    if (glowTexture) {
+    if (glowTexture && !landmark) {
       const spec = glowSpecFor(building.key, building.id);
       const footprint = (proto.footprintW + proto.footprintD) / 2;
       const size = Math.min(6.2, Math.max(2.2, footprint + 1.0 * spec.scale));
@@ -547,13 +604,14 @@ export function createBuildingsView(state: GameState): BuildingsView {
       id: building.id,
       key: building.key,
       group: model,
-      parts: collectAnimParts(model, building),
+      parts,
       glow,
       yaw,
       height: modelHeight,
       lodColor: lodColorFor(building.key, building.id),
-      footprintW: proto.footprintW,
-      footprintD: proto.footprintD,
+      // 3D landmark 用真實佔地（building.w/h 格 → world units）做 LOD box，唔用 prototype key 嘅 size
+      footprintW: landmark ? Math.max(TILE, building.w * TILE) : proto.footprintW,
+      footprintD: landmark ? Math.max(TILE, building.h * TILE) : proto.footprintD,
     });
   };
 
@@ -977,6 +1035,7 @@ export function createBuildingsView(state: GameState): BuildingsView {
       padBadMat.dispose();
       lineOkMat.dispose();
       lineBadMat.dispose();
+      releaseHk3dLandmarks();
       lib.dispose();
     },
   };

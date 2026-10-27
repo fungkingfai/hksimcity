@@ -291,6 +291,8 @@ export interface Building {
   zone?: ZoneType;
   /** 是否為開局已有的真實樓宇（issue #7；existing 建築可有人運作） */
   existing?: boolean;
+  /** Round 9／issue #20：CSDI 3D-BIT00 真實模型 index（render 用；undefined = 普通 prototype） */
+  model3d?: number;
   /** 公用設施接駁狀態（由 sim/utilities.ts 每日更新；只作 UI／視覺） */
   powered?: boolean;
   watered?: boolean;
@@ -581,6 +583,14 @@ export interface GameClock {
   warning: string | null;
   /** 天氣強度 0..1（雨／雪／颱風） */
   weatherIntensity: number;
+  /** Round 9／issue #18：HKO 熱帶氣旋警告信號（0 = 無） */
+  typhoonSignal?: 0 | 1 | 3 | 8 | 9 | 10;
+  /** 信號名稱（HKO 用語，例如「八號東北烈風或暴風信號」） */
+  typhoonName?: string | null;
+  /** 八號信號方向（NE/NW/SE/SW；其他信號為 null） */
+  typhoonDirection?: 'NE' | 'NW' | 'SE' | 'SW' | null;
+  /** Round 9／issue #18：暴雨警告（黃／紅／黑） */
+  rainstorm?: 'amber' | 'red' | 'black' | null;
   paused: boolean;
   /** 0=暫停, 1,2,3 = 倍速 */
   speed: number;

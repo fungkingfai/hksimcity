@@ -375,3 +375,26 @@ interiors-dev 共用材質庫而不互相覆寫）。Lead 在開發中途同步�
 - 1600×960 lite 穩定性：starter + U 層＋flow＋road 工具 20 秒，crashed=false、console errors=0。
 - render：overview 83 draws／1.69M tris；central 399／1.73M；U 層 423／1.82M；buildings-hidden 74／1.64M。
 - 截圖：`docs/screenshots/`（build-panel、info-collapsed、pipe-layers-ui、roads-local、buildings-hidden、pipe-water/sewage/power、shenzhen-overlay、road-drag-preview、road-elevated、road-tunnel）。
+
+---
+
+# 第八輪改版：處理 GitHub issues #17–#20（Round 9）
+
+> 版本：**GAME_VERSION 9／package 0.9.0／git tag v0.9.0**。
+
+| Issue | 問題 | 實作 |
+|---|---|---|
+| **#17** | 現有城市道路仍互相連成片；應道路包圍規劃街區 | `existing-city.ts` 改 **planned block grid**（3×3 block＋1 格路；每 4 block 主幹）；starter 總路 **3,020 格**、components=1、existing-city 樓 100% 貼主路網；render localRoad 窄街；前後截圖對比 |
+| **#18** | 天氣警報應參考天文台颱風密度/級數 | 新增 `sim/hko-climate.ts` 嵌入 HKO 1961–2020 表 6a；weather roll 按月份抽 **1／3／8（四方向）／9／10 號風球**＋黃/紅/黑暴雨、山泥傾瀉；1/3 號影響較輕、8+ 渡輪停航；`clock.typhoonSignal/typhoonName/rainstorm`；城事「天文台氣候」卡＋HKO source |
+| **#19** | 機場飛機沒有飛 | 新增 `render/airport-traffic.ts`：10 架飛機同時（6 stand＋4–6 approach/takeoff）、3 塗裝、跑道/ILS/導航燈；跟旅客量、8 號風球停飛；≤5 draws |
+| **#20** | 按 CSDI 3D-BIT00 提供大量香港特色建築 | 新增 `tools/build-3d-landmarks.py`：HTTP Range 下載 3D-BIT00 tile ZIP central directory → 抽 3DS 高樓 → parse 0x4110/0x4120 → 簡化幾何；生成 **81 座真實 landmark**（CSDI/LandsD，HK1980）；`world/hk-3d-landmarks.ts` 放 existing 樓；`render/models/hk-3d-landmarks.ts` custom geometry＋夜窗；UI badge |
+
+## 版本／存檔
+- GAME_VERSION **9**；package **0.9.0**；save **v9**（沿用 compact＋`roadGradeEdits`；clock typhoon 狀態隨 state 保存；3D landmark 由種子重生）。
+- 新增測試 `tests/round9.test.ts`（規劃街區、HKO 數據、3D landmark 存檔）＋`tests/hko-weather.test.ts`。
+
+## 驗收（最終）
+- tsc **0 error**；vitest **115 / 115**；build OK。
+- Playwright verify：**47 / 47 checks**；mobile **17/17**、UI **21/21**（回歸）。
+- Render：starter overview ~149 draws／1.81M tris、central 320／1.88M；airport 近景 64 draws／1.82M；3D landmark 81 座各 1 draw（遠景 LOD +0）；draw/tris 全部 ≤750／2.3M。
+- 截圖：`docs/screenshots/`（roads-before/after、airport-day/landing/takeoff/night/typhoon、3d-landmarks-day/night/starter、hko-sig8/9/10、hko-card、3d-badge）。
